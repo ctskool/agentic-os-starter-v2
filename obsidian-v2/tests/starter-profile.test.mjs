@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test,{after} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -8,8 +8,10 @@ import {DEFAULT_DRIVERS,dailyDrivers,rubricWithDrivers} from '../runner/profile.
 import {mergeDaily,workflowPrompt,pythonCommand} from '../runner/workflows.mjs';
 import {TIME_ZONE} from '../shared/timezone.mjs';
 
+const scratched=[];
+after(()=>{for(const dir of scratched)fs.rmSync(dir,{recursive:true,force:true})});
 function vaultWith(profile){
- const root=fs.mkdtempSync(path.join(os.tmpdir(),'aos-profile-'));
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'aos-profile-'));scratched.push(root);
  if(profile!==undefined){fs.mkdirSync(path.join(root,'system/v2'),{recursive:true});fs.writeFileSync(path.join(root,'system/v2/profile.json'),typeof profile==='string'?profile:JSON.stringify(profile))}
  return root;
 }

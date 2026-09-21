@@ -1,0 +1,69 @@
+name: ci
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      TZ: America/Chicago   # several routing tests pin calendar dates in this zone
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Bridge and plugin packages
+        working-directory: obsidian-v2
+        run: npm ci --no-audit --no-fund
+      - name: HUD packages
+        working-directory: jarvis-v2
+        run: npm ci --no-audit --no-fund
+      - name: Build the plugin
+        working-directory: obsidian-v2
+        run: npm run build
+      - name: Bridge tests
+        working-directory: obsidian-v2
+        run: node --test --test-concurrency=2 --test-timeout=90000 "tests/*.test.mjs"
+      - name: HUD typecheck and tests
+        working-directory: jarvis-v2
+        run: |
+          npm run typecheck
+          npm test
+
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install into a fresh vault, with voice
+        run: node aos.mjs setup --vault "$RUNNER_TEMP/vault" --voice yes --autostart no --ci
+      - name: Doctor
+        run: node aos.mjs doctor --ci
+      - name: Status
+        if: always()
+        run: node aos.mjs status || true
+      - name: Stop
+        run: node aos.mjs stop
+      - name: Logs
+        if: failure()
+        run: |
+          cat obsidian-v2/.runtime/service-supervisor.jsonl || true
+          ls -la obsidian-v2/.runtime || true

@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, {after} from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,7 +13,10 @@ import {parsePythonVersion, pythonSupported, findPython} from '../scripts/aos/sp
 import {parseArgs} from '../scripts/aos.mjs';
 import {supervisorConfig} from '../runner/service-supervisor.mjs';
 
-const scratch = () => fs.mkdtempSync(path.join(os.tmpdir(), 'aos-test-'));
+// Every scratch folder is removed when the file's tests finish.
+const scratched = [];
+after(() => { for (const dir of scratched) fs.rmSync(dir, {recursive: true, force: true}); });
+const scratch = () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aos-test-')); scratched.push(dir); return dir; };
 const FAKE_KEY = 'sk-or-' + 'test0000'.repeat(4);
 const TOKEN = 'a'.repeat(64);
 const BOM = String.fromCharCode(0xFEFF);
