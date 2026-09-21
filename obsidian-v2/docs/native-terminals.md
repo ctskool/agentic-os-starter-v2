@@ -1,0 +1,19 @@
+# Direct Obsidian terminals
+
+New Obsidian Claude/Codex conversations run in Terminal 3.27.1 by polyipseity. `NativeDirectHost` opens a direct profile whose `runner/native-launch.mjs` process consumes a one-use launch ticket. The CLI inherits that plugin's terminal directly. Its keystrokes and display do not pass through the bridge's terminal renderer or screen polling. Jarvis keeps its browser terminal backed by the bridge. See the [README](../README.md) for the current release version.
+
+Voice still uses the shared router and saved reports. A complex Obsidian request creates a native terminal; a follow-up uses the same native conversation. Each app has separate current conversations and quick-answer context for each provider. Reports, dashboard data and script results remain shared. Completion speech and automatic artifact opening belong to the originating app.
+
+The launch uses the same resolved, configured CLI as the bridge, including an explicitly configured Codex installation. It does not silently upgrade the CLI or change the user's ordinary PowerShell profile. A small launcher passes multiline prompts as exact arguments with inherited input/output; it is not a screen relay. A one-use ticket prevents restored or copied Terminal tabs from replaying a request.
+
+Native Codex launches and explicit resumes use the CLI's `--approve-for-me` preset: workspace-write sandbox with automatic approval review. Routine requests can proceed after review; denied or insufficiently authorized requests can still require user input. The CLI must support this flag (verified with the pinned 0.154.0-alpha.6.2 runtime). This does not grant full access, change global Codex settings, answer terminal prompts, or alter Claude, Jarvis, or headless worker permission settings. Already-running terminals retain the permissions they started with.
+
+The native host sends only launch/input commands, presence and status. It observes the Terminal input boundary so voice cannot submit over an unfinished typed draft or permission prompt. A guarded paste gets one Enter and is checked against the provider's receipt; uncertain delivery is shown for review rather than resent.
+
+A per-view socket carries only a READY handshake and disconnect. This is needed because the Windows Terminal backend can stop conhost without stopping its child CLI. Closing the owning tab closes the socket and stops the launcher's own CLI tree. Reloading just Agentic OS V2 retains that socket and terminal. Restarting the bridge retains native sessions; restarting Obsidian closes them, and saved provider conversations can subsequently be resumed. Restoring a spent Terminal profile does not automatically replay its prompt.
+
+An unconfirmed new launch is checked after 30 seconds; a previously connected terminal gets 90 seconds to reconnect. An unused ticket can be atomically cancelled and its original request recovered. A consumed or uncertain ticket is shown as needing attention and is never automatically replayed or killed using a saved process ID.
+
+Existing bridge-owned conversation history is retained under the web scope. It is not silently adopted as a native process. Native plugin reloads clear inactive automatic selection while preserving active work; Jarvis tabs and reloads adopt unexpired web selection. See [conversation session policy](conversation-sessions.md). The compatibility attachment code remains for older tabs only.
+
+Automated checks cover exact multiline argv, inherited TTY, one-use launch claims, draft and permission races, provider/app isolation, completion and artifact routing, and Windows conhost child cleanup. Native rendering smoothness, microphone/playback, and a full native provider journey need manual testing. macOS native behavior and child-process cleanup are not yet distribution-verified.

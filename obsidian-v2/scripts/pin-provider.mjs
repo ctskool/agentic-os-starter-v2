@@ -1,0 +1,17 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {spawnSync} from 'node:child_process';
+import {projectRoot} from '../runner/runtime.mjs';
+import {assertCliRuntime} from '../runner/cli-runtime.mjs';
+const [provider,command]=process.argv.slice(2);
+if(!['codex','claude'].includes(provider)||!command||!path.isAbsolute(command)||!fs.statSync(command).isFile())throw new Error('Usage: node scripts/pin-provider.mjs codex|claude <absolute executable path>');
+assertCliRuntime(provider,{command:fs.realpathSync(command),prefix:[]});
+const result=spawnSync(command,['--version'],{encoding:'utf8',windowsHide:true,timeout:5000,shell:false});
+if(result.status!==0)throw new Error('Executable version check failed; configuration unchanged.');
+const version=result.stdout.trim();
+if(!(provider==='codex'?/^codex-cli /i:/Claude Code/i).test(version))throw new Error('Executable is not the selected provider; configuration unchanged.');
+const file=path.join(projectRoot,'.runtime/providers.json');
+const pins=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')):{};
+pins[provider]={command:fs.realpathSync(command),version,configuredAt:new Date().toISOString()};
+fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,JSON.stringify(pins,null,2));
+console.log(JSON.stringify({provider,...pins[provider]}));

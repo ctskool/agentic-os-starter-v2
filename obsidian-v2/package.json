@@ -1,0 +1,39 @@
+{
+  "name": "agentic-os-v2",
+  "version": "0.3.64",
+  "description": "Obsidian plugin and local bridge for Agentic OS V2.",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+    "test": "node --test tests/*.test.mjs",
+    "runner": "node runner/runner.mjs",
+    "preview": "node preview/server.mjs"
+  },
+  "keywords": [],
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@eslint/js": "9.30.1",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/space-grotesk": "^5.3.0",
+    "@types/node": "^16.11.6",
+    "@types/three": "^0.176.0",
+    "esbuild": "0.25.5",
+    "eslint-plugin-obsidianmd": "0.1.9",
+    "globals": "14.0.0",
+    "tslib": "2.4.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "8.35.1"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "jiti": "^2.6.1",
+    "js-yaml": "4.1.1",
+    "node-pty": "1.1.0",
+    "obsidian": "latest",
+    "preact": "^10.22.0",
+    "three": "^0.176.0"
+  }
+}

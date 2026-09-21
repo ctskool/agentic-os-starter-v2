@@ -1,0 +1,10 @@
+import esbuild from 'esbuild';
+import fs from 'node:fs';
+import path from 'node:path';
+import {builtinModules} from 'node:module';
+const out=path.resolve('dist/agentic-os-v2');
+fs.mkdirSync(out,{recursive:true});
+const sync=()=>{for(const file of ['manifest.json','styles.css'])fs.copyFileSync(file,path.join(out,file));fs.cpSync('assets',path.join(out,'assets'),{recursive:true})};
+sync();
+const context=await esbuild.context({entryPoints:['src/main.ts'],bundle:true,loader:{'.css':'text'},external:['obsidian','electron','node:*',...builtinModules],format:'cjs',target:'es2022',outfile:path.join(out,'main.js'),jsx:'automatic',jsxImportSource:'preact',minify:true,plugins:[{name:'static',setup(b){b.onEnd(sync)}}]});
+if(process.argv.includes('production')){await context.rebuild();await context.dispose()}else await context.watch();

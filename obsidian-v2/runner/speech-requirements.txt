@@ -1,0 +1,8 @@
+# Local speech service (runner/speech.py): Kokoro text-to-speech + faster-whisper speech-to-text.
+fastapi
+uvicorn[standard]
+numpy
+soundfile
+sounddevice
+kokoro-onnx
+faster-whisper

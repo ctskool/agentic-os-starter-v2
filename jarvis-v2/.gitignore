@@ -1,0 +1,6 @@
+node_modules/
+.next/
+*.tsbuildinfo
+*.log
+test-vault/system/preview.json
+.env*

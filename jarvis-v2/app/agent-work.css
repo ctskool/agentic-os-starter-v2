@@ -1,0 +1,82 @@
+/* Extend the incumbent HUD palette: galaxy silver, Claude ember, quiet terminal ink. */
+.agent-drawer {position:fixed;z-index:30;bottom:0;left:20px;right:20px;color:#e5e9ef;background:#0b0e14;border:1px solid var(--line);border-bottom:0;border-radius:12px 12px 0 0;box-shadow:0 -12px 50px #0005;font:12px/1.5 var(--font-mono),monospace;}
+.agent-drawer button,.agent-drawer select {font:inherit;color:inherit;background:#171c25;border:1px solid #39414e;border-radius:5px;padding:7px 12px;cursor:pointer;}
+.agent-drawer button:disabled {opacity:.4;cursor:default;}
+.agent-drawer button:hover:not(:disabled) {background:#252c38;}
+.agent-drawer-bar {display:flex;align-items:center;gap:18px;padding:8px 14px;min-height:52px;}
+.agent-drawer .agent-drawer-toggle {display:flex;align-items:center;gap:14px;border:0;background:transparent;font-size:13px;padding-left:0;}
+.agent-drawer-toggle small {font-size:10px;color:#a9b2c0;}
+.agent-shared {margin-left:auto;color:#9da8b8;font-size:10px;}
+.agent-work-content {max-height:74svh;overflow:auto;padding:0 16px 12px;}
+.agent-session-nav {display:flex;align-items:center;gap:10px;border-bottom:1px solid #343c48;padding:4px 0 8px;}
+.agent-tabs {display:flex;gap:6px;overflow:auto;align-items:stretch;min-width:0;flex:1;}
+.agent-tabs-empty {padding:6px 0;color:#99a6b8;font-size:11px;}
+.agent-drawer .agent-history-toggle {flex-shrink:0;background:transparent;font-size:11px;padding:5px 9px;}
+.agent-history {padding:6px 0 8px;border-bottom:1px solid #343c48;}
+.agent-history-list {max-height:180px;overflow:auto;}
+.agent-drawer .agent-history-list button {display:flex;align-items:center;justify-content:space-between;gap:18px;width:100%;border:0;border-radius:0;border-bottom:1px solid #252c38;text-align:left;background:transparent;padding:7px 8px;}
+.agent-history-list span {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.agent-history-list small {flex-shrink:0;font-size:10px;color:#a9b2c0;}
+.agent-history p {font-size:10px;color:#99a6b8;margin:8px 0 0;}
+.agent-tabs>div {display:flex;flex-shrink:0;border:1px solid #343c48;border-radius:6px;overflow:hidden;}
+.agent-tabs>div.selected {border-color:var(--ember-hot,#e5e9ef);background:#262d38;}
+.agent-drawer .agent-tabs button {border:0;border-radius:0;background:transparent;text-align:left;}
+.agent-tabs>div>button:first-child {max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.agent-tabs small {display:block;font-size:10px;color:#a9b2c0;margin-top:3px;}
+.agent-drawer .agent-tabs button.is-armed {background:#5a2328;color:#ffe3e3;font-size:11px;padding:0 10px;}
+.agent-work-meta {display:flex;gap:12px;align-items:center;justify-content:space-between;padding:10px 0;color:#bdc6d4;font-size:10px;}
+.agent-work-meta>div {display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
+.agent-work-meta>span {flex-shrink:0;}
+.agent-drawer .agent-work-meta button {padding:4px 8px;font-size:10px;background:transparent;}
+.agent-drawer .agent-keep[aria-pressed="true"] {border-color:var(--ember-hot,#d5deeb);color:var(--ember-hot,#d5deeb);background:#252c38;}
+.agent-terminal {height:clamp(240px,44svh,560px);padding:4px 0;overflow:auto;}
+.agent-terminal .xterm {min-height:100%;}
+.agent-drawer {scrollbar-color:#4b5566 #0b0e14;scrollbar-width:thin;}
+.agent-tabs,.agent-terminal,.agent-answer pre,.agent-work-content {scrollbar-color:#4b5566 #0b0e14;scrollbar-width:thin;}
+.agent-stopped {padding:12px 0;color:#a9b2c0;}
+.agent-answer {margin:8px 0;border-top:1px solid #343c48;padding-top:10px;}
+.agent-answer summary {cursor:pointer;color:#d5deeb;}
+.agent-answer pre {white-space:pre-wrap;overflow-wrap:anywhere;max-height:210px;overflow:auto;margin:10px 0;font:13px/1.6 Consolas,monospace;}
+.agent-empty {padding:18px 0 8px;max-width:720px;}
+.agent-empty strong {font:22px var(--font-display),sans-serif;}
+.agent-empty p {color:#b7c1cf;line-height:1.7;margin-top:10px;}
+.agent-compose {display:flex;gap:10px;margin-top:10px;align-items:stretch;}
+.agent-compose textarea {width:100%;min-width:0;resize:vertical;min-height:58px;max-height:160px;background:#121822;color:#edf1f8;border:1px solid #454f60;border-radius:6px;padding:10px;font:13px/1.5 Consolas,monospace;}
+.agent-compose button {flex-shrink:0;}
+.agent-message-box {padding:2px 0 6px;}
+.agent-message-guard {color:#a9b2c0;font-size:11px;padding-top:8px;}
+.agent-message-guard p {margin:0 0 6px;}
+.agent-message-guard button+button {margin-left:6px;}
+.agent-error {color:#ffb5ac;margin:8px 0;}
+.agent-input-needed {color:#ffd9a8;border-left:2px solid currentColor;padding:7px 10px;margin:4px 0;}
+.agent-recovered {color:#c7d7ed;margin:10px 0 4px;overflow-wrap:anywhere;}
+.agent-services p {margin:8px 0;color:#bdc6d4;overflow-wrap:anywhere;}
+.agent-services p>code {display:block;font-size:11px;color:#e5e9ef;white-space:pre-wrap;}
+.agent-services p>span {display:block;}
+.agent-services {font-size:10px;margin-top:7px;color:#99a6b8;}
+.agent-services summary {cursor:pointer;}
+.agent-drawer footer {display:flex;gap:8px 20px;justify-content:space-between;flex-wrap:wrap;color:#99a6b8;font-size:10px;margin-top:8px;overflow-wrap:anywhere;}
+.agent-voice-status {padding:4px 16px 10px;margin:0;color:#c7d3e3;font-size:11px;max-height:65px;overflow:auto;}
+.agent-voice-target {display:flex;flex-direction:column;gap:6px;font-size:10px;color:var(--ink-dim);margin:10px 0;}
+.agent-voice-target select {width:100%;min-width:0;padding:7px;background:#121822;color:#e5e9ef;border:1px solid #454f60;border-radius:4px;font:10px var(--font-mono),monospace;}
+.voice-card-heading {position:relative;display:flex;align-items:center;gap:10px;}
+.voice-card-heading>.sec-title {min-width:0;flex:1;}
+.voice-conversation-controls {flex-shrink:0;margin-bottom:12px;}
+/* The box grows with its three dots: in an 18px monospace face they are wider than the old fixed 28px. */
+.voice-conversation-controls>summary {display:grid;place-items:center;list-style:none;box-sizing:border-box;min-width:28px;width:auto;padding:0 6px;letter-spacing:0;text-indent:0;white-space:nowrap;height:26px;border:1px solid var(--line);border-radius:5px;color:var(--ink);cursor:pointer;font:18px/1 var(--font-mono),monospace;}
+.voice-conversation-controls>summary::-webkit-details-marker {display:none;}
+.voice-conversation-controls[open]>summary {background:#293140;border-color:#8795ad;}
+/* Spans its heading: the rail is narrower than the old fixed 330px and clips whatever leaves it. */
+.voice-conversation-menu {position:absolute;z-index:12;top:100%;left:0;right:0;padding:12px;background:#111720;border:1px solid #454f60;border-radius:8px;box-shadow:0 12px 32px #0008;color:#e5e9ef;font:11px/1.4 var(--font-mono),monospace;}
+.voice-conversation-heading {display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px;}
+.voice-conversation-heading label {color:#aebacb;font-size:10px;}
+.voice-conversation-heading button {padding:5px 7px;background:transparent;border:1px solid #627089;border-radius:4px;color:#e5e9ef;cursor:pointer;font:10px/1.4 var(--font-mono),monospace;}
+.voice-conversation-heading button:disabled {opacity:.45;cursor:default;}
+.voice-conversation-menu select {display:block;width:100%;min-width:0;padding:8px;background:#1b2330;color:#e5e9ef;border:1px solid #454f60;border-radius:4px;font:11px/1.4 var(--font-mono),monospace;}
+.voice-conversation-menu p {margin:8px 0 0;font-size:10px;color:#b8c5d8;}
+.voice-conversation-controls :is(summary,button,select):focus-visible {outline:2px solid #fff;outline-offset:2px;}
+.agent-open-link {background:transparent;color:var(--ink);border:0;padding:6px 0;text-decoration:underline;text-underline-offset:4px;cursor:pointer;font:10px var(--font-mono),monospace;}
+.v2-stage .preview-banner,.v2-stage .transcript-btn {bottom:66px;}
+.v2-stage .hud {padding-bottom:98px;}
+.agent-drawer :is(button,select,textarea,summary):focus-visible,.agent-voice-target select:focus-visible {outline:2px solid #fff;outline-offset:2px;}
+@media(max-width:700px){.agent-drawer{left:4px;right:4px;}.agent-drawer-bar{gap:6px;padding:8px;}.agent-shared{display:none;}.agent-drawer-toggle small{display:none;}.agent-drawer-bar>button:last-child{margin-left:auto;}.agent-work-content{padding:0 10px 10px;max-height:80svh;}.agent-work-meta{align-items:flex-start;flex-direction:column;}.agent-compose{flex-direction:column;}.agent-drawer button{min-height:36px;}}

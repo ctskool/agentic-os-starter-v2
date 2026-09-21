@@ -1,0 +1,12 @@
+node_modules/
+.next/
+dist/
+.runtime/
+*.log
+*.tsbuildinfo
+.env*
+*.stackdump
+__pycache__/
+.DS_Store
+obsidian-v2/test-vault/
+obsidian-v2/preview/bundle.js

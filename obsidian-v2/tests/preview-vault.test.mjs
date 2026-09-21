@@ -1,0 +1,35 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {createJiti} from 'jiti';
+import {createPreviewSnapshot} from '../preview/vault-snapshot.mjs';
+import {previewAbstractFile} from '../preview/vault-index.mjs';
+const {readLatestMorningHeadlines}=await createJiti(import.meta.url).import('../src/lib/reports.ts');
+
+test('preview exposes native report folder children and real morning headlines without snapshotting report bodies',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'v2-preview-vault-'));
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const daily='daily-notes/2026-09-12.md',report='inbox/research/morning-intel/2026-09-11-intel.md';
+ for(const relative of [daily,report])fs.mkdirSync(path.dirname(path.join(root,relative)),{recursive:true});
+ const note='---\nschema_version: 1\ndate: 2026-09-12\nfocus: Test metadata\n---\n# Plan\n';
+ fs.writeFileSync(path.join(root,daily),note);
+ fs.writeFileSync(path.join(root,report),'# Intel\n\n## TL;DR\n- **Fixture headline** — Verified fixture body.\n\n## Source Status\nFixture\n');
+ const reads=[];
+ const snapshot=createPreviewSnapshot(root,{filesystem:{...fs,readFileSync:(file,...args)=>{reads.push(file);return fs.readFileSync(file,...args)}}});
+ const cache=snapshot();
+ assert.equal(cache[daily],note);
+ assert.equal(reads.length,1);assert.equal(reads[0],path.join(root,daily));
+ assert.match(cache[report],/^\0preview-index:/);
+ const folder=previewAbstractFile(cache,'inbox/research/morning-intel');
+ assert.equal(folder.children[0].name,'2026-09-11-intel.md');
+ const result=await readLatestMorningHeadlines({vault:{getAbstractFileByPath:relative=>previewAbstractFile(cache,relative),read:async file=>fs.readFileSync(path.join(root,file.path),'utf8')}});
+ assert.equal(result.sourcePath,report);
+ assert.deepEqual(result.items,[{bold:'Fixture headline',body:'Verified fixture body.'}]);
+ assert.deepEqual(snapshot(),cache);assert.equal(reads.length,1,'unchanged daily body must not be reread every poll');
+ fs.writeFileSync(path.join(root,daily),note+'Changed body');
+ assert.match(snapshot()[daily],/Changed body$/);assert.equal(reads.length,2);
+ fs.unlinkSync(path.join(root,report));fs.unlinkSync(path.join(root,daily));
+ const empty=snapshot();assert.deepEqual(empty,{});assert.equal(previewAbstractFile(empty,'inbox/research/morning-intel'),null);
+});
