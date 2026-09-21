@@ -87,7 +87,7 @@ Pointing it at an **existing Obsidian vault is fine** — nothing you already ha
 
 | | | |
 |:--|:--|:--|
-| 🛸 **The Obsidian cockpit** | Today's plan, Top 3, metrics and one-click workflows — Plan Today, Morning Intel, Inbox Brief, Weekly Review, Deep Research, Content Cascade and more. Every run writes its report into your vault as plain markdown you can read and edit. | `obsidian-v2/` |
+| 🛸 **The Obsidian cockpit** | Today's plan, Top 3, metrics and one-click workflows — Plan Today, Morning Intel, Inbox Brief, Weekly Review, Deep Research, Content Cascade and more. Each bundled workflow writes its report into your vault as plain markdown you can read and edit. | `obsidian-v2/` |
 | 🖥️ **The Jarvis HUD** | The same system as a full-screen dashboard at `127.0.0.1:3217`, with live terminals for Claude Code and Codex, a provider switch, system vitals and your weekly-usage meter. | `jarvis-v2/` |
 | 🎙️ **Voice** | Hold the microphone and ask. Speech recognition and the spoken reply both run on your machine (Whisper + Kokoro) — no speech API keys, no audio leaves the computer. | `obsidian-v2/` |
 | ⚡ **Jev** *(optional)* | A tiny routing model on OpenRouter that decides where a spoken request goes, so answers start in about a fifth of a second instead of five. Everything still works without it, only slower. | `aos.mjs jev-key` |
@@ -121,7 +121,7 @@ flowchart LR
 
 1. You click a button in the cockpit, type in a HUD terminal, or hold the microphone and talk.
 2. The bridge decides what you meant — with Jev's help if you added a key — and spawns `claude` or `codex` on **your** subscription.
-3. The workflow writes its deliverable into your vault as markdown. The cockpit and the HUD read it straight back out of the files.
+3. Bundled workflows write their deliverables into your vault as markdown. The cockpit and the HUD read it straight back out of the files.
 4. The monitor keeps the bridge and HUD running, and restarts them if they fall over.
 
 The daily-note format is a **frozen parser contract** (`system/schemas/daily-note.md`, v1). The cockpit parses those exact headings — customise the content, not the section names.
@@ -171,13 +171,15 @@ Your choices stay in your vault through updates. See [Dashboard personalization]
 
 ## What it costs
 
-Your Claude and/or Codex subscription does the thinking. Jev costs a fraction of a cent per voice request on OpenRouter. Speech is local and free. There are no other API bills.
+Your Claude and/or Codex account handles the thinking under your provider plan. Optional Jev routing uses paid OpenRouter requests; its cost depends on your selected model and usage. Local speech has no API charge. Your own skills may use additional paid tools or services; review their requirements before connecting them.
 
 ## What it will and will not do
 
-Workflows read your vault, the web and (if you connect them) your calendar and mail, and write **drafts and reports into your vault**. They never send messages, publish, schedule posts or delete notes.
+The bundled workflows read your vault, the web and (if you connect them) your calendar and mail, and write **drafts and reports into your vault**. They are instructed not to send messages, publish, schedule posts or delete notes.
 
-What leaves your computer: requests to your own Claude / Codex account (which can include note content a workflow reads), and, only if you add an OpenRouter key, each voice request to Jev: the words you said, the last two turns of that voice conversation, the title and last few lines of the conversation you have selected, and the file names of recent reports, so it can decide where the request goes. Your notes, daily note and metrics are not sent to OpenRouter. Speech recognition and the voice itself stay on your computer.
+Your own skills run in an interactive Claude Code or Codex conversation and follow that skill's instructions and your agent's permissions. Review what a skill can do before adding it, including any external actions, accounts and services it uses.
+
+Requests to your own Claude / Codex account can include note content a workflow reads. Web searches and connected tools also contact their respective services. Only if you add an OpenRouter key, Jev routing sends: the words you said, the last two turns of that voice conversation, the title and last few lines of the conversation you have selected, and the file names of recent reports, so it can decide where the request goes. Jev routing does not send your full notes, daily note or metrics to OpenRouter. Speech recognition and the voice itself stay on your computer. Your own skills may send data to other services according to the tools and accounts you enable.
 
 <br/>
 

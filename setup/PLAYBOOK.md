@@ -153,8 +153,8 @@ Full commands and limits: `docs/DASHBOARD.md`. Dashboard choices live in `system
 
 A short, personal wrap-up:
 
-- What now runs by itself: the bridge, the HUD and voice (and at login, if they chose that). Nothing leaves the computer except requests to their own Claude / Codex account and, if set, OpenRouter.
-- Costs: their Claude and/or Codex subscription, plus pennies on OpenRouter for Jev. No other API bills.
+- What now runs by itself: the bridge, the HUD and voice (and at login, if they chose that). Explain the requests to their Claude / Codex account, optional Jev routing through OpenRouter, and any web searches or connected services. Review the data access and external actions required by their selected personal skills.
+- Costs: their Claude and/or Codex provider plan, optional OpenRouter usage for Jev, and any paid tools or services used by their personal skills. Local speech has no API charge.
 - Day-to-day: `node aos.mjs status | stop | start | doctor | update`.
 - Where things land: reports in `inbox/reports/` and `inbox/research/`, daily notes in `daily-notes/`, conventions in the vault's `CLAUDE.md` / `AGENTS.md`.
 - Known limits: on Mac there is no global push-to-talk hotkey (use the microphone button) and the Claude weekly-usage meter may read "unavailable". Mac support is new — if something is off, `node aos.mjs doctor` first.
