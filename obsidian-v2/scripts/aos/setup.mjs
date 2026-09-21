@@ -8,7 +8,7 @@ import {spawnSync} from 'node:child_process';
 import {projectRoot} from '../../runner/runtime.mjs';
 import {isWindows, tryJson, sleep, listener, samePath} from './platform.mjs';
 import {layout, start, stop, waitForServices, speechInstalled, bridgeIsOurs, hudIsOurs, PORTS} from './services.mjs';
-import {enableAutostart} from './autostart.mjs';
+import {enableAutostart, autostartOwner} from './autostart.mjs';
 import {setupSpeech} from './speech.mjs';
 import {scaffoldVault} from './vault.mjs';
 import {doctor} from './doctor.mjs';
@@ -72,6 +72,9 @@ async function pauseMonitor(at) {
 // Services keep running throughout; only the monitor changes hands.
 export async function startAtLogin({root = projectRoot, log = console.log} = {}) {
   const at = layout(root);
+  // Refuse BEFORE anything is paused: a login item that belongs to another installation must leave
+  // this installation exactly as it was, monitor included.
+  if (autostartOwner(at) === 'other') throw new Error('A different installation owns the start-at-login item; nothing was changed. Turn it off from that installation first (`node aos.mjs autostart off` in its folder).');
   if (!fs.existsSync(at.config)) await start({root, log});
   await pauseMonitor(at);
   log('-> ' + enableAutostart(at));
