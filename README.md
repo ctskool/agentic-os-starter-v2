@@ -159,6 +159,14 @@ Hold the microphone in the HUD (or the cockpit) and speak. Recording stops when 
 
 Something broken? Open this folder in your coding agent and say **"run the doctor"**. See also [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
 
+### Make the dashboard yours
+
+During setup, your agent offers to wire your own skills into the button section of both dashboards. Tell it what you want those buttons to do: it can connect existing skills, help you create a missing skill, and recommend a useful starting selection. Keep the starter buttons or approve up to ten of your own choices. Both the Obsidian cockpit and the HUD use your saved order.
+
+Use **Customize dashboard** in either app to change the selection later. Included workflows run in the background and save reports; your own installed skills open a normal Claude Code or Codex conversation so you can answer questions and handle approvals. Finding a skill does not automatically install its dependencies or connect its accounts.
+
+Your choices stay in your vault through updates. See [Dashboard personalization](docs/DASHBOARD.md) for installed skills and agent commands.
+
 <br/>
 
 ## What it costs

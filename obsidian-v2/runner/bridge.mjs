@@ -11,6 +11,7 @@ import {getCodexUsage} from './codexUsage.mjs';
 import {getClaudeUsage} from './claudeUsage.mjs';
 import {closeClaudeSignIn} from './claude-signin.mjs';
 import {taskSummary} from '../shared/work-feed.mjs';
+import {readDashboard,saveDashboard,registerDashboardSkill,discoverDashboardSkills,prepareDashboardSkill,assertDashboardReplay} from './dashboard.mjs';
 import {configuredVault} from './runtime.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -108,6 +109,24 @@ server.on('request',async(req,res)=>{
  if((req.headers['x-v2-app']&&!['native','web'].includes(req.headers['x-v2-app']))||!bridgeAuth?.accepts(appScope==='native'?'POST':req.method,req.headers))return json({error:'Bridge authentication required'},401);
  try{
   const url=new URL(req.url,'http://127.0.0.1:3219');
+  // Dashboard configuration is shared between surfaces. These routes retain the
+  // bridge's existing origin, authentication and native/web ownership guards.
+  if(url.pathname==='/dashboard'&&req.method==='GET')return json(readDashboard(root));
+  if(url.pathname==='/dashboard/discover'&&req.method==='GET')return json(discoverDashboardSkills(root,{provider:url.searchParams.get('provider')}));
+  if(url.pathname==='/dashboard'&&req.method==='POST')return json(saveDashboard(root,JSON.parse((await body(req)).toString())));
+  if(url.pathname==='/dashboard/register'&&req.method==='POST')return json(registerDashboardSkill(root,JSON.parse((await body(req)).toString())));
+  if(url.pathname==='/dashboard/launch'&&req.method==='POST'){
+   const b=JSON.parse((await body(req)).toString());
+   if(!uuid(b.id))throw new Error('Invalid task ID');
+   const previous=terminals.records.get(b.id)||terminals.workflowRequest(b.id)?.record;
+   if(previous)scopedTask(previous.id);
+   const prepared=prepareDashboardSkill(root,{skill:b.skill,request:b.request,selection:b.selection||selection(root)});
+   assertDashboardReplay(previous,prepared,appScope);
+   readCurrentState(root,appScope);
+   const task=terminals.start({id:b.id,...prepared,...(appScope==='native'?{execution:'native'}:{})});
+   if(!previous)setCurrent(root,terminals,{provider:task.provider,id:task.id,scope:appScope});
+   return json(task);
+  }
   if(url.pathname.startsWith('/native/')){
    if(appScope!=='native')return json({error:'Native Obsidian authorization required'},403);
    if(req.method==='GET'&&url.pathname==='/native/pending')return json(terminals.pendingNative());

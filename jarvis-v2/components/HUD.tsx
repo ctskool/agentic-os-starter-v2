@@ -7,7 +7,8 @@ import dynamic from "next/dynamic";
 import type { VaultState, Metric } from "@/lib/vault";
 import { voice } from "@/lib/voiceClient";
 import {useAgentWork} from '@/lib/useAgentWork';
-import {setWorkProvider,type WorkTask} from '@/lib/work';
+import {getWorkSelection,openWork,setWorkProvider,type WorkTask} from '@/lib/work';
+import {dashboardEntries,dashboardSkillsStore,launchInstalledSkill,skillUnavailable,type DashboardProvider,type DashboardState} from '@/lib/dashboard-skills';
 import {isPendingCallout,queueWorkflowCallout,reconcileWorkflowCallouts,type WorkflowCallout} from '@/lib/workflow-callouts';
 import {shortConversationTitle} from '../../obsidian-v2/shared/work-presentation';
 import { scrubRunSummary, humanizeFailure } from "@/lib/spokenText";
@@ -18,6 +19,7 @@ import {ArtifactPresenter,validateArtifact,type ArtifactView} from '../lib/artif
 import type {ArtifactOpener} from '../../obsidian-v2/shared/artifact-delivery';
 import StarField from "./StarField";
 import SkillBrowser from './SkillBrowser';
+import DashboardCustomizer from './DashboardCustomizer';
 import ProviderUsage from './ProviderUsage';
 
 const GalaxyCore = dynamic(() => import("./GalaxyCore"), { ssr: false });
@@ -265,31 +267,43 @@ const Vitals = memo(function Vitals({ state, hot, provider }: { state: VaultStat
   );
 });
 
-// Skill buttons queue background workflows; their report cards stay on the HUD.
-const DECK_SKILLS = Object.entries(SKILLS).filter(([id])=>id!=='voice-ask').map(([skill,spec])=>({skill,...spec}));
-const QUICK_SKILLS = ['plan-today','inbox-brief','deep-research-chase','content-cascade'];
+// Bundled skills queue reports; registered installed skills open interactive work.
 
 function CommandDeck({
   state,
+  provider,
   hot,
   onQueued,
 }: {
   state: VaultState | null;
+  provider: DashboardProvider;
   hot?: boolean;
   onQueued: (skill: string, ok: boolean, id?:string) => void;
 }) {
   const [cooldown, setCooldown] = useState<Record<string, boolean>>({});
-  const [argument,setArgument]=useState<{skill:string;label:string;key:string}|null>(null);
+  const [argument,setArgument]=useState<{skill:string;label:string;key:string;installed:boolean}|null>(null);
   const [argumentText,setArgumentText]=useState('');
   const [queueError,setQueueError] = useState("");
   const [browsing,setBrowsing]=useState(false);
+  const [customizing,setCustomizing]=useState(false);
+  const [preferences,setPreferences]=useState<DashboardState>(dashboardSkillsStore.getSnapshot());
+  useEffect(()=>dashboardSkillsStore.subscribe(setPreferences),[]);
+  const catalog=preferences.data.catalog;
 
   const fire = async (skill: string, args:Record<string,string> = {}) => {
-    const spec=SKILLS[skill];
-    if(spec?.arg&&!args[spec.arg]){setArgument({skill,label:spec.label,key:spec.arg});setArgumentText('');return;}
+    const spec=catalog.find(entry=>entry.id===skill);
+    if(!spec){setQueueError('This skill is no longer available. Customize your dashboard to replace it.');return;}
+    const unavailable=skillUnavailable(spec,provider,preferences.data.installedProviders);if(unavailable){setQueueError(unavailable);return;}
+    const key=spec.kind==='installed'?'request':spec.arg;
+    if(key&&!args[key]){setArgument({skill,label:spec.label,key,installed:spec.kind==='installed'});setArgumentText('');return;}
     if (cooldown[skill]) return;
     setCooldown((c) => ({ ...c, [skill]: true }));
     try {
+      if(spec.kind==='installed'){
+        const selection=await getWorkSelection();
+        const task=await launchInstalledSkill(spec,args.request,selection,undefined,preferences.data.installedProviders);
+        openWork([task.id]);setQueueError('');setCooldown(c=>({...c,[skill]:false}));return;
+      }
       const res = await fetch("/api/queue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -299,7 +313,7 @@ function CommandDeck({
       const task=await res.json();setQueueError("");onQueued(skill, true,task.id);
       void dashboardStore.refresh();
     } catch (e) {
-      setQueueError(e instanceof Error?e.message:"V2 bridge unavailable");setCooldown(c=>({...c,[skill]:false}));onQueued(skill,false);return;
+      setQueueError(e instanceof Error?e.message:"V2 bridge unavailable");setCooldown(c=>({...c,[skill]:false}));if(spec.kind==='builtin')onQueued(skill,false);return;
     }
     setTimeout(() => setCooldown((c) => ({ ...c, [skill]: false })), 15000);
   };
@@ -319,27 +333,32 @@ function CommandDeck({
         </div>
       )}
       <div className="deck deck-compact">
-        {DECK_SKILLS.filter(d=>QUICK_SKILLS.includes(d.skill)).map((d) => (
+        {dashboardEntries(preferences.data).map((d) => (
           <button
-            key={d.skill}
-            className={`deck-btn ${cooldown[d.skill] ? "fired" : ""}`}
-            onClick={() => fire(d.skill)}
-            disabled={cooldown[d.skill] || !state}
+            key={d.id}
+            className={`deck-btn ${cooldown[d.id] ? "fired" : ""}`}
+            onClick={() => fire(d.id)}
+            disabled={cooldown[d.id] || !state || !!skillUnavailable(d,provider,preferences.data.installedProviders)}
+            title={skillUnavailable(d,provider,preferences.data.installedProviders)||d.description}
           >
             <span className="deck-dot" />
-            <span className="deck-label">{cooldown[d.skill] ? "QUEUED" : d.label}</span>
+            <span className="deck-label">{cooldown[d.id] ? d.kind==='installed'?'OPENING…':'QUEUED' : d.label}{skillUnavailable(d,provider,preferences.data.installedProviders)&&<small className="deck-skill-reason">{skillUnavailable(d,provider,preferences.data.installedProviders)}</small>}</span>
             <span className="deck-arrow">→</span>
           </button>
         ))}
       </div>
-      <button className="browse-skills" onClick={()=>setBrowsing(true)}><span>Browse all skills</span><span>{DECK_SKILLS.length} <span aria-hidden="true">↗</span></span></button>
-      {browsing&&<SkillBrowser onClose={()=>setBrowsing(false)} onSelect={skill=>void fire(skill)} available={!!state}/>}
+      {!dashboardEntries(preferences.data).length&&<p className="dashboard-note">Choose shortcuts with Customize dashboard.</p>}
+      <button className="browse-skills" onClick={()=>setBrowsing(true)}><span>Browse all skills</span><span>{catalog.length} <span aria-hidden="true">↗</span></span></button>
+      <button className="browse-skills customize-dashboard" disabled={!preferences.loaded||!!preferences.error} onClick={()=>setCustomizing(true)}><span>Customize dashboard</span><span aria-hidden="true">⚙</span></button>
+      {browsing&&<SkillBrowser onClose={()=>setBrowsing(false)} onSelect={skill=>void fire(skill)} available={!!state} catalog={catalog} provider={provider} installedProviders={preferences.data.installedProviders}/>}
+      {customizing&&<DashboardCustomizer data={preferences.data} provider={provider} onClose={()=>setCustomizing(false)}/>}
       {argument && <form className="voice-message" onSubmit={e=>{e.preventDefault();const a=argument;if(argumentText.trim()){setArgument(null);void fire(a.skill,{[a.key]:argumentText.trim()})}}}>
-        <label>{argument.label}<input autoFocus aria-label={argument.label+" "+argument.key} value={argumentText} maxLength={4000} placeholder={argument.key==='url'?'https://…':'Enter a topic…'} onChange={e=>setArgumentText(e.target.value)}/></label>
-        <button type="submit" disabled={!argumentText.trim()}>Run skill</button><button type="button" onClick={()=>setArgument(null)}>Cancel</button>
+        <label>{argument.installed?`What should ${argument.label} do?`:argument.label}<input autoFocus aria-label={argument.label+" "+argument.key} value={argumentText} maxLength={4000} placeholder={argument.installed?'Describe your task…':argument.key==='url'?'https://…':'Enter a topic…'} onChange={e=>setArgumentText(e.target.value)}/></label>
+        <button type="submit" disabled={!argumentText.trim()}>{argument.installed?'Open in terminal':'Run skill'}</button><button type="button" onClick={()=>setArgument(null)}>Cancel</button>
       </form>}
       {queueError && <p className="voice-message" role="alert">{queueError}</p>}
-      <div className="deck-hint">{state?'Runs in the background · reports appear here':'Workflow runner offline'}</div>
+      {(preferences.error||preferences.data.error)&&<p className="voice-message" role="alert">Dashboard preferences: {preferences.error||preferences.data.error}{preferences.error&&!preferences.loaded?' · Showing default shortcuts.':preferences.error?' · Showing last loaded shortcuts.':''}</p>}
+      <div className="deck-hint">{state?'Bundled skills → reports here · installed skills → terminals':'Workflow runner offline'}</div>
     </section>
   );
 }
@@ -1170,6 +1189,7 @@ export default function HUD() {
         <div className="hud-right">
           <CommandDeck
             state={state}
+            provider={provider}
             hot={hotPanels.includes("pipeline") || hotPanels.includes("diagnostics")}
             onQueued={onQueued}
           />

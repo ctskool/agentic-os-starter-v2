@@ -91,7 +91,7 @@ You cannot do the sign-in for them. Everything else works without it; those work
 
 1. Open Obsidian → *Open folder as vault* → the vault path.
 2. New vault: Obsidian asks whether to trust the author and enable plugins → **Trust**. Existing vault: *Settings → Community plugins → Turn on community plugins → enable "Agentic OS V2"*.
-3. Optional, for terminals inside Obsidian: *Community plugins → Browse → "Terminal"* (by polyipseity) → install and enable. Without it, conversations open in the Jarvis HUD instead.
+3. For conversations and personal-skill buttons inside Obsidian: *Community plugins → Browse → "Terminal"* (by polyipseity) → install and enable. They can skip this and use the Jarvis HUD for personal skills and conversations; bundled background workflows still work inside Obsidian. Before wiring personal skills, explain this choice.
 4. Open the HUD: http://127.0.0.1:3217
 5. First use of the microphone: the browser (and on Mac, *System Settings → Privacy & Security → Microphone*) asks for permission → allow.
 
@@ -112,6 +112,38 @@ Then have the user try three things themselves:
 3. Say *"Open the morning intel"* (after they have run Morning Intel once).
 
 ## Phase 7 — Make it theirs (each item optional)
+
+### Choose their dashboard buttons
+
+Ask: *"Would you like me to wire your own skills into the button section of both dashboards? Tell me what you want those buttons to do, or we can keep the starter buttons for now."* Keeping the starter buttons is a complete answer: leave their selection unchanged and continue.
+
+If they want to personalize, ask these one at a time:
+
+1. *"What do you mainly use AI for — running your day, client work, research, content, or something else?"*
+2. *"Which skills do you already use regularly, and is there a new workflow you would like a button for?"* Do not claim to know their usage history. With their agreement, use `node aos.mjs dashboard discover --provider claude` or `--provider codex` to find installed skills for the tool they use.
+3. Suggest a short starting list, with one plain-language reason for each recommendation, and ask what they would like to keep or change. Offer up to ten buttons; they do not need to fill all ten.
+
+First read the available bundled and registered choices with `node aos.mjs dashboard list`. Recommend only actual entries or installed skills you have verified. Useful examples:
+
+| Their work | Possible bundled buttons |
+|---|---|
+| Daily organization | Plan Today, Inbox Brief, Weekly Review, Summarize Vault |
+| Client work and research | Lead Research, Deep Research, Weekly Review |
+| Content creation | Content Cascade, Brainstorm Angles, Build Outline, YT Pipeline |
+
+These are suggestions, not fixed presets. Explain any required connection: for example, calendar and email workflows need their connected accounts. A skill file being present does not prove its tools or accounts are available. Read the selected skill's instructions before recommending it, explain missing requirements, and do not install new skills or connect accounts without the member choosing that step.
+
+If they want a new skill that does not exist yet, help define its job, required inputs and expected result. After they choose to create it, use the coding tool's normal skill-creation workflow and an appropriate user or vault skill folder. Check the resulting SKILL.md, its provider compatibility and its dependencies before wiring the button. Do not modify this application's source or promise an unavailable integration works. If a skill needs more setup, say what remains and leave that button unwired until the member is ready. Never run a publishing, messaging, purchasing or other external action merely to test a new button.
+
+For an existing personal skill, register its exact installed `SKILL.md` path with `node aos.mjs dashboard add --path "<absolute SKILL.md path>" --provider claude|codex|both --revision "<revision from list>"`. Only use `both` after verifying the instructions work in both tools. Registration returns `registeredId` and a new revision; it does not launch the skill or pin a button by itself. Skills absent from the standard discovery folders can be registered by their exact path.
+
+Once they approve the selection, run `node aos.mjs dashboard select --skills "<comma-separated IDs in their chosen order>" --revision "<latest revision>"`. Use `--skills none` only if they explicitly want no quick buttons. A revision conflict means another window changed the dashboard: reload the saved selection and reconcile it with the member's choices before retrying.
+
+Read `node aos.mjs dashboard list` again to confirm the saved order. Both the Obsidian cockpit and the HUD pick it up within a few seconds. Point out **Customize dashboard** in either app: they can add, remove or reorder buttons, find installed skills, and restore defaults later. Bundled workflows produce reports in the background; personal skills open an ordinary conversation in their selected coding tool, where questions and approvals remain visible. Never run an installed skill merely to test registration: ask for the actual task first.
+
+Full commands and limits: `docs/DASHBOARD.md`. Dashboard choices live in `system/v2/dashboard.json` inside their vault and survive updates; do not change application source code to customize them.
+
+### Other preferences
 
 - **Daily Drivers:** ask for the three or four things they want on every day's checklist, and write them to `<vault>/system/v2/profile.json` as `{"dailyDrivers": ["…", "…"]}` (1–8 short labels). Optional `"cta"`: the closing paragraph Content Cascade should use for their community or newsletter.
 - **Metrics cards** (YouTube, Instagram, TikTok, GitHub): the settings live in `~/.claude/.env`. That is only a file this system reads; it does not need Claude Code. If the `~/.claude` folder does not exist (a Codex-only computer), create the folder first, then create the file from `docs/env.example`. Open it in their editor (`notepad` / `open -e`), tell them which lines to fill, and wait. Handles are not secret; the YouTube key is, so they type it, not you.

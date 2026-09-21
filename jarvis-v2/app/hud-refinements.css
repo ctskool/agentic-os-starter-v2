@@ -66,3 +66,43 @@
 .provider-usage p {font-size:9px;line-height:1.7;color:var(--ink-dim);margin:5px 0;}
 .provider-usage details {margin-top:7px;font-size:9px;color:var(--ink-dim);}
 .provider-usage summary {cursor:pointer;}
+
+.customize-dashboard {margin-top:0;padding-top:5px;color:var(--ink-dim);font-size:10px;}
+.customize-dashboard:disabled {opacity:.55;cursor:not-allowed;}
+.deck-skill-reason {display:block;font:9px/1.5 var(--font-mono),monospace;color:#b5c0d0;margin-top:5px;letter-spacing:0;}
+.dashboard-customizer {width:min(730px,calc(100vw - 32px));}
+.dashboard-customizer button,.dashboard-customizer select {border:1px solid #64718b66;border-radius:6px;background:#17212d;color:#e5edf5;padding:7px 10px;font:11px/1.5 var(--font-mono),monospace;cursor:pointer;}
+.dashboard-customizer button:hover:not(:disabled) {border-color:#7ed5ed;background:#7ed5ed14;}
+.dashboard-customizer button:disabled {opacity:.5;cursor:not-allowed;}
+.dashboard-customizer :is(button,input,select,summary):focus-visible {outline:2px solid #9cdeef;outline-offset:3px;}
+.dashboard-customizer header {margin-bottom:14px;}
+.dashboard-selected {list-style:none;margin:0 0 18px;padding:0;display:grid;gap:5px;}
+.dashboard-selected li {display:flex;align-items:center;justify-content:space-between;gap:10px;background:#ffffff04;border:1px solid #64718b30;border-radius:6px;padding:7px 9px;}
+.dashboard-selected li>span {min-width:0;overflow-wrap:anywhere;}
+.dashboard-selected li>div {display:flex;gap:5px;flex-shrink:0;}
+.dashboard-selected small,.dashboard-choice small,.dashboard-found small {display:block;font-size:10px;color:#9daec3;line-height:1.6;}
+.dashboard-catalog {display:grid;gap:7px;max-height:250px;overflow:auto;margin:12px 0;scrollbar-color:#4c596c #101319;}
+.dashboard-choice {display:flex;align-items:start;gap:12px;padding:11px;border:1px solid #64718b30;border-radius:6px;}
+.dashboard-choice input {width:16px;height:16px;margin:3px 0;accent-color:#8cd6e9;flex-shrink:0;}
+.dashboard-choice strong {font-weight:500;}
+.dashboard-choice small {margin-top:4px;}
+.dashboard-choice .dashboard-unavailable {color:#e3bc92;}
+.dashboard-discovery {border-top:1px solid #64718b40;margin-top:16px;padding-top:14px;}
+.dashboard-discovery summary {cursor:pointer;color:#bde8f3;}
+.dashboard-discovery p,.dashboard-note {font-size:10px;line-height:1.7;color:#adbbce;margin:12px 0;}
+.dashboard-discovery-actions {display:flex;align-items:end;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+.dashboard-discovery label {display:grid;gap:6px;flex:1;min-width:0;font-size:10px;}
+.dashboard-discovery select {display:block;}
+.dashboard-discovery form {display:flex;align-items:end;gap:10px;margin-top:15px;}
+.dashboard-discovery input {width:100%;min-width:0;border:1px solid #64718b66;border-radius:6px;background:#080e16;padding:10px;color:#e5edf5;font:11px var(--font-mono),monospace;}
+.dashboard-found {display:grid;gap:7px;max-height:220px;overflow:auto;margin:14px 0;scrollbar-color:#4c596c #101319;}
+.dashboard-found>div {display:flex;align-items:start;justify-content:space-between;gap:10px;padding:9px;border:1px solid #64718b30;border-radius:6px;}
+.dashboard-found>div>span {min-width:0;overflow-wrap:anywhere;}
+.dashboard-found button {flex-shrink:0;}
+.dashboard-feedback {font-size:11px;line-height:1.7;padding:12px;border:1px solid #d4a27066;border-radius:6px;background:#d4a2700a;color:#f0cca5;margin:12px 0;}
+.dashboard-feedback button {margin-top:6px;}
+.dashboard-editor-footer {position:sticky;bottom:-24px;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid #64718b40;margin:16px -24px -24px;padding:14px 24px 24px;background:#101319;box-shadow:0 -10px 16px #101319;}
+.dashboard-editor-footer>div {display:flex;gap:8px;}
+.dashboard-editor-footer .dashboard-save {background:#7ed5ed20;border-color:#7ed5ed80;color:#cef1fa;}
+@media(max-width:550px){.dashboard-customizer h2{font-size:30px;}.dashboard-discovery form,.dashboard-editor-footer{align-items:stretch;flex-direction:column;}.dashboard-editor-footer>div{justify-content:flex-end;}.dashboard-found>div{flex-direction:column;}.dashboard-selected li>div{gap:3px;}.dashboard-selected button{padding:5px 7px;}}
+@media(max-width:760px){.dashboard-editor-footer{bottom:-18px;margin-right:-18px;margin-bottom:-18px;margin-left:-18px;padding-right:18px;padding-bottom:18px;padding-left:18px;}}

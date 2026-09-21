@@ -1,20 +1,15 @@
 import {ProviderUsage} from './ProviderUsage';
 import {MetricCard} from './MetricCard';
 import {LatestVideoCard} from './LatestVideoCard';
-import {SKILLS} from '../../shared/contract.mjs';
 import { h, Fragment } from "preact";
-import { useState } from "preact/hooks";
 import { Notice } from "obsidian";
 import type ChaseCommandCenter from "../main";
 import type { MetricSnapshot } from "../lib/metrics";
 import type { DailyNoteRead } from "../lib/vault";
 import { toggleTaskByText } from "../lib/vault-writer";
 import type { LatestVideo } from "../lib/youtube";
-import { writeIntent } from "../lib/queue";
-import { askForArg } from "./IntentArgModal";
 import { useProvider } from "../lib/provider";
-import { BUTTONS, type ButtonSpec } from "./ActionBar";
-import {openWorkflowPicker} from './WorkflowModal';
+import { ActionBar } from "./ActionBar";
 
 // Glass console — faithful implementation of design 6b ("glass in a dark
 // chassis"): lit ivory panes carry figures, smoked panes carry lists. This
@@ -38,16 +33,6 @@ const TILES: { key: string; label: string; tone: "youtube" | "instagram" | "tikt
 	{ key: "tiktok:followers", label: "TikTok", tone: "tiktok" },
 ];
 
-// Ten quick-access skills (shared with the terminal ActionBar) as keys —
-// Intel Brief is primary: it IS the morning action since morning-intel
-// became the one pipeline. Rows wrap at the grid's 5 columns.
-type KeySpec = ButtonSpec & { primary?: boolean };
-
-const KEYS: KeySpec[] = BUTTONS.map((b) => ({
-	...b,
-	primary: b.skill === "morning-intel",
-}));
-
 export function GlassConsole({
 	plugin,
 	snapshots,
@@ -56,33 +41,6 @@ export function GlassConsole({
 	onSubmitted,
 }: Props) {
 	const providerState = useProvider(plugin.app);
-	const [busy, setBusy] = useState(false);
-
-	const fire = async (spec: KeySpec) => {
-		if (busy) return;
-		setBusy(true);
-		try {
-			const args: Record<string, string> = {};
-			if (spec.prompt) {
-				const value = await askForArg(
-					plugin.app,
-					spec.promptLabel || spec.label,
-					spec.placeholder || "",
-				);
-				if (!value) {
-					new Notice("Cancelled.");
-					return;
-				}
-				args[spec.prompt] = value;
-			}
-			await writeIntent(plugin.app, spec.skill, args);
-			onSubmitted?.();
-		} catch (e) {
-			new Notice(`Could not start workflow: ${e}`);
-		} finally {
-			setBusy(false);
-		}
-	};
 
 	const toggleTask = async (text: string) => {
 		if (!daily) return;
@@ -106,20 +64,7 @@ export function GlassConsole({
 			<div className="aos-v2-row aos-v2-row--upload"><LatestVideoCard video={latestVideo}/></div>
 
 			{/* keys — one-tap agent runs */}
-			<div style={{display:'flex',justifyContent:'flex-end',marginBottom:'6px'}}><button type="button" style={{fontSize:'11px'}} onClick={()=>openWorkflowPicker(plugin.app)}>More workflows…</button></div>
-			<div className="aos-v2-row aos-v2-row--keys">
-				{KEYS.map((k) => (
-					<button
-						key={k.skill}
-						type="button"
-						className={`aos-v2-key ${k.primary ? "aos-v2-key--primary" : ""}`}
-						disabled={busy || (!SKILLS[k.skill]?.direct && !providerState.health?.providers[providerState.selection.provider]?.installed)}
-						onClick={() => void fire(k)}
-					>
-						{k.label}
-					</button>
-				))}
-			</div>
+			<ActionBar plugin={plugin} appearance="glass" onSubmitted={onSubmitted}/>
 
 			{/* lists — schedule + tasks, both smoked */}
 			<div className="aos-v2-row aos-v2-row--lists">
