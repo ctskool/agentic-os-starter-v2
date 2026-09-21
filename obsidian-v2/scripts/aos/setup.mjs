@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {projectRoot} from '../../runner/runtime.mjs';
 import {isWindows, tryJson, sleep, listener, samePath} from './platform.mjs';
-import {layout, start, stop, waitForServices, speechInstalled, ownedBy, PORTS} from './services.mjs';
+import {layout, start, stop, waitForServices, speechInstalled, bridgeIsOurs, hudIsOurs, PORTS} from './services.mjs';
 import {enableAutostart} from './autostart.mjs';
 import {setupSpeech} from './speech.mjs';
 import {scaffoldVault} from './vault.mjs';
@@ -67,15 +67,13 @@ export async function startAtLogin({root = projectRoot, log = console.log} = {})
 
 // Nothing is installed, built or written into a vault until this passes: another copy of the
 // system must not own the ports, and the vault must not belong to another installation.
-export async function preflight(at, vault, {adopt = false, get = tryJson, find = listener} = {}) {
+export async function preflight(at, vault, {adopt = false, get = tryJson, find = listener, post} = {}) {
   const monitor = await get(`http://127.0.0.1:${PORTS.supervisor}/status`);
   if (monitor && !(monitor.kind === 'agentic-os-service-supervisor' && samePath(monitor.runtimeDir, at.runtime))) throw new Error('Another installation of this system (or another program) is running on port 3221. Stop it from its own folder first. Nothing was changed.');
   if (!monitor && find(PORTS.supervisor)) throw new Error('Another program is using port 3221. Nothing was changed.');
-  for (const [port, script] of [[PORTS.bridge, at.bridge], [PORTS.jarvis, at.next]]) {
-    const info = find(port);
-    // A renamed HUD process (macOS) is fine when OUR monitor is the one running.
-    if (info && !ownedBy(info, script) && !monitor) throw new Error(`Another program is using port ${port}. Stop it first. Nothing was changed.`);
-  }
+  // Whatever listens on our ports must prove it is this installation; our own monitor running is no excuse.
+  if (find(PORTS.bridge) && !await bridgeIsOurs(at, post ? {post} : {})) throw new Error('Another program (or another installation of this system) is using port 3219. Stop it first. Nothing was changed.');
+  if (find(PORTS.jarvis) && !await hudIsOurs(at, {get, find})) throw new Error('Another program (or another installation of this system) is using port 3217. Stop it first. Nothing was changed.');
   const marker = path.join(vault, '.obsidian', 'plugins', 'agentic-os-v2', 'terminal-runtime.json');
   let owner = null; try { owner = JSON.parse(fs.readFileSync(marker, 'utf8')).runtimeDir; } catch { /* not connected yet */ }
   if (owner && !samePath(owner, at.runtime) && !adopt) throw new Error(`This vault is already connected to another installation (${path.dirname(owner)}). Use that one, or run setup again with --adopt to move the vault to this installation. Nothing was changed.`);

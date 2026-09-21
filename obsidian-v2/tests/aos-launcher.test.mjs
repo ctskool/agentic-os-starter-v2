@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {parseLsofPids, parsePsLine, parseWindowsProcess, commandIncludes, samePath, which, listener, openUrl} from '../scripts/aos/platform.mjs';
-import {layout, desiredServices, mergePrior, ownedBy, stop, PORTS} from '../scripts/aos/services.mjs';
-import {launchAgentPlist, scheduledTaskScript, autostartOwner, taskOwner, AGENT_LABEL, TASK_NAME} from '../scripts/aos/autostart.mjs';
+import {parseLsofPids, parsePsLine, parseWindowsProcess, samePath, which, listener, openUrl} from '../scripts/aos/platform.mjs';
+import {layout, desiredServices, mergePrior, bridgeIsOurs, hudIsOurs, speechIsOurs, stop, PORTS} from '../scripts/aos/services.mjs';
+import {launchAgentPlist, scheduledTaskScript, autostartOwner, taskOwner, plistArguments, launchctlArguments, AGENT_LABEL, TASK_NAME} from '../scripts/aos/autostart.mjs';
 import {preflight} from '../scripts/aos/setup.mjs';
 import {scaffoldVault, pluginEnabled} from '../scripts/aos/vault.mjs';
 import {saveJevKey, hasJevKey, collectJevKey, JEV_DEFAULTS} from '../scripts/aos/jev-key.mjs';
@@ -15,16 +15,19 @@ import {supervisorConfig} from '../runner/service-supervisor.mjs';
 
 const scratch = () => fs.mkdtempSync(path.join(os.tmpdir(), 'aos-test-'));
 const FAKE_KEY = 'sk-or-' + 'test0000'.repeat(4);
+const TOKEN = 'a'.repeat(64);
+const BOM = String.fromCharCode(0xFEFF);
 
 test('process listings from both operating systems are parsed, and junk is refused', () => {
   assert.deepEqual(parseLsofPids('812\n812\n  977 \nCOMMAND\n'), [812, 977]);
   assert.deepEqual(parsePsLine('Mon Sep  1 09:05:02 2026 /opt/homebrew/bin/node /Users/a/aos/obsidian-v2/runner/bridge.mjs\n'),
     {startedAt: 'Mon Sep 1 09:05:02 2026', commandLine: '/opt/homebrew/bin/node /Users/a/aos/obsidian-v2/runner/bridge.mjs', name: 'node'});
   assert.equal(parsePsLine('garbage'), null);
-  assert.deepEqual(parseWindowsProcess('\uFEFF{"pid":42,"name":"node.exe","commandLine":"\\"C:\\\\n\\\\node.exe\\" C:\\\\x\\\\bridge.mjs","startedAt":"2026-09-21T18:33:46Z"}'),
-    {pid: 42, name: 'node.exe', commandLine: '"C:\\n\\node.exe" C:\\x\\bridge.mjs', startedAt: '2026-09-21T18:33:46Z'});
+  assert.deepEqual(parseWindowsProcess(BOM + '{"pid":42,"name":"node.exe","commandLine":"node x","startedAt":"2026-09-21T18:33:46Z"}'),
+    {pid: 42, name: 'node.exe', commandLine: 'node x', startedAt: '2026-09-21T18:33:46Z'});
   assert.equal(parseWindowsProcess('{"pid":"42"}'), null);
   assert.equal(parseWindowsProcess(''), null);
+  assert.equal(samePath('/a/b/../c', '/a/c'), true); assert.equal(samePath('', ''), false); assert.equal(samePath(null, '/a'), false);
 });
 
 test('a listener is identified per platform, and two listeners on one port are never resolved by position', () => {
@@ -38,23 +41,44 @@ test('a listener is identified per platform, and two listeners on one port are n
   assert.throws(() => listener(0), /Invalid port/);
 });
 
-test('ownership needs the interpreter AND this checkout\'s script path, in either slash style', () => {
-  const script = path.resolve('/x/aos/obsidian-v2/runner/bridge.mjs');
-  assert.equal(ownedBy({name: 'node', commandLine: `/usr/bin/node ${script}`}, script), true);
-  assert.equal(ownedBy({name: 'node.exe', commandLine: `"C:/node.exe" "${script.replace(/\\/g, '/')}"`}, script), true);
-  assert.equal(ownedBy({name: 'node', commandLine: '/usr/bin/node /other/checkout/runner/bridge.mjs'}, script), false);
-  assert.equal(ownedBy({name: 'python3', commandLine: `python3 ${script}`}, script), false);
-  assert.equal(ownedBy({name: 'node', commandLine: `node /tmp/other.js --watch ${script}`}, script), false, 'our script as somebody else\'s argument is not our process');
-  assert.equal(ownedBy({name: 'node', commandLine: `/usr/bin/node ${script}.bak`}, script), false);
-  assert.equal(ownedBy({name: 'node', commandLine: `"/Applications/My Tools/node" "${script}"`}, script), true, 'an interpreter path with spaces');
-  const speech = path.resolve('/x/aos/obsidian-v2/runner/speech.py'), python = {interpreter: /(^|\/)python[\d.]*(\.exe)?$/i, flags: ['-u'], after: /^"?\s+--assets\s/};
-  assert.equal(ownedBy({commandLine: `/x/aos/obsidian-v2/.runtime/speech-venv/bin/python -u ${speech} --assets /x/assets`}, speech, python), true);
-  assert.equal(ownedBy({commandLine: `/usr/bin/python3 -u ${speech}`}, speech, python), false, 'the expected arguments must follow');
-  assert.equal(ownedBy({commandLine: `/usr/bin/node -u ${speech} --assets /x`}, speech, python), false);
-  assert.equal(ownedBy({ambiguous: true}, script), false);
-  assert.equal(ownedBy(null, script), false);
-  assert.equal(commandIncludes('anything', ''), false);
-  assert.equal(samePath('/a/b/../c', '/a/c'), true);
+function installation() {
+  const root = scratch(), at = layout(root);
+  fs.mkdirSync(at.runtime, {recursive: true}); fs.mkdirSync(at.jarvis, {recursive: true}); fs.mkdirSync(path.dirname(at.speechScript), {recursive: true});
+  fs.writeFileSync(at.speechScript, ''); fs.writeFileSync(at.auth, JSON.stringify({token: TOKEN}));
+  fs.writeFileSync(at.vaultFile, JSON.stringify({vault: path.join(root, 'vault')}));
+  return at;
+}
+// A bridge that behaves like ours: 401 without the right token, anything else with it.
+const bridgeLike = accepted => async (url, options) => {
+  if (url.endsWith('/shutdown')) return {ok: true, status: 200, data: {ok: true}};
+  const supplied = options.headers['X-V2-Token'];
+  return supplied === accepted ? {ok: false, status: 400, data: {error: 'Task not found'}} : {ok: false, status: 401, data: {error: 'Bridge authentication required'}};
+};
+
+test('a service proves itself over its own port: the token for the bridge, a self-reported process id that must match the listener for the rest', async () => {
+  const at = installation();
+  assert.equal(await bridgeIsOurs(at, {post: bridgeLike(TOKEN)}), true);
+  assert.equal(await bridgeIsOurs(at, {post: bridgeLike('b'.repeat(64))}), false, 'another installation\'s bridge refuses our token');
+  assert.equal(await bridgeIsOurs(at, {post: async () => ({ok: false, status: 404, data: null})}), false, 'a server that does not ask for a token is not a bridge');
+  assert.equal(await bridgeIsOurs(at, {post: async () => ({ok: true, status: 200, data: {}})}), false);
+  assert.equal(await bridgeIsOurs(at, {post: async () => { throw new Error('offline'); }}), false);
+  const bare = installation(); fs.writeFileSync(bare.auth, '{}');
+  assert.equal(await bridgeIsOurs(bare, {post: bridgeLike(undefined)}), false, 'no token on disk, no proof');
+
+  const listening = pid => () => ({pid, name: 'whatever', commandLine: 'anything at all', startedAt: 'T1'});
+  const hud = service => async () => service;
+  assert.deepEqual(await hudIsOurs(at, {find: listening(7), get: hud({kind: 'jarvis-v2', pid: 7, root: at.jarvis})}), listening(7)());
+  assert.equal(await hudIsOurs(at, {find: listening(7), get: hud({kind: 'jarvis-v2', pid: 8, root: at.jarvis})}), null, 'it may only vouch for the process that is listening');
+  assert.equal(await hudIsOurs(at, {find: listening(7), get: hud({kind: 'jarvis-v2', pid: 7, root: path.resolve('/another/checkout/jarvis-v2')})}), null);
+  assert.equal(await hudIsOurs(at, {find: listening(7), get: hud({kind: 'something-else', pid: 7, root: at.jarvis})}), null);
+  assert.equal(await hudIsOurs(at, {find: listening(7), get: hud(null)}), null, 'a server that says nothing about itself is not ours');
+  assert.equal(await hudIsOurs(at, {find: () => ({ambiguous: true}), get: hud({kind: 'jarvis-v2', pid: 7, root: at.jarvis})}), null);
+  assert.equal(await hudIsOurs(at, {find: () => null, get: hud({kind: 'jarvis-v2', pid: 7, root: at.jarvis})}), null);
+
+  const health = service => async () => ({ok: true, service});
+  assert.deepEqual(await speechIsOurs(at, {find: listening(9), get: health({kind: 'aos-v2-speech', pid: 9, script: at.speechScript})}), listening(9)());
+  assert.equal(await speechIsOurs(at, {find: listening(9), get: health({kind: 'aos-v2-speech', pid: 9, script: path.resolve('/another/runner/speech.py')})}), null);
+  assert.equal(await speechIsOurs(at, {find: listening(9), get: health(undefined)}), null, 'an older or foreign speech service is borrowed, never stopped');
 });
 
 test('the service list matches the PowerShell launcher, is accepted by the monitor, and keeps earlier optional services', () => {
@@ -68,94 +92,128 @@ test('the service list matches the PowerShell launcher, is accepted by the monit
   assert.deepEqual(base[2].args, ['-u', at.speechScript, '--assets', at.speechAssets]);
   assert.doesNotThrow(() => supervisorConfig({runtimeDir: at.runtime, lockPort: PORTS.supervisor, services: base}));
   assert.deepEqual(desiredServices(at, {node}).map(service => service.id), ['bridge']);
-  const merged = mergePrior(desiredServices(at, {node}), {runtimeDir: at.runtime, services: [...base, {id: 'other', port: 1}]}, at.runtime);
-  assert.deepEqual(merged.map(service => service.id), ['bridge', 'jarvis', 'speech']);
+  const merged = mergePrior(desiredServices(at, {node}), {runtimeDir: at.runtime, services: [...base, {id: 'other', port: 1}, {id: 'preview', port: 3218}]}, at.runtime);
+  assert.deepEqual(merged.map(service => service.id), ['bridge', 'jarvis', 'speech'], 'the development preview is not something this launcher starts, even from an older configuration');
   assert.throws(() => mergePrior([], {runtimeDir: path.resolve('/elsewhere/.runtime'), services: []}, at.runtime), /another installation/);
 });
 
-function stopFixture({state, work, web, shutdown = {ok: true, data: {ok: true}}, listeners}) {
-  const root = scratch(), at = layout(root);
-  fs.mkdirSync(at.runtime, {recursive: true});
-  fs.writeFileSync(at.vaultFile, JSON.stringify({vault: path.join(root, 'vault')}));
-  fs.writeFileSync(at.auth, JSON.stringify({token: 'a'.repeat(64)}));
+function stopWith(at, {state = {vault: path.join(at.root, 'vault')}, work = {tasks: []}, hudService = {kind: 'jarvis-v2', pid: 2, root: at.jarvis}, hudVault = path.join(at.root, 'vault'),
+  speechService, listeners = {[PORTS.jarvis]: 2}, post = bridgeLike(TOKEN), inspect} = {}) {
   const killed = [], posted = [];
-  const owned = script => ({pid: 100 + killed.length, name: process.platform === 'win32' ? 'node.exe' : 'node', commandLine: `node ${script}${script.endsWith('next') ? ' start --hostname 127.0.0.1 --port 3217' : ''}`, startedAt: 'T1'});
-  const table = listeners(at, owned);
-  return {at, killed, posted, run: () => stop({root, log: () => {}, find: port => table[port] || null, inspect: pid => Object.values(table).find(item => item?.pid === pid) || null,
-    kill: pid => killed.push(pid), get: async url => url.endsWith('/state') && !url.includes('/api/') ? state?.(at) : url.endsWith('/work') ? work : web?.(at),
-    post: async (url, options) => { posted.push([url, options.headers['X-V2-Token']]); return shutdown; }})};
+  const info = pid => ({pid, name: 'x', commandLine: 'x', startedAt: 'T1'});
+  const run = stop({root: at.root, log: () => {}, kill: pid => killed.push(pid), find: port => listeners[port] === 'ambiguous' ? {ambiguous: true} : listeners[port] ? info(listeners[port]) : null,
+    inspect: inspect || (pid => info(pid)),
+    get: async url => url.endsWith(':3219/state') ? state : url.endsWith('/work') ? work : url.endsWith('/api/service') ? hudService : url.endsWith('/api/state') ? {vault_root: hudVault} : url.endsWith(':3220/health') ? {ok: true, service: speechService} : null,
+    post: async (url, options) => { if (url.endsWith('/shutdown')) posted.push(options.headers['X-V2-Token']); return post(url, options); }});
+  return {run, killed, posted};
 }
-const ours = at => ({vault: path.join(at.root, 'vault')});
 
 test('stop fails closed: nothing is stopped unless the bridge, the vault, the tasks and every process check out', async () => {
-  const healthy = (at, owned) => ({[PORTS.bridge]: {...owned(at.bridge), pid: 1}, [PORTS.jarvis]: {...owned(at.next), pid: 2}});
   const cases = [
-    [{state: () => null, work: {tasks: []}, listeners: healthy}, /Bridge is unavailable/],
-    [{state: () => ({vault: '/someone/else'}), work: {tasks: []}, listeners: healthy}, /another vault/],
-    [{state: ours, work: {tasks: [{state: 'ready', pid: null}]}, listeners: healthy}, /Stop active tasks/],
-    [{state: ours, work: {tasks: [{state: 'stopped', pid: 77}]}, listeners: healthy}, /Stop active tasks/],
-    [{state: ours, work: null, listeners: healthy}, /Stop active tasks/],
-    [{state: ours, work: {tasks: []}, web: ours, listeners: (at, owned) => ({...healthy(at, owned), [PORTS.bridge]: {pid: 1, name: 'node', commandLine: 'node /another/checkout/runner/bridge.mjs', startedAt: 'T1'}})}, /Unexpected process on 3219/],
-    [{state: ours, work: {tasks: []}, web: ours, listeners: (at, owned) => ({...healthy(at, owned), [PORTS.jarvis]: {ambiguous: true}})}, /Unexpected process on 3217/],
-    [{state: ours, work: {tasks: []}, web: () => ({vault_root: '/someone/else'}), listeners: healthy}, /Jarvis belongs to another vault/],
+    [() => ({state: null}), /Bridge is unavailable/],
+    [() => ({state: {vault: '/someone/else'}}), /another vault/],
+    [() => ({post: bridgeLike('c'.repeat(64))}), /does not accept this installation's token/],
+    [() => ({work: {tasks: [{state: 'ready', pid: null}]}}), /Stop active tasks/],
+    [() => ({work: {tasks: [{state: 'stopped', pid: 77}]}}), /Stop active tasks/],
+    [() => ({work: null}), /Stop active tasks/],
+    [() => ({hudService: null}), /Unexpected process on 3217/],
+    [at => ({hudService: {kind: 'jarvis-v2', pid: 99, root: at.jarvis}}), /Unexpected process on 3217/],
+    [() => ({listeners: {[PORTS.jarvis]: 'ambiguous'}}), /Unexpected process on 3217/],
+    [() => ({hudVault: '/someone/else'}), /Jarvis belongs to another vault/],
   ];
   for (const [options, message] of cases) {
-    const fixture = stopFixture(options);
-    await assert.rejects(fixture.run(), message);
-    assert.deepEqual(fixture.killed, []); assert.deepEqual(fixture.posted, []);
+    const at = installation(), attempt = stopWith(at, options(at));
+    await assert.rejects(attempt.run, message);
+    assert.deepEqual(attempt.killed, []); assert.deepEqual(attempt.posted, [], 'the bridge was not asked to shut down');
   }
-  const refused = stopFixture({state: ours, work: {tasks: []}, web: at => ({vault_root: path.join(at.root, 'vault')}), shutdown: {ok: false, data: {error: 'Stop active terminal tasks and voice requests first.'}}, listeners: healthy});
-  await assert.rejects(refused.run(), /Stop active terminal tasks/);
+  const at = installation();
+  const refused = stopWith(at, {post: async (url, options) => url.endsWith('/shutdown') ? {ok: false, status: 409, data: {error: 'Stop active terminal tasks and voice requests first.'}} : bridgeLike(TOKEN)(url, options)});
+  await assert.rejects(refused.run, /Stop active terminal tasks/);
   assert.deepEqual(refused.killed, [], 'a bridge that refuses to shut down leaves the HUD running');
 });
 
-test('stop shuts the bridge down through its own endpoint, stops only verified processes, and leaves borrowed speech alone', async () => {
-  const fixture = stopFixture({state: ours, work: {tasks: [{state: 'stopped', pid: null}]}, web: at => ({vault_root: path.join(at.root, 'vault')}),
-    listeners: (at, owned) => ({[PORTS.bridge]: {...owned(at.bridge), pid: 1}, [PORTS.jarvis]: {...owned(at.next), pid: 2},
-      [PORTS.speech]: {pid: 3, name: 'python.exe', commandLine: 'python -u C:/another/install/runner/speech.py', startedAt: 'T1'}})});
-  const result = await fixture.run();
-  assert.deepEqual(result.stopped, ['bridge', 'jarvis']);
-  assert.deepEqual(fixture.killed, [2], 'the bridge exits by itself; speech from another installation is not ours to stop');
-  assert.deepEqual(fixture.posted, [['http://127.0.0.1:3219/shutdown', 'a'.repeat(64)]]);
-  const recycled = stopFixture({state: ours, work: {tasks: []}, web: at => ({vault_root: path.join(at.root, 'vault')}),
-    listeners: (at, owned) => ({[PORTS.bridge]: {...owned(at.bridge), pid: 1}, [PORTS.jarvis]: {...owned(at.next), pid: 2}})});
-  let calls = 0;
-  const original = recycled.run;
-  void original;
-  const at = recycled.at;
-  await stop({root: at.root, log: () => {}, find: port => port === PORTS.jarvis ? {pid: 2, name: 'node', commandLine: `node ${at.next} start --hostname 127.0.0.1 --port 3217`, startedAt: 'T1'} : port === PORTS.bridge ? {pid: 1, name: 'node', commandLine: `node ${at.bridge}`, startedAt: 'T1'} : null,
-    inspect: () => { calls++; return {pid: 2, name: 'node', commandLine: 'something else now', startedAt: 'T2'}; }, kill: pid => recycled.killed.push(pid),
-    get: async url => url.includes('/api/state') ? {vault_root: path.join(at.root, 'vault')} : url.endsWith('/work') ? {tasks: []} : {vault: path.join(at.root, 'vault')}, post: async () => ({ok: true, data: {}})});
-  assert.equal(calls, 1); assert.deepEqual(recycled.killed, [], 'a process id that now belongs to a different process is left alone');
+test('stop shuts the bridge down through its own endpoint, stops only proven processes, and leaves borrowed speech alone', async () => {
+  const at = installation();
+  const borrowed = stopWith(at, {listeners: {[PORTS.jarvis]: 2, [PORTS.speech]: 3}, speechService: {kind: 'aos-v2-speech', pid: 3, script: path.resolve('/another/install/runner/speech.py')}});
+  assert.deepEqual((await borrowed.run).stopped, ['bridge', 'jarvis']);
+  assert.deepEqual(borrowed.killed, [2]); assert.deepEqual(borrowed.posted, [TOKEN]);
+  const own = stopWith(at, {listeners: {[PORTS.jarvis]: 2, [PORTS.speech]: 3}, speechService: {kind: 'aos-v2-speech', pid: 3, script: at.speechScript}});
+  assert.deepEqual((await own.run).stopped, ['bridge', 'jarvis', 'speech']); assert.deepEqual(own.killed, [2, 3]);
+  const noHud = stopWith(at, {listeners: {}});
+  assert.deepEqual((await noHud.run).stopped, ['bridge']); assert.deepEqual(noHud.killed, []);
+  const recycled = stopWith(at, {inspect: pid => ({pid, name: 'x', commandLine: 'x', startedAt: 'T2'})});
+  await recycled.run; assert.deepEqual(recycled.killed, [], 'a process id that now belongs to a different process is left alone');
 });
 
-test('login items carry the captured PATH, survive odd characters, and another checkout\'s item is never claimed', () => {
+test('setup changes nothing when another installation owns the ports or the vault', async () => {
+  const at = installation(), vault = path.join(scratch(), 'vault');
+  const nothing = {get: async () => null, find: () => null};
+  await assert.rejects(preflight(at, vault, {get: async () => ({kind: 'agentic-os-service-supervisor', runtimeDir: path.resolve('/elsewhere/.runtime')}), find: () => null}), /Another installation .* port 3221.*Nothing was changed/);
+  await assert.rejects(preflight(at, vault, {get: async () => ({hello: 'world'}), find: () => null}), /port 3221/);
+  await assert.rejects(preflight(at, vault, {get: async () => null, find: port => port === PORTS.supervisor ? {pid: 9} : null}), /Another program is using port 3221/);
+  const ourMonitor = {kind: 'agentic-os-service-supervisor', runtimeDir: at.runtime};
+  const withMonitor = extra => async url => url.endsWith(':3221/status') ? ourMonitor : extra?.(url) ?? null;
+  await assert.rejects(preflight(at, vault, {get: withMonitor(), find: port => port === PORTS.bridge ? {pid: 9} : null, post: bridgeLike('d'.repeat(64))}), /using port 3219/, 'our monitor running excuses nobody');
+  await assert.rejects(preflight(at, vault, {get: withMonitor(), find: port => port === PORTS.jarvis ? {pid: 9} : null, post: bridgeLike(TOKEN)}), /using port 3217/);
+  await assert.doesNotReject(preflight(at, vault, {get: withMonitor(url => url.endsWith('/api/service') ? {kind: 'jarvis-v2', pid: 9, root: at.jarvis} : null), find: port => [PORTS.bridge, PORTS.jarvis].includes(port) ? {pid: 9} : null, post: bridgeLike(TOKEN)}));
+  await assert.doesNotReject(preflight(at, vault, nothing));
+  const marker = path.join(vault, '.obsidian', 'plugins', 'agentic-os-v2');
+  fs.mkdirSync(marker, {recursive: true});
+  fs.writeFileSync(path.join(marker, 'terminal-runtime.json'), JSON.stringify({runtimeDir: path.resolve('/first/install/obsidian-v2/.runtime')}));
+  await assert.rejects(preflight(at, vault, nothing), /already connected to another installation .*--adopt/);
+  await assert.doesNotReject(preflight(at, vault, {...nothing, adopt: true}));
+  fs.writeFileSync(path.join(marker, 'terminal-runtime.json'), JSON.stringify({runtimeDir: at.runtime}));
+  await assert.doesNotReject(preflight(at, vault, nothing));
+});
+
+test('a login item is ours only when it parses to exactly what this launcher registers', () => {
   const plist = launchAgentPlist({node: '/opt/homebrew/bin/node', supervisor: '/Users/a&b/aos/runner/service-supervisor.mjs', config: '/Users/a&b/aos/.runtime/service-recovery.json', cwd: '/Users/a&b/aos', pathEnv: '/opt/homebrew/bin:/usr/bin', log: '/tmp/x.log'});
   assert.match(plist, new RegExp(`<string>${AGENT_LABEL}</string>`));
-  assert.match(plist, /<string>\/Users\/a&amp;b\/aos\/runner\/service-supervisor\.mjs<\/string>\n\s*<string>--config<\/string>/);
   assert.match(plist, /<key>SuccessfulExit<\/key><false\/>/); assert.match(plist, /<key>AbandonProcessGroup<\/key><true\/>/);
   assert.match(plist, /<key>PATH<\/key><string>\/opt\/homebrew\/bin:\/usr\/bin<\/string>/);
-  const script = scheduledTaskScript({node: "C:\\n\\node.exe", config: "C:\\Users\\O'Neil\\aos\\.runtime\\service-recovery.json", wrapper: 'C:\\aos\\scripts\\run-recovery.ps1', cwd: 'C:\\aos'});
-  assert.match(script, /O''Neil/); assert.ok(script.includes(`-TaskName '${TASK_NAME}'`)); assert.match(script, /-WindowStyle Hidden -File/);
+  assert.deepEqual(plistArguments(plist), ['/opt/homebrew/bin/node', '/Users/a&b/aos/runner/service-supervisor.mjs', '--config', '/Users/a&b/aos/.runtime/service-recovery.json'], 'what we write is what we read back');
+  assert.equal(plistArguments('<plist/>'), null);
+  assert.deepEqual(launchctlArguments('gui/501/x = {\n\tstate = running\n\targuments = {\n\t\t/opt/node\n\t\t/x/runner/service-supervisor.mjs\n\t\t--config\n\t\t/x/.runtime/service-recovery.json\n\t}\n\tenvironment = {\n\t\tPATH => /usr/bin\n\t}\n}\n'),
+    ['/opt/node', '/x/runner/service-supervisor.mjs', '--config', '/x/.runtime/service-recovery.json']);
+  assert.equal(launchctlArguments('state = running'), null);
+
   const at = layout(path.resolve('/x/aos/obsidian-v2'));
   const wrapper = path.join(at.root, 'scripts', 'run-recovery.ps1'), ps = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+  const registered = (file = wrapper, config = at.config) => `-NoProfile -NonInteractive -WindowStyle Hidden -File "${file}" -NodeExecutable "C:\\n\\node.exe" -ConfigFile "${config}"`;
+  const script = scheduledTaskScript({node: 'C:\\n\\node.exe', config: "C:\\Users\\O'Neil\\aos\\.runtime\\service-recovery.json", wrapper, cwd: at.root});
+  assert.match(script, /O''Neil/); assert.ok(script.includes(`-TaskName '${TASK_NAME}'`));
   const task = actions => JSON.stringify({exists: true, actions});
-  assert.equal(taskOwner('', wrapper), null);
-  assert.equal(taskOwner(task([{execute: ps, arguments: `-File "${wrapper}" -NodeExecutable x`}]), wrapper), 'ours');
-  assert.equal(taskOwner(task([{execute: ps, arguments: '-File "D:\\\\other\\\\run-recovery.ps1"'}]), wrapper), 'other');
-  assert.equal(taskOwner(task([{execute: 'C:\\\\tools\\\\backup.exe', arguments: ''}]), wrapper), 'other', 'a same-named task with no arguments is somebody else\'s, not absent');
-  assert.equal(taskOwner(task([]), wrapper), 'other');
-  assert.equal(taskOwner(task([{execute: 'C:\\\\x\\\\evil.exe', arguments: `"${wrapper}"`}]), wrapper), 'other', 'our wrapper as an argument of another program');
-  assert.equal(taskOwner(task([{execute: ps, arguments: `-File "${wrapper}"`}, {execute: ps, arguments: 'extra'}]), wrapper), 'other');
-  assert.equal(taskOwner('not json', wrapper), 'other');
-  assert.equal(autostartOwner(at, {platform: 'win32', run: () => ({status: 1, stdout: ''})}), 'other', 'an unanswerable question is not a yes');
-  const agent = (file, loaded) => ({platform: 'darwin', home: '/Users/a', exists: () => file !== null, read: () => file, run: () => loaded === null ? {status: 113, stdout: ''} : {status: 0, stdout: loaded}});
+  assert.equal(taskOwner('{"exists":false}', at), null);
+  assert.equal(taskOwner(task([{execute: ps, arguments: registered()}]), at), 'ours');
+  assert.equal(taskOwner(task([{execute: ps, arguments: registered('D:\\other\\scripts\\run-recovery.ps1')}]), at), 'other');
+  assert.equal(taskOwner(task([{execute: ps, arguments: registered(wrapper, 'D:\\other\\.runtime\\service-recovery.json')}]), at), 'other');
+  assert.equal(taskOwner(task([{execute: ps, arguments: `-File other.ps1 "${wrapper}"`}]), at), 'other', 'our wrapper as an argument of another script');
+  assert.equal(taskOwner(task([{execute: ps, arguments: registered() + ' ; evil'}]), at), 'other');
+  assert.equal(taskOwner(task([{execute: 'C:\\tools\\backup.exe', arguments: ''}]), at), 'other', 'a same-named task with no arguments is somebody else\'s, not absent');
+  assert.equal(taskOwner(task([{execute: 'C:\\x\\evil.exe', arguments: registered()}]), at), 'other');
+  assert.equal(taskOwner(task([]), at), 'other');
+  assert.equal(taskOwner(task([{execute: ps, arguments: registered()}, {execute: ps, arguments: 'extra'}]), at), 'other');
+  for (const unanswered of ['', 'not json', '{"error":true}', '{"exists":false,"error":true}', '{}']) assert.equal(taskOwner(unanswered, at), 'other', `silence or an error is never "absent": ${unanswered}`);
+  assert.equal(autostartOwner(at, {platform: 'win32', run: () => ({status: 1, stdout: '{"exists":false}'})}), 'other');
+  assert.equal(autostartOwner(at, {platform: 'win32', run: () => ({status: 0, stdout: '{"exists":false}'})}), null);
+
+  const file = list => `<key>ProgramArguments</key><array>${list.map(item => `<string>${item}</string>`).join('')}</array>`;
+  const job = list => `x = {\n\targuments = {\n${list.map(item => '\t\t' + item).join('\n')}\n\t}\n\tenvironment = {\n\t\tNOTE => ${at.supervisor}\n\t}\n}`;
+  const mine = ['/opt/homebrew/bin/node', at.supervisor, '--config', at.config], theirs = ['/opt/homebrew/bin/node', '/other/runner/service-supervisor.mjs', '--config', '/other/.runtime/service-recovery.json'];
+  const missing = {status: 113, stdout: '', stderr: 'Could not find service "x" in domain for user gui: 501'};
+  const agent = (onDisk, loaded) => ({platform: 'darwin', home: '/Users/a', exists: () => onDisk !== null, read: () => onDisk, run: () => loaded === null ? missing : typeof loaded === 'object' ? loaded : {status: 0, stdout: loaded}});
   assert.equal(autostartOwner(at, agent(null, null)), null);
-  assert.equal(autostartOwner(at, agent(`<string>${at.supervisor}</string>`, null)), 'ours');
-  assert.equal(autostartOwner(at, agent('<string>/other/runner/service-supervisor.mjs</string>', null)), 'other');
-  assert.equal(autostartOwner(at, agent(null, 'arguments = {/opt/node /other/checkout/runner/service-supervisor.mjs}')), 'other', 'a loaded job whose file is gone still belongs to someone');
-  assert.equal(autostartOwner(at, agent(`<string>${at.supervisor}</string>`, 'arguments = {/opt/node /other/checkout/runner/service-supervisor.mjs}')), 'other', 'our file on disk does not make a foreign loaded job ours');
-  assert.equal(autostartOwner(at, agent(null, `arguments = {/opt/node ${at.supervisor}}`)), 'ours');
+  assert.equal(autostartOwner(at, agent(file(mine), null)), 'ours');
+  assert.equal(autostartOwner(at, agent(file(theirs), null)), 'other');
+  assert.equal(autostartOwner(at, agent(null, job(theirs))), 'other', 'a loaded job whose file is gone still belongs to someone; our path in its environment proves nothing');
+  assert.equal(autostartOwner(at, agent(file(mine), job(theirs))), 'other', 'our file on disk does not make a foreign loaded job ours');
+  assert.equal(autostartOwner(at, agent(file(mine), 'state = running')), 'other', 'a loaded job that cannot be read is not ours');
+  assert.equal(autostartOwner(at, agent(null, job(mine))), 'ours');
+  assert.equal(autostartOwner(at, agent(file(['/opt/node', '/x/other.js', at.supervisor, at.config]), null)), 'other');
+  assert.equal(autostartOwner(at, agent(null, job(['/bin/echo', at.supervisor, '--config', at.config]))), 'other', 'our paths after some other program are not our monitor');
+  assert.equal(autostartOwner(at, agent(file(['node', at.supervisor, '--config', at.config]), null)), 'other', 'a relative program is not what this launcher registers');
+  for (const unanswered of [{status: 1, stdout: '', stderr: 'Operation not permitted'}, {status: null, stdout: '', error: new Error('ETIMEDOUT')}, {status: 113, stdout: '', stderr: ''}])
+    assert.equal(autostartOwner(at, agent(file(mine), unanswered)), 'other', 'a question launchd did not answer is never "nothing is loaded"');
 });
 
 test('a vault is completed without overwriting a note, and only a brand-new vault gets Obsidian settings', () => {
@@ -176,6 +234,18 @@ test('a vault is completed without overwriting a note, and only a brand-new vaul
   assert.deepEqual(fs.readdirSync(path.join(existing, '.obsidian')), ['app.json'], 'an existing vault\'s settings folder is never written');
   assert.throws(() => scaffoldVault(template, path.join(template, 'inside')), /outside this installation/);
   assert.throws(() => scaffoldVault(template, 'relative/vault'), /absolute/);
+});
+
+test('a linked folder or note inside the vault is never written through', {skip: process.platform === 'win32' && 'creating links needs elevation on Windows'}, () => {
+  const template = path.resolve('vault-template'), vault = path.join(scratch(), 'vault'), outside = scratch();
+  fs.mkdirSync(vault, {recursive: true});
+  fs.symlinkSync(outside, path.join(vault, 'inbox'), 'dir');
+  fs.writeFileSync(path.join(outside, 'mine.md'), 'mine');
+  fs.symlinkSync(path.join(outside, 'mine.md'), path.join(vault, 'CLAUDE.md'));
+  scaffoldVault(template, vault);
+  assert.deepEqual(fs.readdirSync(outside), ['mine.md'], 'nothing was created through the linked folder');
+  assert.equal(fs.readFileSync(path.join(outside, 'mine.md'), 'utf8'), 'mine');
+  assert.ok(fs.existsSync(path.join(vault, 'system/schemas/daily-note.md')));
 });
 
 test('the key page saves a well-formed key with the live settings, keeps tuned settings, and never echoes the key', async () => {
@@ -212,8 +282,7 @@ test('the saved settings are exactly what the voice router reads as "fast path o
 test('python discovery skips a stub that answers nothing and refuses versions that are too old', () => {
   assert.deepEqual(parsePythonVersion('Python 3.12.4'), {major: 3, minor: 12, text: '3.12.4'});
   assert.equal(pythonSupported(parsePythonVersion('Python 3.9.6')), false); assert.equal(pythonSupported(parsePythonVersion('Python 2.7.18')), false);
-  const found = findPython({env: {PATH: '/bin'}, platform: 'darwin', run: command => command.endsWith('python3') ? {status: 0, stdout: 'Python 3.11.9'} : {status: 9009, stdout: ''}});
-  assert.equal(found, null, 'nothing on this PATH exists on disk');
+  assert.equal(findPython({env: {PATH: '/nowhere'}, platform: 'darwin', run: () => ({status: 0, stdout: 'Python 3.11.9'})}), null, 'nothing on this PATH exists on disk');
   assert.equal(which('python3', {env: {PATH: '/a:/b'}, exists: file => file === '/b/python3', platform: 'darwin'}), '/b/python3');
   assert.equal(which('npm', {env: {PATH: 'C:\\one;C:\\n'}, exists: file => file === 'C:\\n\\npm.cmd', platform: 'win32'}), 'C:\\n\\npm.cmd');
 });
@@ -224,61 +293,4 @@ test('command-line parsing and the local-page guard', () => {
   assert.deepEqual(parseArgs([]), {command: 'help', flags: {}, words: []});
   assert.throws(() => openUrl('https://example.com/x', {run: () => ({status: 0})}), /Only local pages/);
   assert.equal(openUrl('http://127.0.0.1:5123/token', {run: (command, args) => ({status: command === 'open' && args[0].endsWith('/token') ? 0 : 1}), platform: 'darwin'}), true);
-});
-
-test('a HUD that renamed its own process (macOS, Linux) is proven by the monitor\'s pid or by its working directory, never by its title alone', async () => {
-  const {parseLsofCwd, processCwd} = await import('../scripts/aos/platform.mjs');
-  assert.equal(parseLsofCwd('p501\nfcwd\nn/Users/a/aos/jarvis-v2\n'), '/Users/a/aos/jarvis-v2');
-  assert.equal(parseLsofCwd('p501\n'), null);
-  assert.equal(processCwd(501, {platform: 'win32'}), null);
-  assert.equal(processCwd(501, {platform: 'darwin', run: () => ({status: 0, stdout: 'p501\nfcwd\nn/x/jarvis-v2\n'})}), '/x/jarvis-v2');
-  const root = scratch(), at = layout(root), vault = path.join(root, 'vault');
-  fs.mkdirSync(at.runtime, {recursive: true});
-  fs.writeFileSync(at.vaultFile, JSON.stringify({vault})); fs.writeFileSync(at.auth, JSON.stringify({token: 'b'.repeat(64)}));
-  const renamed = {pid: 2, name: 'next-server', commandLine: 'next-server (v15.3.2)', startedAt: 'T1'};
-  const bridge = {pid: 1, name: 'node', commandLine: `node ${at.bridge}`, startedAt: 'T1'};
-  const attempt = async ({cwd, monitor}) => {
-    const killed = [];
-    const run = stop({root, log: () => {}, find: port => port === PORTS.jarvis ? renamed : port === PORTS.bridge ? bridge : null, inspect: () => renamed, cwdOf: () => cwd, kill: pid => killed.push(pid),
-      get: async url => url.endsWith(':3221/status') ? monitor : url.includes('/api/state') ? {vault_root: vault} : url.endsWith('/work') ? {tasks: []} : {vault}, post: async () => ({ok: true, data: {}})});
-    return {run, killed};
-  };
-  const elsewhere = await attempt({cwd: '/another/checkout/jarvis-v2', monitor: null});
-  await assert.rejects(elsewhere.run, /Unexpected process on 3217/); assert.deepEqual(elsewhere.killed, []);
-  const foreignMonitor = await attempt({cwd: null, monitor: {kind: 'agentic-os-service-supervisor', runtimeDir: path.resolve('/another/.runtime'), services: [{id: 'jarvis', pid: 2}]}});
-  await assert.rejects(foreignMonitor.run, /Unexpected process on 3217/);
-  const byCwd = await attempt({cwd: at.jarvis, monitor: null});
-  await byCwd.run; assert.deepEqual(byCwd.killed, [2]);
-  const byMonitor = await attempt({cwd: null, monitor: {kind: 'agentic-os-service-supervisor', runtimeDir: at.runtime, services: [{id: 'jarvis', pid: 2}]}});
-  await byMonitor.run; assert.deepEqual(byMonitor.killed, [2]);
-});
-
-test('setup changes nothing when another installation owns the ports or the vault', async () => {
-  const root = scratch(), at = layout(root), vault = path.join(scratch(), 'vault');
-  const ourMonitor = {kind: 'agentic-os-service-supervisor', runtimeDir: at.runtime};
-  await assert.rejects(preflight(at, vault, {get: async () => ({kind: 'agentic-os-service-supervisor', runtimeDir: path.resolve('/elsewhere/.runtime')}), find: () => null}), /Another installation .* port 3221.*Nothing was changed/);
-  await assert.rejects(preflight(at, vault, {get: async () => ({hello: 'world'}), find: () => null}), /port 3221/);
-  await assert.rejects(preflight(at, vault, {get: async () => null, find: port => port === PORTS.supervisor ? {pid: 9} : null}), /Another program is using port 3221/);
-  await assert.rejects(preflight(at, vault, {get: async () => null, find: port => port === PORTS.bridge ? {pid: 9, commandLine: 'node /another/runner/bridge.mjs'} : null}), /port 3219/);
-  await assert.doesNotReject(preflight(at, vault, {get: async () => null, find: () => null}));
-  await assert.doesNotReject(preflight(at, vault, {get: async () => ourMonitor, find: port => port === PORTS.jarvis ? {pid: 2, commandLine: 'next-server (v15.3.2)'} : null}));
-  const marker = path.join(vault, '.obsidian', 'plugins', 'agentic-os-v2');
-  fs.mkdirSync(marker, {recursive: true});
-  fs.writeFileSync(path.join(marker, 'terminal-runtime.json'), JSON.stringify({runtimeDir: path.resolve('/first/install/obsidian-v2/.runtime')}));
-  await assert.rejects(preflight(at, vault, {get: async () => null, find: () => null}), /already connected to another installation .*--adopt/);
-  await assert.doesNotReject(preflight(at, vault, {adopt: true, get: async () => null, find: () => null}));
-  fs.writeFileSync(path.join(marker, 'terminal-runtime.json'), JSON.stringify({runtimeDir: at.runtime}));
-  await assert.doesNotReject(preflight(at, vault, {get: async () => null, find: () => null}));
-});
-
-test('a linked folder or note inside the vault is never written through', {skip: process.platform === 'win32' && 'creating links needs elevation on Windows'}, () => {
-  const template = path.resolve('vault-template'), vault = path.join(scratch(), 'vault'), outside = scratch();
-  fs.mkdirSync(vault, {recursive: true});
-  fs.symlinkSync(outside, path.join(vault, 'inbox'), 'dir');
-  fs.writeFileSync(path.join(outside, 'mine.md'), 'mine');
-  fs.symlinkSync(path.join(outside, 'mine.md'), path.join(vault, 'CLAUDE.md'));
-  scaffoldVault(template, vault);
-  assert.deepEqual(fs.readdirSync(outside), ['mine.md'], 'nothing was created through the linked folder');
-  assert.equal(fs.readFileSync(path.join(outside, 'mine.md'), 'utf8'), 'mine');
-  assert.ok(fs.existsSync(path.join(vault, 'system/schemas/daily-note.md')));
 });

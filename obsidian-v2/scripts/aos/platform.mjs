@@ -8,31 +8,12 @@ import {spawnSync} from 'node:child_process';
 export const isWindows = process.platform === 'win32';
 const caseless = process.platform === 'win32' || process.platform === 'darwin';
 
+// Same place on disk. Links are resolved when the paths exist (macOS reports /private/var for /var).
 export function samePath(a, b) {
-  const left = path.resolve(String(a || '')), right = path.resolve(String(b || ''));
+  if (!a || !b) return false;
+  const real = value => { const full = path.resolve(String(value)); try { return fs.realpathSync.native(full); } catch { return full; } };
+  const left = real(a), right = real(b);
   return caseless ? left.toLowerCase() === right.toLowerCase() : left === right;
-}
-
-// Command lines quote and slash paths differently per launcher; compare on a
-// normalized form so `C:\x\runner\bridge.mjs` matches `"C:/x/runner/bridge.mjs"`.
-const flat = value => { const text = String(value || '').replace(/\\/g, '/'); return caseless ? text.toLowerCase() : text; };
-export function commandIncludes(commandLine, file) {
-  const needle = flat(path.resolve(file));
-  return needle.length > 3 && flat(commandLine).includes(needle);
-}
-
-// True only when the command line IS "<interpreter> [allowed flags] <script> <expected rest>".
-// The script path showing up as a later argument of some other program does not count.
-export function commandRuns(commandLine, script, {interpreter = /(^|\/)node(\.exe)?$/i, flags = [], after = /^("|\s|$)/} = {}) {
-  const line = flat(commandLine).trim(), needle = flat(path.resolve(script));
-  const found = line.indexOf(needle);
-  if (needle.length <= 3 || found < 0) return false;
-  let before = line.slice(0, found).replace(/"$/, '').trimEnd();
-  for (let again = true; again;) {
-    again = false;
-    for (const flag of flags) if (before.endsWith(' ' + flag)) { before = before.slice(0, -flag.length).trimEnd(); again = true; }
-  }
-  return interpreter.test(before.replace(/^"|"$/g, '')) && after.test(line.slice(found + needle.length));
 }
 
 export function parseLsofPids(text) {
@@ -65,18 +46,6 @@ export function processInfo(pid, {run = spawnSync, platform = process.platform} 
   const result = run('ps', ['-ww', '-o', 'lstart=,command=', '-p', String(pid)], {encoding: 'utf8', timeout: 5000});
   const parsed = result.status === 0 ? parsePsLine(result.stdout) : null;
   return parsed && {pid, ...parsed};
-}
-
-// `lsof -a -p <pid> -d cwd -Fn` prints p<pid>, fcwd, n<path>.
-export function parseLsofCwd(text) {
-  const line = String(text || '').split(/\r?\n/).find(item => item.startsWith('n/'));
-  return line ? line.slice(1) : null;
-}
-// Working directory of a process (POSIX only; Windows keeps the full command line instead).
-export function processCwd(pid, {run = spawnSync, platform = process.platform} = {}) {
-  if (platform === 'win32' || !Number.isSafeInteger(pid) || pid < 1) return null;
-  const result = run('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], {encoding: 'utf8', timeout: 5000});
-  return result.status === 0 ? parseLsofCwd(result.stdout) : null;
 }
 
 // The loopback listener on a port, or null. More than one listener is reported

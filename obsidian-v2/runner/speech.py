@@ -19,8 +19,15 @@ def load_engines(assets):
         os.environ['PATH'] = directory + os.pathsep + os.environ['PATH']
     from faster_whisper import WhisperModel
     from kokoro_onnx import Kokoro
+    def usable(model):
+        # A GPU model loads fine without the CUDA math libraries and only fails on its first
+        # sentence ("cublas64_12.dll is not found"). Run one second of silence through it now.
+        import numpy as np
+        segments, _ = model.transcribe(np.zeros(16000, dtype=np.float32), language='en')
+        list(segments)
+        return model
     try:
-        whisper = WhisperModel('small.en', device='cuda', compute_type='float16', local_files_only=True)
+        whisper = usable(WhisperModel('small.en', device='cuda', compute_type='float16', local_files_only=True))
     except Exception:
         whisper = WhisperModel('small.en', device='cpu', compute_type='int8', local_files_only=True)
     return whisper, Kokoro(os.path.join(assets, 'kokoro-v1.0.onnx'), os.path.join(assets, 'voices-v1.0.bin'))
@@ -77,6 +84,7 @@ def create_app(assets, engines=None, capture_factory=CaptureController, hotkey_f
     @app.get('/health')
     def health():
         return {'ok': True, 'engine': 'kokoro', 'stt': {'ok': True},
+            'service': {'kind': 'aos-v2-speech', 'pid': os.getpid(), 'script': os.path.abspath(__file__)},
             'wake': {'enabled': False, 'ok': False, 'error': 'Wake-word detection is not enabled in standalone V2.'},
             'events': {'supported': True, 'clients': len(clients)},
             'capture': {'available': capture.available, 'busy': capture.busy, 'error': capture.error},

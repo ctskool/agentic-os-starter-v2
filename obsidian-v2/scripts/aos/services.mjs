@@ -6,7 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {projectRoot} from '../../runner/runtime.mjs';
-import {listener, processInfo, processCwd, samePath, commandRuns, tryJson, fetchJson, sleep} from './platform.mjs';
+import {listener, processInfo, samePath, tryJson, fetchJson, sleep} from './platform.mjs';
 import {autostartOwner, kickAutostart} from './autostart.mjs';
 
 export const PORTS = {jarvis: 3217, preview: 3218, bridge: 3219, speech: 3220, supervisor: 3221};
@@ -29,10 +29,9 @@ export const configuredVaultPath = at => fs.existsSync(at.vaultFile) ? readJson(
 export const speechInstalled = at => fs.existsSync(at.speechPython) && ['kokoro-v1.0.onnx', 'voices-v1.0.bin'].every(name => fs.existsSync(path.join(at.speechAssets, name)));
 
 // Pure: the list of services the monitor should keep alive.
-export function desiredServices(at, {node = process.execPath, speechUrl = null, vault = null, preview = false, jarvisBuilt = false, ownSpeech = false} = {}) {
+export function desiredServices(at, {node = process.execPath, speechUrl = null, vault = null, jarvisBuilt = false, ownSpeech = false} = {}) {
   const env = {...(speechUrl ? {AOS_V2_SPEECH_URL: speechUrl} : {}), ...(vault ? {AOS_V2_VAULT: vault} : {})};
   const services = [{id: 'bridge', port: PORTS.bridge, command: node, args: [at.bridge], cwd: at.root, env}];
-  if (preview) services.push({id: 'preview', port: PORTS.preview, command: node, args: [at.preview], cwd: at.root, env});
   if (jarvisBuilt) services.push({id: 'jarvis', port: PORTS.jarvis, command: node, args: [at.next, 'start', '--hostname', '127.0.0.1', '--port', String(PORTS.jarvis)], cwd: at.jarvis});
   if (ownSpeech) services.push({id: 'speech', port: PORTS.speech, command: at.speechPython, args: ['-u', at.speechScript, '--assets', at.speechAssets], cwd: at.root});
   return services;
@@ -43,7 +42,7 @@ export function mergePrior(services, prior, runtimeDir) {
   if (!prior) return services;
   if (!samePath(prior.runtimeDir, runtimeDir)) throw new Error('Recovery configuration belongs to another installation.');
   const ids = new Set(services.map(service => service.id));
-  return [...services, ...(prior.services || []).filter(service => ['preview', 'jarvis', 'speech'].includes(service.id) && !ids.has(service.id))];
+  return [...services, ...(prior.services || []).filter(service => ['jarvis', 'speech'].includes(service.id) && !ids.has(service.id))];
 }
 
 async function healthySpeech() {
@@ -64,7 +63,7 @@ function atomicWrite(file, text) {
   fs.writeFileSync(temp, text); fs.renameSync(temp, file);
 }
 
-export async function start({root = projectRoot, preview = false, resetRecovery = false, log = console.log} = {}) {
+export async function start({root = projectRoot, resetRecovery = false, log = console.log} = {}) {
   const at = layout(root);
   let supervisor = await supervisorStatus();
   if (supervisor && (supervisor.kind !== 'agentic-os-service-supervisor' || !samePath(supervisor.runtimeDir, at.runtime))) throw new Error('Port 3221 belongs to another installation; nothing changed.');
@@ -79,7 +78,7 @@ export async function start({root = projectRoot, preview = false, resetRecovery 
   if (resetRecovery) fs.rmSync(at.recoveryState, {force: true});
   const speechUrl = process.env.AOS_V2_SPEECH_URL || await healthySpeech();
   const ownSpeech = speechInstalled(at) && (!speechUrl || speechUrl === local(PORTS.speech));
-  let services = desiredServices(at, {speechUrl: speechUrl || (ownSpeech ? local(PORTS.speech) : null), vault: configuredVaultPath(at), preview, jarvisBuilt: fs.existsSync(at.buildId), ownSpeech});
+  let services = desiredServices(at, {speechUrl: speechUrl || (ownSpeech ? local(PORTS.speech) : null), vault: configuredVaultPath(at), jarvisBuilt: fs.existsSync(at.buildId), ownSpeech});
   if (supervisor && services.some(service => !supervisor.services.some(known => known.id === service.id))) {
     // Reconfigure the monitor alone when an existing installation adds a service.
     atomicWrite(at.pause, '{"reason":"recovery services changed"}');
@@ -124,13 +123,31 @@ export async function status({root = projectRoot} = {}) {
   return {bridge: await tryJson(`${local(PORTS.bridge)}/services`, {timeoutMs: 5000}), supervisor: await supervisorStatus()};
 }
 
-// Pure: is this listener exactly the command this checkout launches for that service?
-export function ownedBy(info, script, options = {}) {
-  return !!info && !info.ambiguous && commandRuns(info.commandLine, script, options);
+// A service proves itself over its own port; nothing is inferred from a command line.
+// The bridge must refuse a request without a token and accept the token only this installation
+// holds. The HUD and the speech service report their process id and location, and that id must be
+// the process the operating system shows listening on the port, so a program can only ever vouch
+// for itself: lying here gets nobody else stopped.
+const NOBODY = '00000000-0000-4000-8000-000000000000';
+export async function bridgeIsOurs(at, {post = fetchJson} = {}) {
+  let token; try { token = readJson(at.auth).token; } catch { return false; }
+  if (!/^[0-9a-f]{64}$/.test(token || '')) return false;
+  const ask = headers => post(`${local(PORTS.bridge)}/work/stop`, {method: 'POST', headers, body: {id: NOBODY, ifIdle: true}, timeoutMs: 4000});
+  try {
+    const anonymous = await ask({}), known = await ask({'X-V2-Token': token});
+    return anonymous.status === 401 && known.status !== 401 && known.status < 500;
+  } catch { return false; }
 }
-const PYTHON = /(^|\/)python[\d.]*(\.exe)?$/i;
+export async function hudIsOurs(at, {get = tryJson, find = listener} = {}) {
+  const info = find(PORTS.jarvis), service = await get(`${local(PORTS.jarvis)}/api/service`, {timeoutMs: 5000});
+  return !!info && !info.ambiguous && service?.kind === 'jarvis-v2' && service.pid === info.pid && samePath(service.root, at.jarvis) ? info : null;
+}
+export async function speechIsOurs(at, {get = tryJson, find = listener} = {}) {
+  const info = find(PORTS.speech), service = (await get(`${local(PORTS.speech)}/health`, {timeoutMs: 5000}))?.service;
+  return !!info && !info.ambiguous && service?.kind === 'aos-v2-speech' && service.pid === info.pid && samePath(service.script, at.speechScript) ? info : null;
+}
 
-export async function stop({root = projectRoot, log = console.log, find = listener, inspect = processInfo, cwdOf = processCwd, kill = pid => process.kill(pid), get = tryJson, post = fetchJson} = {}) {
+export async function stop({root = projectRoot, log = console.log, find = listener, inspect = processInfo, kill = pid => process.kill(pid), get = tryJson, post = fetchJson} = {}) {
   const at = layout(root);
   const vault = configuredVaultPath(at);
   if (!vault) throw new Error('This installation has no configured vault; nothing stopped.');
@@ -138,45 +155,28 @@ export async function stop({root = projectRoot, log = console.log, find = listen
   // Fail closed before stopping any service: no unsent CLI drafts or active agents discarded.
   if (!state) throw new Error('Bridge is unavailable, so task state cannot be verified. No service was stopped.');
   if (!samePath(state.vault, vault)) throw new Error('The bridge belongs to another vault; nothing stopped.');
+  if (!await bridgeIsOurs(at, {post})) throw new Error('The bridge on 3219 does not accept this installation\'s token; nothing stopped.');
   const work = await get(`${local(PORTS.bridge)}/work`);
   if (!work || (work.tasks || []).some(task => task.pid || OPEN_STATES.has(task.state))) throw new Error('Stop active tasks in Terminals first. No service was stopped.');
-  const expected = [
-    {name: 'bridge', port: PORTS.bridge, script: at.bridge},
-    {name: 'preview', port: PORTS.preview, script: at.preview},
-    {name: 'jarvis', port: PORTS.jarvis, script: at.next, after: /^"?\s+start\s+--hostname 127\.0\.0\.1 --port 3217(\s|$)/},
-    {name: 'speech', port: PORTS.speech, script: at.speechScript, interpreter: PYTHON, flags: ['-u'], after: /^"?\s+--assets\s/, optional: true},
-  ];
-  // Next renames its process on macOS and Linux, so the command line no longer names the script.
-  // Two other proofs are accepted: OUR monitor started exactly this pid, or it is a next-server
-  // whose working directory is this checkout's HUD.
-  const monitor = await get(`${local(PORTS.supervisor)}/status`, {timeoutMs: 2000});
-  const monitored = monitor?.kind === 'agentic-os-service-supervisor' && samePath(monitor.runtimeDir, at.runtime) ? monitor.services || [] : [];
-  const proven = (service, info) => ownedBy(info, service.script, service)
-    || (!info.ambiguous && Number.isSafeInteger(info.pid) && /^(node|next-server|python)/i.test(info.name || '') && monitored.some(item => item.id === service.name && item.pid === info.pid))
-    || (service.name === 'jarvis' && !info.ambiguous && /^next-server\b/.test(info.commandLine || '') && samePath(cwdOf(info.pid) || '', at.jarvis));
   const targets = [];
-  for (const service of expected) {
-    const info = find(service.port);
-    if (!info) continue;
-    if (!proven(service, info)) {
-      // Speech may be a shared service from another installation: leave it alone.
-      if (service.optional) continue;
-      throw new Error(`Unexpected process on ${service.port}; nothing stopped.`);
-    }
-    if (service.name === 'jarvis') {
-      const web = await get(`${local(PORTS.jarvis)}/api/state`, {timeoutMs: 5000});
-      if (!web || !samePath(web.vault_root, state.vault)) throw new Error('Jarvis belongs to another vault; nothing stopped.');
-    }
-    targets.push({...service, pid: info.pid, startedAt: info.startedAt});
+  if (find(PORTS.jarvis)) {
+    const hud = await hudIsOurs(at, {get, find});
+    if (!hud) throw new Error('Unexpected process on 3217; nothing stopped.');
+    const web = await get(`${local(PORTS.jarvis)}/api/state`, {timeoutMs: 5000});
+    if (!web || !samePath(web.vault_root, state.vault)) throw new Error('Jarvis belongs to another vault; nothing stopped.');
+    targets.push({name: 'jarvis', pid: hud.pid, startedAt: hud.startedAt});
   }
+  // Speech may be shared with another installation: only our own is stopped, anything else is left running.
+  const speech = find(PORTS.speech) ? await speechIsOurs(at, {get, find}) : null;
+  if (speech) targets.push({name: 'speech', pid: speech.pid, startedAt: speech.startedAt});
   const token = readJson(at.auth).token;
   const shutdown = await post(`${local(PORTS.bridge)}/shutdown`, {method: 'POST', headers: {'X-V2-Token': token}, body: {}, timeoutMs: 5000});
   if (!shutdown.ok) throw new Error(shutdown.data?.error || 'The bridge refused to stop; nothing stopped.');
-  for (const target of targets.filter(item => item.name !== 'bridge')) {
+  for (const target of targets) {
     // Process ids are reused: stop only the exact process verified above.
     const current = inspect(target.pid);
     if (current && current.startedAt === target.startedAt) { try { kill(target.pid); log(`Stopped ${target.name}.`); } catch { log(`Could not stop ${target.name} (${target.pid}).`); } }
   }
   log('Idle services stopped; automatic recovery is paused. Saved conversations and message-box drafts are retained. Run `node aos.mjs start` to start again.');
-  return {stopped: targets.map(target => target.name)};
+  return {stopped: ['bridge', ...targets.map(target => target.name)]};
 }

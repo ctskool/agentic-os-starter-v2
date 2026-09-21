@@ -39,7 +39,7 @@ export async function main(argv = process.argv.slice(2), log = console.log) {
   const {command, flags, words} = parseArgs(argv);
   switch (command) {
     case 'setup': return (await setup({vault: typeof flags.vault === 'string' ? flags.vault : undefined, voice: yesNo(flags.voice, 'voice'), autostart: yesNo(flags.autostart, 'autostart'), rebuild: flags.rebuild === true, ci: flags.ci === true, adopt: flags.adopt === true, log})).ok ? 0 : 1;
-    case 'start': await start({preview: flags.preview === true, resetRecovery: flags['reset-recovery'] === true, log}); return 0;
+    case 'start': await start({resetRecovery: flags['reset-recovery'] === true, log}); return 0;
     case 'stop': await stop({log}); return 0;
     case 'status': log(JSON.stringify(await status(), null, 1)); return 0;
     case 'doctor': return (await doctor({ci: flags.ci === true, full: flags.full === true, phase: flags.phase === 'install' ? 'install' : 'ready', log})).ok ? 0 : 1;

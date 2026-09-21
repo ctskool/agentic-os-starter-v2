@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
-import {commandIncludes} from './platform.mjs';
+import {samePath} from './platform.mjs';
 
 export const TASK_NAME = 'Agentic OS V2 Service Recovery';
 export const AGENT_LABEL = 'com.agentic-os-v2.recovery';
@@ -60,34 +60,54 @@ function powershell(script, run = spawnSync) {
   return run(exe, ['-NoProfile', '-NonInteractive', '-Command', script], {encoding: 'utf8', windowsHide: true, timeout: 30000});
 }
 
-// Pure: a task counts as ours only with exactly one action, run by PowerShell, naming our wrapper.
-export function taskOwner(text, wrapper) {
-  const raw = String(text || '').replace(/^\uFEFF/, '').trim();
-  if (!raw) return null;
-  let task; try { task = JSON.parse(raw); } catch { return 'other'; }
-  if (!task?.exists) return null;
+// Ownership is decided by PARSING the exact shape this launcher registers, never by searching
+// for our paths inside someone else's command. Anything that exists and does not parse to our
+// wrapper / monitor AND our configuration file is 'other'; so is a question that cannot be answered.
+const TASK_ARGUMENTS = /^-NoProfile -NonInteractive -WindowStyle Hidden -File "([^"]+)" -NodeExecutable "([^"]+)" -ConfigFile "([^"]+)"$/;
+export function taskOwner(text, at) {
+  let task; try { task = JSON.parse(String(text || '').replace(/^\uFEFF/, '').trim()); } catch { return 'other'; }
+  if (task?.exists === false && !task.error) return null;
+  if (task?.exists !== true || task.error) return 'other';
   const actions = Array.isArray(task.actions) ? task.actions : [];
-  const ours = actions.length === 1 && /(^|[\\/])powershell\.exe$/i.test(String(actions[0].execute || '').replace(/^"|"$/g, '')) && commandIncludes(actions[0].arguments, wrapper);
-  return ours ? 'ours' : 'other';
+  if (actions.length !== 1 || !/(^|[\\/])powershell\.exe$/i.test(String(actions[0].execute || '').replace(/^"|"$/g, ''))) return 'other';
+  const parsed = TASK_ARGUMENTS.exec(String(actions[0].arguments || '').trim());
+  return parsed && samePath(parsed[1], wrapperOf(at)) && samePath(parsed[3], at.config) ? 'ours' : 'other';
 }
+const TASK_QUERY = `try{$t=@(Get-ScheduledTask -ErrorAction Stop|Where-Object{$_.TaskName -eq '${TASK_NAME}'});if($t.Count -eq 0){'{"exists":false}'}elseif($t.Count -gt 1){'{"error":true}'}else{@{exists=$true;actions=@($t[0].Actions|ForEach-Object{@{execute=[string]$_.Execute;arguments=[string]$_.Arguments}})}|ConvertTo-Json -Compress -Depth 4}}catch{'{"error":true}'}`;
+
+const unxml = value => String(value).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+export function plistArguments(text) {
+  const block = /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(String(text || ''));
+  return block ? [...block[1].matchAll(/<string>([\s\S]*?)<\/string>/g)].map(match => unxml(match[1])) : null;
+}
+// `launchctl print gui/<uid>/<label>` lists the program arguments one per line inside "arguments = { ... }".
+export function launchctlArguments(text) {
+  const block = /(?:^|\n)[ \t]*arguments = \{\r?\n([\s\S]*?)\r?\n[ \t]*\}/.exec(String(text || ''));
+  return block ? block[1].split(/\r?\n/).map(line => line.trim()).filter(Boolean) : null;
+}
+// Exactly `node <our monitor> --config <our configuration>`: the program itself must be node, not merely be followed by our paths.
+const monitorArguments = (list, at) => Array.isArray(list) && list.length === 4 && /^node$/i.test(path.basename(String(list[0]))) && path.isAbsolute(String(list[0])) && samePath(list[1], at.supervisor) && list[2] === '--config' && samePath(list[3], at.config);
 
 const domain = () => `gui/${process.getuid?.() ?? 0}`;
 // The job launchd has LOADED can differ from the file on disk (deleted or replaced plist).
+// Returns the description of the loaded job, null when launchd says there is none (exit 113,
+// "Could not find service"), and false when the question could not be answered (timeout, permission,
+// anything else): unknown is never treated as absent.
 function loadedAgent(run) {
   const result = run('launchctl', ['print', `${domain()}/${AGENT_LABEL}`], {encoding: 'utf8', timeout: 10000});
-  return result.status === 0 ? String(result.stdout || '') : null;
+  if (result.status === 0) return String(result.stdout || '');
+  return result.status === 113 && !result.error && /could not find service/i.test(String(result.stderr || '') + String(result.stdout || '')) ? null : false;
 }
 
-// 'ours' | 'other' | null. Anything that exists and is not provably ours is 'other'.
+// 'ours' | 'other' | null
 export function autostartOwner(at, {platform = process.platform, run = spawnSync, home = os.homedir(), read = fs.readFileSync, exists = fs.existsSync} = {}) {
   if (platform === 'win32') {
-    const result = powershell(`$t=Get-ScheduledTask -TaskName '${TASK_NAME}' -ErrorAction SilentlyContinue;if($t){@{exists=$true;actions=@($t.Actions|ForEach-Object{@{execute=[string]$_.Execute;arguments=[string]$_.Arguments}})}|ConvertTo-Json -Compress -Depth 4}`, run);
-    if (result.status !== 0) return 'other';
-    return taskOwner(result.stdout, wrapperOf(at));
+    const result = powershell(TASK_QUERY, run);
+    return result.status === 0 ? taskOwner(result.stdout, at) : 'other';
   }
   if (platform !== 'darwin') return null;
-  const file = exists(agentFile(home)) ? (commandIncludes(read(agentFile(home), 'utf8'), at.supervisor) ? 'ours' : 'other') : null;
-  const loaded = loadedAgent(run), job = loaded === null ? null : commandIncludes(loaded, at.supervisor) ? 'ours' : 'other';
+  const file = exists(agentFile(home)) ? (monitorArguments(plistArguments(read(agentFile(home), 'utf8')), at) ? 'ours' : 'other') : null;
+  const loaded = loadedAgent(run), job = loaded === null ? null : loaded !== false && monitorArguments(launchctlArguments(loaded), at) ? 'ours' : 'other';
   if (file === 'other' || job === 'other') return 'other';
   return file || job;
 }
@@ -111,7 +131,7 @@ export function enableAutostart(at, {platform = process.platform, run = spawnSyn
   }
   if (platform === 'darwin') {
     // Only a job proven to be ours (checked above) is ever unloaded.
-    if (loadedAgent(run) !== null) run('launchctl', ['bootout', `${domain()}/${AGENT_LABEL}`], {timeout: 10000});
+    if (typeof loadedAgent(run) === 'string') run('launchctl', ['bootout', `${domain()}/${AGENT_LABEL}`], {timeout: 10000});
     fs.mkdirSync(path.dirname(agentFile(home)), {recursive: true});
     fs.writeFileSync(agentFile(home), launchAgentPlist({node, supervisor: at.supervisor, config: at.config, cwd: at.root, pathEnv, log: path.join(at.runtime, 'service-supervisor-startup-error.log')}));
     // Loading runs the job; while the pause marker is present the monitor exits at once and launchd leaves it.
@@ -132,6 +152,6 @@ export function disableAutostart(at, {platform = process.platform, run = spawnSy
   }
   // Removing the file first means a later login cannot start it even if bootout fails.
   fs.rmSync(agentFile(home), {force: true});
-  if (loadedAgent(run) !== null) run('launchctl', ['bootout', `${domain()}/${AGENT_LABEL}`], {timeout: 10000});
+  if (typeof loadedAgent(run) === 'string') run('launchctl', ['bootout', `${domain()}/${AGENT_LABEL}`], {timeout: 10000});
   return 'macOS login item removed. Its monitor was stopped, which pauses recovery; run `node aos.mjs start` to resume.';
 }
