@@ -43,7 +43,7 @@ Ask: *"Where should your vault live? I can create a new one at `~/agentic-vault`
 
 Then two yes/no questions, one at a time:
 
-1. *"Do you want voice? It is free and runs on your computer, but downloads about 800 MB once."*
+1. *"Do you want voice? It is free and runs on your computer, but downloads about 1.3 GB once."*
 2. *"Should everything start by itself when you log in?"* (recommended)
 
 ## Phase 2 — Install
@@ -58,10 +58,13 @@ Read the output. Typical fixes:
 
 - `npm ci` fails on Mac with compiler errors → `xcode-select --install`, then run setup again.
 - Python not found or too old → install it (table above), open a new terminal, run setup again.
-- `Port 3221 belongs to another installation` → another copy of this system is running from a different folder. Stop that one first (`node aos.mjs stop` in its folder).
-- A voice download fails half way → run setup again; finished files are kept.
+- `Another installation of this system ... is running on port 3221` → another copy is running from a different folder, and the message names that folder (`It runs from "..."`). Run `node aos.mjs stop` in that folder, or keep using that copy instead of installing a second one. If the message names no folder, open http://127.0.0.1:3221/status: `runtimeDir` is the other copy's `obsidian-v2/.runtime` folder.
+- `Voice: a speech service is already running on this computer ... and will be shared` → not an error. Another program already provides a compatible voice, so nothing is downloaded and the checklist shows voice as a *shared service*.
+- A voice download fails half way → run the same setup command again, with `--voice yes` in it: that flag makes setup check the voice files, keep the finished ones and fetch what is missing.
 
-The checklist at the end shows `WAIT  Plugin switched on in Obsidian` — that is expected until Phase 5.
+The checklist at the end shows `WAIT  Plugin switched on in Obsidian` — that is expected until Phase 5 (a new vault has the plugin ready, but Obsidian has not opened it yet). A vault where the plugin was already working shows PASS.
+
+**How to read the result.** Every check prints a line: PASS, FAIL, WAIT (a click only the user can make) or SKIP (could not run, with the reason). The command exits with code 1 when there is at least one FAIL, and the last line says which kind: *core parts* failed (fix these before going on), or only *optional parts* such as voice or Jev (the system is usable; carry on with the phases and come back to them).
 
 **If the services are not running a minute after setup** (some agent sandboxes end background processes when a command finishes): ask the user to run `node aos.mjs start` in their own terminal, or use `--autostart yes`, which hands the services to the operating system.
 
@@ -70,8 +73,10 @@ The checklist at the end shows `WAIT  Plugin switched on in Obsidian` — that i
 Explain in two or three sentences: *voice requests are routed by a small model on OpenRouter called Jev. It answers in about a fifth of a second instead of five, and costs a fraction of a cent per request. It is sent what you said, the last two turns of that voice conversation, the title and last lines of the selected conversation and the file names of recent reports, never your notes. Without it everything still works, only slower.*
 
 1. The user creates an account at https://openrouter.ai, adds a few dollars of credit, and creates a key at https://openrouter.ai/keys.
-2. Run `node aos.mjs jev-key`. A page opens in **their** browser; they paste the key there. The command waits up to five minutes and prints only `{"saved":true}` or `{"saved":false}`. If your command runner cannot wait that long, ask the user to run the command in their own terminal.
-3. Check with `node aos.mjs jev-key --check`.
+2. You run `node aos.mjs jev-key`. A page opens in **their** browser and they paste the key there; tell them that is all they have to do. The command prints only `{"saved":true}` or `{"saved":false}`.
+3. You check with `node aos.mjs jev-key --check`.
+
+*For you, not for the user:* step 2 keeps running for up to five minutes while it waits for the page. If your tool cannot keep a command running that long, do not retry it in a loop. Ask the user to run `node aos.mjs jev-key` in their own terminal and to tell you when the page said it was saved, then do step 3.
 
 ## Phase 4 — Calendar and mail (optional)
 
@@ -98,7 +103,7 @@ Ask them to tell you when the cockpit is visible in Obsidian.
 node aos.mjs doctor --full
 ```
 
-Every line is PASS, FAIL, WAIT or SKIP, and every FAIL names its fix. `--full` also runs one real workflow (Vault Summary) on their subscription and checks that the report landed in the vault. Apply the fix, run it again, repeat until nothing fails. More help: `docs/TROUBLESHOOTING.md`.
+Every line is PASS, FAIL, WAIT or SKIP, and every FAIL names its fix; a check that could not run is printed as SKIP with the reason, never left out. `--full` also runs one real workflow (Vault Summary) on their subscription and checks that the report landed in the vault. Apply the fix and run it again. When the same check fails the same way twice in a row the doctor says so and changes its advice: stop re-running it at that point and do what that line says. More help: `docs/TROUBLESHOOTING.md`.
 
 Then have the user try three things themselves:
 
@@ -109,7 +114,7 @@ Then have the user try three things themselves:
 ## Phase 7 — Make it theirs (each item optional)
 
 - **Daily Drivers:** ask for the three or four things they want on every day's checklist, and write them to `<vault>/system/v2/profile.json` as `{"dailyDrivers": ["…", "…"]}` (1–8 short labels). Optional `"cta"`: the closing paragraph Content Cascade should use for their community or newsletter.
-- **Metrics cards** (YouTube, Instagram, TikTok, GitHub): create `~/.claude/.env` from `docs/env.example` if it does not exist, open it in their editor (`notepad` / `open -e`), tell them which lines to fill, and wait. Handles are not secret; the YouTube key is, so they type it, not you.
+- **Metrics cards** (YouTube, Instagram, TikTok, GitHub): the settings live in `~/.claude/.env`. That is only a file this system reads; it does not need Claude Code. If the `~/.claude` folder does not exist (a Codex-only computer), create the folder first, then create the file from `docs/env.example`. Open it in their editor (`notepad` / `open -e`), tell them which lines to fill, and wait. Handles are not secret; the YouTube key is, so they type it, not you.
 - **Time zone:** dates follow the computer's clock. After changing the computer's time zone: `node aos.mjs stop`, then `node aos.mjs start`.
 
 ## Phase 8 — Hand over

@@ -151,7 +151,7 @@ test('stop shuts the bridge down through its own endpoint, stops only proven pro
 test('setup changes nothing when another installation owns the ports or the vault', async () => {
   const at = installation(), vault = path.join(scratch(), 'vault');
   const nothing = {get: async () => null, find: () => null};
-  await assert.rejects(preflight(at, vault, {get: async () => ({kind: 'agentic-os-service-supervisor', runtimeDir: path.resolve('/elsewhere/.runtime')}), find: () => null}), /Another installation .* port 3221.*Nothing was changed/);
+  await assert.rejects(preflight(at, vault, {get: async () => ({kind: 'agentic-os-service-supervisor', runtimeDir: path.resolve('/elsewhere/.runtime')}), find: () => null}), error => /Another installation .* port 3221.*Nothing was changed/.test(error.message) && error.message.includes(`It runs from "${path.resolve('/elsewhere/..')}"`) && /node aos\.mjs stop/.test(error.message));
   await assert.rejects(preflight(at, vault, {get: async () => ({hello: 'world'}), find: () => null}), /port 3221/);
   await assert.rejects(preflight(at, vault, {get: async () => null, find: port => port === PORTS.supervisor ? {pid: 9} : null}), /Another program is using port 3221/);
   const ourMonitor = {kind: 'agentic-os-service-supervisor', runtimeDir: at.runtime};

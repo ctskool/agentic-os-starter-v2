@@ -2,8 +2,9 @@
 // is, where a command lives, and how to open a page. Parsers are pure so both
 // operating systems are covered by fixtures wherever the suite runs.
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
-import {spawnSync} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
 
 export const isWindows = process.platform === 'win32';
 const caseless = process.platform === 'win32' || process.platform === 'darwin';
@@ -77,13 +78,62 @@ export function openUrl(url, {run = spawnSync, platform = process.platform} = {}
   return run(platform === 'darwin' ? 'open' : 'xdg-open', [url], {timeout: 10000}).status === 0;
 }
 
+// One request to a local service on a connection of its own, closed afterwards.
+// Never the shared pool behind fetch(): this launcher freezes its event loop for seconds to minutes
+// at a time (package installs, process look-ups, a CLI answering), a local server closes an idle
+// kept-alive connection after about five seconds, and a frozen program cannot see that happen. Its
+// next request then goes out on the dead connection and comes back as ECONNRESET, which reads as
+// "the service is down" when it is perfectly healthy. A connection per request cannot go stale.
+export function request(url, {method = 'GET', headers = {}, body, timeoutMs = 4000} = {}) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    if (target.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(target.hostname)) { reject(new Error('Only local services are contacted this way')); return; }
+    const payload = body === undefined ? null : Buffer.isBuffer(body) ? body : Buffer.from(String(body));
+    const outgoing = http.request(target, {method, agent: false, headers: {...headers, ...(payload ? {'Content-Length': payload.length} : {})}}, response => {
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('error', fail);
+      response.on('end', () => { clearTimeout(timer); resolve({ok: response.statusCode >= 200 && response.statusCode < 300, status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks)}); });
+    });
+    function fail(error) { clearTimeout(timer); outgoing.destroy(); reject(error); }
+    const timer = setTimeout(() => fail(Object.assign(new Error(`No answer within ${timeoutMs} ms`), {code: 'ETIMEDOUT'})), timeoutMs);
+    outgoing.on('error', fail);
+    outgoing.end(payload || undefined);
+  });
+}
+
 export async function fetchJson(url, {method = 'GET', headers = {}, body, timeoutMs = 4000} = {}) {
-  const response = await fetch(url, {method, headers: {...(body === undefined ? {} : {'Content-Type': 'application/json'}), ...headers},
-    body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs)});
-  const text = await response.text();
+  const response = await request(url, {method, timeoutMs, headers: {...(body === undefined ? {} : {'Content-Type': 'application/json'}), ...headers},
+    body: body === undefined ? undefined : JSON.stringify(body)});
+  const text = response.body.toString('utf8');
   let data = null; try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON body */ }
   return {ok: response.ok, status: response.status, data};
 }
 export const tryJson = async (url, options) => { try { const result = await fetchJson(url, options); return result.ok ? result.data : null; } catch { return null; } };
+// Like tryJson, but says WHY there was no answer, so a check can report the real reason.
+export const probeJson = async (url, options) => { try { return {...await fetchJson(url, options), error: ''}; } catch (error) { return {ok: false, status: 0, data: null, error: String(error.code || error.message || error)}; } };
+
+// Runs a program without freezing this one: timers, open connections and progress output keep working
+// while it runs. Same result shape as spawnSync where the launcher uses it. After the time limit the
+// program is asked to stop, then forced, and the caller gets its answer within graceMs either way:
+// a program that ignores the request, or a grandchild that keeps the output pipes open, cannot hang it.
+export function run(command, args, {cwd, timeoutMs = 120000, graceMs = 3000, input = '', env} = {}) {
+  return new Promise(resolve => {
+    let child, stdout = '', stderr = '', timedOut = false, settled = false;
+    let force;
+    const finish = (status, error) => { if (settled) return; settled = true; clearTimeout(timer); clearTimeout(force); resolve({status, stdout, stderr, timedOut, error}); };
+    try { child = spawn(command, args, {cwd, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe']}); } catch (error) { resolve({status: null, stdout, stderr, timedOut, error}); return; }
+    const timer = setTimeout(() => {
+      timedOut = true; try { child.kill(); } catch { /* already gone */ }
+      force = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* already gone */ } child.stdout.destroy(); child.stderr.destroy(); finish(null); }, graceMs);
+    }, timeoutMs);
+    child.stdout.setEncoding('utf8').on('data', text => { if (stdout.length < 4e6) stdout += text; });
+    child.stderr.setEncoding('utf8').on('data', text => { if (stderr.length < 4e6) stderr += text; });
+    child.on('error', error => finish(null, error));
+    child.on('close', code => finish(code));
+    child.stdin.on('error', () => { /* the program never read its input */ });
+    child.stdin.end(input);
+  });
+}
 
 export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));

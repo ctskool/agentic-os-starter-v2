@@ -1,101 +1,202 @@
 // The member's test. Every line is PASS, FAIL, WAIT (needs a click from the
 // user) or SKIP, and every FAIL carries the one thing to do about it.
+// Two promises to the reader: a check never disappears (a check that cannot run
+// prints SKIP with the reason), and the same failure twice in a row stops
+// saying "try again".
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {spawnSync} from 'node:child_process';
 import {projectRoot} from '../../runner/runtime.mjs';
-import {tryJson, fetchJson, sleep} from './platform.mjs';
+import {tryJson, probeJson, fetchJson, request, run, sleep} from './platform.mjs';
 import {layout, PORTS, configuredVaultPath, speechInstalled} from './services.mjs';
 import {pluginInstalled, pluginEnabled} from './vault.mjs';
 import {hasJevKey} from './jev-key.mjs';
 
-const local = port => `http://127.0.0.1:${port}`;
-const readSetup = at => { try { return JSON.parse(fs.readFileSync(path.join(at.runtime, 'aos-setup.json'), 'utf8')); } catch { return {}; } };
+const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; } };
+const SUPERVISOR_LOG = 'obsidian-v2/.runtime/service-supervisor.jsonl';
+const SHOW_SOMEONE = `Show your coding agent this line together with the last 30 lines of ${SUPERVISOR_LOG}, or post both in the community.`;
+const VOICE_CHECKS = ['Voice service healthy', 'Text to speech', 'Speech to text hears it back'];
+const STILL_STARTING = new Set(['checking', 'starting', 'waiting_for_listener', 'backoff']);
+
+// Why the voice line failed, from what the bridge, the monitor and the disk say. Pure.
+//   probe     - the answer of the bridge's /voice/health: {status, data, error}
+//   speechUrl - the speech service the bridge uses; own - whether that is this installation's (3220)
+export function voiceProblem({probe, speechUrl, own, installed, phase, waitedSeconds = 0}) {
+  if (!probe.data) return {detail: `the bridge did not answer the voice check (${probe.error || `HTTP ${probe.status}`})`,
+    fix: 'Run `node aos.mjs status`. If the bridge is not listed as online, run `node aos.mjs start`. If it is online, this is a fault in the check, not in your voice.'};
+  if (!own) return {detail: `the shared speech service at ${speechUrl} stopped answering`,
+    fix: 'That service belongs to another program on this computer: start that program again. To stop depending on it, run `node aos.mjs stop`, then `node aos.mjs setup --voice yes`: with nothing to share, this installation gets a voice of its own. (If you set AOS_V2_SPEECH_URL yourself, remove that setting first; setup says so when it is the cause.)'};
+  if (!installed) return {detail: 'not installed', fix: 'Run `node aos.mjs setup --voice yes`.'};
+  if (!phase) return {detail: 'installed, but the recovery monitor is not running it', fix: 'Run `node aos.mjs stop`, then `node aos.mjs start`: the service list is rebuilt at a start.'};
+  if (phase === 'blocked') return {detail: 'its process keeps crashing and the monitor stopped restarting it',
+    fix: `Read the last lines that mention "speech" in ${SUPERVISOR_LOG}. Then repair the files with \`node aos.mjs setup --voice yes\` and run \`node aos.mjs start --reset-recovery\`.`};
+  if (STILL_STARTING.has(phase)) return {detail: `still not up after waiting ${waitedSeconds} seconds`,
+    fix: {first: `The monitor reports it as "${phase}". A first start on a slow disk can need another minute: run \`node aos.mjs doctor\` once more. ${SUPERVISOR_LOG} shows what the service is doing.`,
+      repeated: `It is not going to come up by waiting. Repair the voice files with \`node aos.mjs setup --voice yes\`, then \`node aos.mjs start --reset-recovery\`.`}};
+  return {detail: 'its process is running but reports that it is not ready', fix: `Run \`node aos.mjs stop\`, then \`node aos.mjs start\`. If it repeats, repair the files with \`node aos.mjs setup --voice yes\`.`};
+}
 
 // phase 'install' = before the user has opened Obsidian: the plugin switch is WAIT, not FAIL.
-export async function doctor({root = projectRoot, ci = false, full = false, phase = 'ready', log = console.log} = {}) {
-  const at = layout(root), setup = readSetup(at), results = [];
-  const add = (status, name, detail = '', fix = '') => { results.push({status, name, detail, fix}); log(`${status.padEnd(4)} ${name}${detail ? ' - ' + detail : ''}${status === 'FAIL' && fix ? `\n     fix: ${fix}` : ''}`); };
-  const check = async (name, fn) => { try { await fn(); } catch (error) { add('FAIL', name, String(error.message || error).slice(0, 300), 'Run `node aos.mjs doctor` again; if it repeats, show this line to your coding agent.'); } };
+// ports, runCommand, pause, now and voiceWaitMs exist for the tests; members never pass them.
+export async function doctor({root = projectRoot, ci = false, full = false, phase = 'ready', log = console.log,
+  ports = PORTS, runCommand = run, pause = sleep, now = Date.now, voiceWaitMs = 90000} = {}) {
+  const at = layout(root), setup = readJson(path.join(at.runtime, 'aos-setup.json')), results = [];
+  const local = port => `http://127.0.0.1:${port}`;
+  const memoryFile = path.join(at.runtime, 'aos-doctor-last.json'), before = readJson(memoryFile).failures || {}, failing = {};
+
+  // fix is a sentence, or {first, repeated} when the second identical failure needs different advice.
+  const add = (status, name, detail = '', fix = '', {optional = false} = {}) => {
+    let lines = '';
+    if (status === 'FAIL') {
+      const repeats = before[name]?.detail === detail ? before[name].count : 0;
+      failing[name] = {detail, count: repeats + 1};
+      const advice = typeof fix === 'string' ? fix : (repeats && fix.repeated) || fix.first;
+      if (advice) lines += `\n     fix: ${advice}`;
+      if (repeats) lines += `\n     This is the same failure as the last run (${repeats + 1} in a row), so running the doctor again will not change it. ${SHOW_SOMEONE}`;
+    }
+    results.push({status, name, detail, optional});
+    log(`${status.padEnd(4)} ${name}${detail ? ' - ' + detail : ''}${lines}`);
+  };
+  const reported = name => results.some(item => item.name === name);
+  // A group of checks that depend on each other. `names` is every line the group owes: whatever
+  // ends it early (a failed step, a thrown error), the lines it did not reach are printed as SKIP.
+  const group = async (names, fn, {optional = false} = {}) => {
+    let reason = '';
+    try { reason = (await fn()) || ''; }
+    catch (error) {
+      add('FAIL', names.find(name => !reported(name)) || `${names[0]} (unexpected error)`, String(error.code || error.message || error).slice(0, 300),
+        {first: 'Run `node aos.mjs doctor` once more.', repeated: 'This is a fault, not a hiccup.'}, {optional});
+    }
+    const failedStep = names.find(name => results.some(item => item.name === name && item.status === 'FAIL'));
+    for (const name of names) if (!reported(name)) add('SKIP', name, `not run: ${reason || (failedStep ? `"${failedStep}" did not pass` : 'an earlier step did not finish')}`);
+  };
 
   const major = Number(process.versions.node.split('.')[0]);
   add(major >= 22 ? 'PASS' : 'FAIL', 'Node.js 22 or newer', process.versions.node, 'Install the current LTS from nodejs.org, open a new terminal, run setup again.');
 
+  // Asked first, printed in their usual place: the plugin line below needs the bridge's answer.
+  let supervisor = await tryJson(`${local(ports.supervisor)}/status`);
+  const services = await tryJson(`${local(ports.bridge)}/services`, {timeoutMs: 6000});
+  const hud = await tryJson(`${local(ports.jarvis)}/api/state`, {timeoutMs: 15000});
+
   const vault = configuredVaultPath(at);
-  if (!vault || !fs.existsSync(vault)) add('FAIL', 'Vault configured', vault || 'none', 'Run `node aos.mjs setup --vault "<absolute path>"`.');
-  else {
+  await group(['Vault configured', 'Vault has the daily-note schema', 'Obsidian plugin files installed', 'Plugin switched on in Obsidian'], async () => {
+    if (!vault || !fs.existsSync(vault)) { add('FAIL', 'Vault configured', vault || 'none', 'Run `node aos.mjs setup --vault "<absolute path>"`.'); return; }
     add('PASS', 'Vault configured', vault);
     add(fs.existsSync(path.join(vault, 'system', 'schemas', 'daily-note.md')) ? 'PASS' : 'FAIL', 'Vault has the daily-note schema', '', 'Run setup again; it adds missing template files and never overwrites notes.');
     add(pluginInstalled(vault) ? 'PASS' : 'FAIL', 'Obsidian plugin files installed', '', 'Run `node aos.mjs setup --vault "<path>"` again.');
-    if (pluginEnabled(vault)) add('PASS', 'Plugin switched on in Obsidian');
-    else add(phase === 'install' || ci ? 'WAIT' : 'FAIL', 'Plugin switched on in Obsidian', 'needs the user', 'In Obsidian: Settings > Community plugins -> turn on community plugins -> enable "Agentic OS V2".');
-  }
+    // A new vault arrives with the plugin already listed as enabled, which proves nothing: Obsidian
+    // still asks the user to trust it the first time the vault is opened. Proof is the cockpit
+    // being connected to the bridge right now, or Obsidian having opened this vault before.
+    const connected = (services?.surfaces || []).some(surface => surface.kind === 'native');
+    const openedBefore = ['workspace.json', 'workspace-mobile.json', 'app.json', 'appearance.json'].some(name => fs.existsSync(path.join(vault, '.obsidian', name)));
+    const needsUser = phase === 'install' || ci ? 'WAIT' : 'FAIL';
+    if (pluginEnabled(vault) && (connected || openedBefore)) add('PASS', 'Plugin switched on in Obsidian', connected ? 'the cockpit is connected right now' : '');
+    else if (pluginEnabled(vault)) add(needsUser, 'Plugin switched on in Obsidian', 'ready in this new vault, but Obsidian has not opened it yet', 'Open Obsidian -> "Open folder as vault" -> choose the vault folder -> "Trust author and enable plugins".');
+    else add(needsUser, 'Plugin switched on in Obsidian', 'needs the user', 'In Obsidian: Settings > Community plugins -> turn on community plugins -> enable "Agentic OS V2".');
+  });
 
-  const supervisor = await tryJson(`${local(PORTS.supervisor)}/status`);
   add(supervisor ? 'PASS' : 'FAIL', 'Recovery monitor running', supervisor ? `${supervisor.services.length} services watched` : '', 'Run `node aos.mjs start`.');
-  const services = await tryJson(`${local(PORTS.bridge)}/services`, {timeoutMs: 6000});
-  add(services?.bridge?.online ? 'PASS' : 'FAIL', 'Bridge answering on 3219', '', 'Run `node aos.mjs start`, wait 20 seconds, then look at .runtime/service-supervisor.jsonl.');
-  const hud = await tryJson(`${local(PORTS.jarvis)}/api/state`, {timeoutMs: 15000});
-  add(hud ? 'PASS' : 'FAIL', 'Jarvis HUD answering on 3217', '', 'Run `node aos.mjs setup` again to build the HUD, then `node aos.mjs start`.');
+  add(services?.bridge?.online ? 'PASS' : 'FAIL', `Bridge answering on ${ports.bridge}`, '', `Run \`node aos.mjs start\`, wait 20 seconds, then look at ${SUPERVISOR_LOG}.`);
+  add(hud ? 'PASS' : 'FAIL', `Jarvis HUD answering on ${ports.jarvis}`, '', 'Run `node aos.mjs setup` again to build the HUD, then `node aos.mjs start`.');
+  const bridgeDown = 'the bridge is not answering (see the FAIL above)';
 
+  const signedIn = [], installed = [];
   for (const provider of ['claude', 'codex']) {
     const info = services?.providers?.[provider];
+    if (!services) { add('SKIP', `${provider} CLI`, `not checked: ${bridgeDown}`); continue; }
     if (!info?.installed) { add('SKIP', `${provider} CLI`, 'not installed (one provider is enough)'); continue; }
+    installed.push(provider);
     add('PASS', `${provider} CLI found`, String(info.version || '').slice(0, 60));
-    if (ci) continue;
-    await check(`${provider} signed in`, async () => {
+    if (ci) { add('SKIP', `${provider} signed in`, 'not checked with --ci'); continue; }
+    await group([`${provider} signed in`], async () => {
       const args = provider === 'claude' ? ['--print', '--model', 'haiku', 'Reply with the single word OK.'] : ['exec', '--skip-git-repo-check', '-s', 'read-only', 'Reply with the single word OK.'];
-      const result = spawnSync(info.command, args, {encoding: 'utf8', timeout: 120000, windowsHide: true, cwd: at.runtime, input: ''});
-      if (result.status === 0 && /\bOK\b/i.test(result.stdout || '')) add('PASS', `${provider} signed in`);
-      else add('FAIL', `${provider} signed in`, 'no reply', `Open a terminal, run \`${provider}\`, sign in, then run doctor again.`);
-    });
+      // Not spawnSync: a CLI can take two minutes to answer, and a frozen doctor cannot keep a timer or a connection alive.
+      const result = await runCommand(info.command, args, {timeoutMs: 120000, cwd: at.runtime, input: ''});
+      if (result.status === 0 && /\bOK\b/i.test(result.stdout || '')) { signedIn.push(provider); add('PASS', `${provider} signed in`); }
+      else add('FAIL', `${provider} signed in`, result.timedOut ? 'no reply within two minutes' : 'no reply', `Open a terminal, run \`${provider}\`, sign in, then run the doctor again.`, {optional: true});
+    }, {optional: true});
   }
-  if (!ci && services && !['claude', 'codex'].some(provider => services.providers?.[provider]?.installed)) add('FAIL', 'At least one of Claude Code or Codex', 'neither found', 'Install Claude Code or Codex, sign in, then run `node aos.mjs setup` again so its location is saved.');
+  if (!ci && services && !installed.length) add('FAIL', 'At least one of Claude Code or Codex', 'neither found', 'Install Claude Code or Codex, sign in, then run `node aos.mjs setup` again so its location is saved.');
+  else if (!ci && installed.length && !signedIn.length) add('FAIL', 'A provider that is signed in', `${installed.join(' and ')} installed, none answered`, 'Nothing can run without one. Open a terminal, run `claude` or `codex`, sign in, then run the doctor again.');
 
   if (setup.voice === false) add('SKIP', 'Voice', 'not installed (add later: `node aos.mjs setup --voice yes`)');
-  else await check('Voice', async () => {
-    const health = await tryJson(`${local(PORTS.bridge)}/voice/health`, {timeoutMs: 8000});
-    if (!health?.ok) return add('FAIL', 'Voice service healthy', speechInstalled(at) ? 'installed but not answering yet' : 'not installed', speechInstalled(at) ? 'The voice models take up to a minute to load after a start; run doctor again. Then check .runtime/service-supervisor.jsonl.' : 'Run `node aos.mjs setup --voice yes`.');
-    add('PASS', 'Voice service healthy', health.engine || '');
-    const speech = services?.speech?.url || local(PORTS.speech);
-    const spoken = await fetch(`${speech}/speak?text=${encodeURIComponent('Voice check, one two three.')}`, {signal: AbortSignal.timeout(60000)});
-    const wav = Buffer.from(await spoken.arrayBuffer());
-    if (!spoken.ok || wav.length < 5000) return add('FAIL', 'Text to speech', `status ${spoken.status}`, 'Run `node aos.mjs setup --voice yes` again to repair the voice files.');
-    add('PASS', 'Text to speech', `${Math.round(wav.length / 1024)} KB of audio`);
-    const heard = await fetch(`${speech}/stt`, {method: 'POST', body: wav, signal: AbortSignal.timeout(120000)});
-    const text = heard.ok ? String((await heard.json()).text || '') : '';
-    add(/voice|check|one|two|three/i.test(text) ? 'PASS' : 'FAIL', 'Speech to text hears it back', text.slice(0, 60), 'Run `node aos.mjs setup --voice yes` again to repair the speech model.');
-  });
+  else await group(VOICE_CHECKS, async () => {
+    if (!services?.bridge?.online) return bridgeDown;
+    const healthUrl = `${local(ports.bridge)}/voice/health`, speechUrl = services.speech?.url || local(ports.speech), own = speechUrl === local(ports.speech);
+    const speechPhase = () => supervisor?.services?.find(service => service.id === 'speech')?.phase || '';
+    // What the monitor says NOW: the sign-in checks above can take minutes, and a service may have
+    // come up, crashed or been given up on meanwhile.
+    const refresh = async () => { supervisor = await tryJson(`${local(ports.supervisor)}/status`, {timeoutMs: 2000}) || supervisor; };
+    await refresh();
+    let probe = await probeJson(healthUrl, {timeoutMs: 8000});
+    // Our own service loads its models before it opens its port. Wait for that here, once,
+    // instead of sending the person round in circles with "run the doctor again". The limit is on
+    // the clock, slow probes included (the last round can run over by one probe, never by more),
+    // and the wait ends as soon as the monitor stops calling it "starting".
+    if (!probe.data?.ok && own && speechInstalled(at) && STILL_STARTING.has(speechPhase())) {
+      log(`     voice is still loading its models; waiting up to ${Math.round(voiceWaitMs / 1000)} seconds ...`);
+      const started = now(), left = () => voiceWaitMs - (now() - started);
+      while (!probe.data?.ok && STILL_STARTING.has(speechPhase()) && left() > 0) {
+        await pause(Math.min(3000, left())); await refresh();
+        probe = await probeJson(healthUrl, {timeoutMs: 8000});
+      }
+    }
+    if (!probe.data?.ok) {
+      // The configured limit, not the measured time: the line must read the same on the next run for a repeat to be recognised.
+      const problem = voiceProblem({probe, speechUrl, own, installed: speechInstalled(at), phase: speechPhase(), waitedSeconds: Math.round(voiceWaitMs / 1000)});
+      add('FAIL', VOICE_CHECKS[0], problem.detail, problem.fix, {optional: true}); return;
+    }
+    const whose = own ? `this installation's own service on ${ports.speech}` : `shared service at ${speechUrl}, run by another program on this computer`;
+    add('PASS', VOICE_CHECKS[0], `${probe.data.engine ? probe.data.engine + ', ' : ''}${whose}`);
+    // The same two calls the bridge makes, against the same service, own or shared.
+    const repair = own ? 'Run `node aos.mjs setup --voice yes` again to repair the voice files.' : `The shared speech service at ${speechUrl} answers its health check but cannot do this; restart the program that runs it.`;
+    const spoken = await request(`${speechUrl}/speak?text=${encodeURIComponent('Voice check, one two three.')}`, {timeoutMs: 60000});
+    if (!spoken.ok || spoken.body.length < 5000) { add('FAIL', VOICE_CHECKS[1], `status ${spoken.status}, ${spoken.body.length} bytes`, repair, {optional: true}); return; }
+    add('PASS', VOICE_CHECKS[1], `${Math.round(spoken.body.length / 1024)} KB of audio`);
+    const heard = await request(`${speechUrl}/stt`, {method: 'POST', headers: {'Content-Type': 'audio/wav'}, body: spoken.body, timeoutMs: 120000});
+    let text = ''; try { text = heard.ok ? String(JSON.parse(heard.body.toString('utf8')).text || '') : ''; } catch { /* not JSON */ }
+    add(/voice|check|one|two|three/i.test(text) ? 'PASS' : 'FAIL', VOICE_CHECKS[2], heard.ok ? text.slice(0, 60) || 'heard nothing' : `status ${heard.status}`, repair, {optional: true});
+  }, {optional: true});
 
   if (!hasJevKey(at.runtime)) add('SKIP', 'Jev fast voice routing', 'no OpenRouter key saved (optional: `node aos.mjs jev-key`)');
   else if (ci) add('PASS', 'Jev key saved');
-  else await check('Jev fast voice routing', async () => {
+  else await group(['Jev fast voice routing'], async () => {
     const {readJevConfig, jevState, classifyJev} = await import('../../runner/jev.mjs');
     const config = readJevConfig();
     try {
       const result = await classifyJev(jevState({transcript: 'What is on my schedule today?'}), {key: config.key, deadlineMs: 8000, tier2kind: config.tier2kind, rulebook: config.rulebook});
       add('PASS', 'Jev fast voice routing', `answered in ${Math.round(result.ms)} ms`);
     } catch (error) {
-      add('FAIL', 'Jev fast voice routing', String(error.message), /HTTP 40[13]/.test(error.message) ? 'The key was refused. Run `node aos.mjs jev-key` and paste a fresh key from openrouter.ai/keys.' : /HTTP 402/.test(error.message) ? 'The OpenRouter account has no credit. Add a few dollars at openrouter.ai/credits.' : 'Check the internet connection and run doctor again. Voice still works without Jev, only slower.');
+      // Timings differ per run; keep the detail stable so a repeat is recognised.
+      add('FAIL', 'Jev fast voice routing', String(error.message).replace(/\d+(\.\d+)? ?ms/g, 'N ms'), /HTTP 40[13]/.test(error.message) ? 'The key was refused. Run `node aos.mjs jev-key` and paste a fresh key from openrouter.ai/keys.' : /HTTP 402/.test(error.message) ? 'The OpenRouter account has no credit. Add a few dollars at openrouter.ai/credits.' : 'Check the internet connection. Voice still works without Jev, only slower.', {optional: true});
     }
-  });
+  }, {optional: true});
 
-  if (full && !ci && services?.bridge?.online) await check('A real workflow end to end', async () => {
+  const WORKFLOW = 'A real workflow end to end';
+  if (!full) add('SKIP', WORKFLOW, 'not asked for (`node aos.mjs doctor --full` includes it)');
+  else if (ci) add('SKIP', WORKFLOW, 'not run with --ci');
+  else await group([WORKFLOW], async () => {
+    if (!services?.bridge?.online) return bridgeDown;
     const token = JSON.parse(fs.readFileSync(at.auth, 'utf8')).token, id = crypto.randomUUID();
-    const started = await fetchJson(`${local(PORTS.bridge)}/work/skill`, {method: 'POST', headers: {'X-V2-Token': token, 'X-V2-App': 'web'}, body: {id, skill: 'vault-summary'}, timeoutMs: 15000});
-    if (!started.ok) return add('FAIL', 'A real workflow end to end', started.data?.error || `status ${started.status}`, 'Sign in to the selected provider, then run `node aos.mjs doctor --full` again.');
+    const started = await fetchJson(`${local(ports.bridge)}/work/skill`, {method: 'POST', headers: {'X-V2-Token': token, 'X-V2-App': 'web'}, body: {id, skill: 'vault-summary'}, timeoutMs: 15000});
+    if (!started.ok) { add('FAIL', WORKFLOW, started.data?.error || `status ${started.status}`, 'Sign in to the selected provider, then run `node aos.mjs doctor --full` again.'); return; }
     for (let waited = 0; waited < 300; waited += 3) {
-      await sleep(3000);
-      const task = (await tryJson(`${local(PORTS.bridge)}/work`, {timeoutMs: 8000}))?.tasks?.find(item => item.id === id);
+      await pause(3000);
+      const task = (await tryJson(`${local(ports.bridge)}/work`, {timeoutMs: 8000}))?.tasks?.find(item => item.id === id);
       const destination = task?.workflow?.destination;
-      if (task?.state === 'stopped' && !task.error && destination && fs.existsSync(path.join(vault, destination))) return add('PASS', 'A real workflow end to end', destination);
-      if (task && (task.state === 'error' || task.state === 'needs input' || (task.state === 'stopped' && task.error))) return add('FAIL', 'A real workflow end to end', String(task.error || task.state).slice(0, 200), 'Open the HUD at http://127.0.0.1:3217, look at the failed task in History, and show its message to your coding agent.');
+      if (task?.state === 'stopped' && !task.error && destination && fs.existsSync(path.join(vault, destination))) { add('PASS', WORKFLOW, destination); return; }
+      if (task && (task.state === 'error' || task.state === 'needs input' || (task.state === 'stopped' && task.error))) { add('FAIL', WORKFLOW, String(task.error || task.state).slice(0, 200), `Open the HUD at ${local(ports.jarvis)}, look at the failed task in History, and show its message to your coding agent.`); return; }
     }
-    add('FAIL', 'A real workflow end to end', 'no result after 5 minutes', 'Open the HUD, check the task under Terminals, then run doctor again.');
+    add('FAIL', WORKFLOW, 'no result after 5 minutes', 'Open the HUD, check the task under Terminals, and show what it says to your coding agent.');
   });
 
-  const failed = results.filter(item => item.status === 'FAIL').length, waiting = results.filter(item => item.status === 'WAIT').length;
-  log(`\n${failed ? `${failed} check(s) failed.` : waiting ? 'Everything installed. Waiting on the step(s) marked WAIT.' : 'All checks passed.'}`);
-  return {ok: failed === 0, failed, waiting, results};
+  try { fs.mkdirSync(at.runtime, {recursive: true}); fs.writeFileSync(memoryFile, JSON.stringify({failures: failing}, null, 1)); } catch { /* a read-only folder only loses the repeat detection */ }
+
+  const fails = results.filter(item => item.status === 'FAIL'), core = fails.filter(item => !item.optional), waiting = results.filter(item => item.status === 'WAIT').length;
+  const listed = items => items.map(item => item.name).join(', ');
+  log(`\n${!fails.length ? (waiting ? 'Everything installed. Waiting on the step(s) marked WAIT.' : 'All checks passed.')
+    : !core.length ? `The core system is installed and working. ${fails.length} optional part(s) need attention: ${listed(fails)}. Each FAIL line above says what to do; everything else can be used now.`
+    : `${fails.length} check(s) failed, including core parts (${listed(core)}). Work through the fix lines from the top.`}`);
+  return {ok: fails.length === 0, failed: fails.length, coreFailed: core.length, waiting, results};
 }

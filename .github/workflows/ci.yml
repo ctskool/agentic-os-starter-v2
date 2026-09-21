@@ -68,10 +68,48 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      # First, a computer where ANOTHER program already runs a speech service (port 3108). Setup must
+      # share it and download nothing, the doctor must prove speak -> listen through it, and stop must
+      # leave it running. A clean runner never has such a service, so a stand-in plays that program.
+      - name: Another program's speech service (stand-in on 3108)
+        run: |
+          node -e "require('child_process').spawn(process.execPath,['obsidian-v2/tests/fixtures/fake-speech.mjs','--port','3108'],{detached:true,stdio:'ignore'}).unref()"
+          for attempt in $(seq 1 20); do curl -fs http://127.0.0.1:3108/health && break; sleep 1; done
+          curl -fs http://127.0.0.1:3108/health
+      - name: Install beside it (voice is shared, nothing is downloaded)
+        run: |
+          mkdir -p ci-logs
+          node aos.mjs setup --vault "$RUNNER_TEMP/vault" --voice yes --autostart no --ci | tee ci-logs/setup-shared.log
+          grep -q "will be shared, so there is nothing to download" ci-logs/setup-shared.log
+          test ! -e obsidian-v2/.runtime/speech-venv
+      - name: Doctor with the shared voice
+        run: |
+          node aos.mjs doctor --ci | tee ci-logs/doctor-shared.log
+          grep -q "PASS Voice service healthy - .*shared service at http://127.0.0.1:3108" ci-logs/doctor-shared.log
+          grep -q "PASS Text to speech" ci-logs/doctor-shared.log
+          grep -q "PASS Speech to text hears it back" ci-logs/doctor-shared.log
+      - name: The monitor runs no speech service of its own, and stop leaves the other program's alone
+        run: |
+          node aos.mjs status > ci-logs/status-shared.json
+          node -e "const s=JSON.parse(require('fs').readFileSync('ci-logs/status-shared.json','utf8'));const ids=s.supervisor.services.map(x=>x.id);console.log(ids,s.bridge.speech.url);if(ids.includes('speech')||s.bridge.speech.url!=='http://127.0.0.1:3108')process.exit(1)"
+          node aos.mjs stop | tee ci-logs/stop-shared.log
+          if grep -q "Stopped speech" ci-logs/stop-shared.log; then echo "stop touched the shared speech service"; exit 1; fi
+          curl -fs http://127.0.0.1:3108/health
+      - name: The other program goes away
+        run: |
+          curl -fs -X POST http://127.0.0.1:3108/quit
+          sleep 2
+          if curl -fs http://127.0.0.1:3108/health; then echo "stand-in still running"; exit 1; fi
+      # Now the ordinary case: nothing to share, so setup installs this installation's own voice.
       - name: Install into a fresh vault, with voice
-        run: node aos.mjs setup --vault "$RUNNER_TEMP/vault" --voice yes --autostart no --ci
+        run: |
+          node aos.mjs setup --vault "$RUNNER_TEMP/vault" --voice yes --autostart no --ci | tee ci-logs/setup-own.log
+          test -e obsidian-v2/.runtime/speech-venv
       - name: Doctor
-        run: node aos.mjs doctor --ci
+        run: |
+          node aos.mjs doctor --ci | tee ci-logs/doctor-own.log
+          grep -q "PASS Voice service healthy - .*this installation's own service on 3220" ci-logs/doctor-own.log
+          grep -q "PASS Speech to text hears it back" ci-logs/doctor-own.log
       - name: Status
         if: always()
         run: node aos.mjs status || true

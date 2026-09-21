@@ -45,13 +45,32 @@ export function mergePrior(services, prior, runtimeDir) {
   return [...services, ...(prior.services || []).filter(service => ['jarvis', 'speech'].includes(service.id) && !ids.has(service.id))];
 }
 
-async function healthySpeech() {
+async function healthySpeech(get = tryJson) {
   for (const port of [PORTS.speech, 3108]) {
-    const health = await tryJson(`${local(port)}/health`, {timeoutMs: 2000});
+    const health = await get(`${local(port)}/health`, {timeoutMs: 2000});
     if (health?.ok && health?.stt?.ok) return local(port);
   }
   return null;
 }
+
+// The one decision about voice, shared by `start` and `setup` so they cannot disagree:
+//   shared - a healthy speech service that is not ours already answers on this computer; the
+//            bridge uses it, and this installation neither starts nor needs a copy of its own
+//   own    - this installation runs its own service on 3220 (only when its files are installed)
+//   healthy - the chosen service answers right now. An address from AOS_V2_SPEECH_URL is honoured
+//            without asking (as before), so it can be shared and NOT healthy: a stale setting.
+export async function speechPlan(at, {get = tryJson, env = process.env, installed = speechInstalled} = {}) {
+  const answers = async url => { const health = await get(`${url}/health`, {timeoutMs: 2000}); return !!(health?.ok && health?.stt?.ok); };
+  const configured = env.AOS_V2_SPEECH_URL || null, found = configured || await healthySpeech(get);
+  const shared = !!found && found !== local(PORTS.speech);
+  const own = !shared && installed(at);
+  return {url: found || (own ? local(PORTS.speech) : null), own, shared, healthy: configured ? await answers(configured) : !!found};
+}
+
+// Where another running copy of this system lives, from what its monitor reports about itself
+// (<folder>/obsidian-v2/.runtime). Empty when the thing on the port is not this system at all.
+export const otherInstallation = monitor => monitor?.kind === 'agentic-os-service-supervisor' && typeof monitor.runtimeDir === 'string' && monitor.runtimeDir
+  ? ` It runs from "${path.resolve(monitor.runtimeDir, '..', '..')}": stop it there first (\`node aos.mjs stop\` in that folder), or keep using that copy.` : '';
 
 const supervisorStatus = (timeoutMs = 2000) => tryJson(`${local(PORTS.supervisor)}/status`, {timeoutMs});
 async function waitForSupervisorExit() {
@@ -71,7 +90,7 @@ export const loginItemBlocks = (owner, env = process.env) => owner === 'other' &
 export async function start({root = projectRoot, resetRecovery = false, log = console.log} = {}) {
   const at = layout(root);
   let supervisor = await supervisorStatus();
-  if (supervisor && (supervisor.kind !== 'agentic-os-service-supervisor' || !samePath(supervisor.runtimeDir, at.runtime))) throw new Error('Port 3221 belongs to another installation; nothing changed.');
+  if (supervisor && (supervisor.kind !== 'agentic-os-service-supervisor' || !samePath(supervisor.runtimeDir, at.runtime))) throw new Error(`Port 3221 belongs to another installation; nothing changed.${otherInstallation(supervisor)}`);
   if (!supervisor && listener(PORTS.supervisor)) throw new Error('An unrecognized service owns port 3221; nothing changed.');
   fs.mkdirSync(at.runtime, {recursive: true});
   if (resetRecovery && supervisor) atomicWrite(at.pause, '{"reason":"explicit recovery reset"}');
@@ -81,9 +100,8 @@ export async function start({root = projectRoot, resetRecovery = false, log = co
     supervisor = null;
   }
   if (resetRecovery) fs.rmSync(at.recoveryState, {force: true});
-  const speechUrl = process.env.AOS_V2_SPEECH_URL || await healthySpeech();
-  const ownSpeech = speechInstalled(at) && (!speechUrl || speechUrl === local(PORTS.speech));
-  let services = desiredServices(at, {speechUrl: speechUrl || (ownSpeech ? local(PORTS.speech) : null), vault: configuredVaultPath(at), jarvisBuilt: fs.existsSync(at.buildId), ownSpeech});
+  const voice = await speechPlan(at);
+  let services = desiredServices(at, {speechUrl: voice.url, vault: configuredVaultPath(at), jarvisBuilt: fs.existsSync(at.buildId), ownSpeech: voice.own});
   if (supervisor && services.some(service => !supervisor.services.some(known => known.id === service.id))) {
     // Reconfigure the monitor alone when an existing installation adds a service.
     atomicWrite(at.pause, '{"reason":"recovery services changed"}');

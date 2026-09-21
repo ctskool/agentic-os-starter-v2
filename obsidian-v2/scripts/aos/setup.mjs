@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {projectRoot} from '../../runner/runtime.mjs';
 import {isWindows, tryJson, sleep, listener, samePath} from './platform.mjs';
-import {layout, start, stop, waitForServices, speechInstalled, bridgeIsOurs, hudIsOurs, PORTS} from './services.mjs';
+import {layout, start, stop, waitForServices, speechInstalled, speechPlan, bridgeIsOurs, hudIsOurs, otherInstallation, PORTS} from './services.mjs';
 import {enableAutostart, autostartOwner} from './autostart.mjs';
 import {setupSpeech} from './speech.mjs';
 import {scaffoldVault} from './vault.mjs';
@@ -62,10 +62,10 @@ function buildHud(at, log) {
 const readState = at => { try { return JSON.parse(fs.readFileSync(path.join(at.runtime, 'aos-setup.json'), 'utf8')); } catch { return {}; } };
 const writeState = (at, state) => { fs.mkdirSync(at.runtime, {recursive: true}); fs.writeFileSync(path.join(at.runtime, 'aos-setup.json'), JSON.stringify(state, null, 1)); };
 
-async function pauseMonitor(at) {
-  if (!await tryJson(`http://127.0.0.1:${PORTS.supervisor}/status`)) return;
+async function pauseMonitor(at, get = tryJson) {
+  if (!await get(`http://127.0.0.1:${PORTS.supervisor}/status`)) return;
   fs.writeFileSync(at.pause, '{"reason":"login item change"}');
-  for (let attempt = 0; attempt < 24 && await tryJson(`http://127.0.0.1:${PORTS.supervisor}/status`, {timeoutMs: 1000}); attempt++) await sleep(500);
+  for (let attempt = 0; attempt < 24 && await get(`http://127.0.0.1:${PORTS.supervisor}/status`, {timeoutMs: 1000}); attempt++) await sleep(500);
 }
 
 // The login item must own the monitor, so hand over: pause ours, install, start through it.
@@ -85,7 +85,7 @@ export async function startAtLogin({root = projectRoot, log = console.log} = {})
 // system must not own the ports, and the vault must not belong to another installation.
 export async function preflight(at, vault, {adopt = false, get = tryJson, find = listener, post} = {}) {
   const monitor = await get(`http://127.0.0.1:${PORTS.supervisor}/status`);
-  if (monitor && !(monitor.kind === 'agentic-os-service-supervisor' && samePath(monitor.runtimeDir, at.runtime))) throw new Error('Another installation of this system (or another program) is running on port 3221. Stop it from its own folder first. Nothing was changed.');
+  if (monitor && !(monitor.kind === 'agentic-os-service-supervisor' && samePath(monitor.runtimeDir, at.runtime))) throw new Error(`Another installation of this system (or another program) is running on port 3221. Nothing was changed.${otherInstallation(monitor) || ' Open http://127.0.0.1:3221/status in a browser to see what it is.'}`);
   if (!monitor && find(PORTS.supervisor)) throw new Error('Another program is using port 3221. Nothing was changed.');
   // Whatever listens on our ports must prove it is this installation; our own monitor running is no excuse.
   if (find(PORTS.bridge) && !await bridgeIsOurs(at, post ? {post} : {})) throw new Error('Another program (or another installation of this system) is using port 3219. Stop it first. Nothing was changed.');
@@ -94,6 +94,38 @@ export async function preflight(at, vault, {adopt = false, get = tryJson, find =
   let owner = null; try { owner = JSON.parse(fs.readFileSync(marker, 'utf8')).runtimeDir; } catch { /* not connected yet */ }
   if (owner && !samePath(owner, at.runtime) && !adopt) throw new Error(`This vault is already connected to another installation (${path.dirname(owner)}). Use that one, or run setup again with --adopt to move the vault to this installation. Nothing was changed.`);
 }
+
+// Voice at setup time: 'off', 'present' (already installed), 'repaired', 'shared' (another program's
+// healthy speech service will be used, so nothing is downloaded) or 'installed'. The question is
+// asked the same way `start` asks it, so setup never downloads a voice the services would not run.
+// explicit = the person typed --voice yes this time: installed files are then checked and repaired
+// (the installer keeps what is complete and fetches what is missing, e.g. an interrupted model).
+export async function prepareVoice(at, {wantVoice, explicit = false, log = console.log, plan = speechPlan, installVoice = setupSpeech, installed = speechInstalled} = {}) {
+  if (!wantVoice) return 'off';
+  const voice = await plan(at);
+  // Only a setting can name a shared service that does not answer; discovery never picks a dead one.
+  if (voice.shared && !voice.healthy) log(`-> Voice: the AOS_V2_SPEECH_URL setting points at ${voice.url}, which is not answering. The services use that address for as long as the setting exists, so voice stays silent until you remove the setting and run \`node aos.mjs stop\`, then \`node aos.mjs start\`.`);
+  if (installed(at)) {
+    if (!explicit) return 'present';
+    log('-> Voice: already installed; checking the files and fetching anything that is missing');
+    await installVoice(at, {log});
+    return 'repaired';
+  }
+  if (voice.shared && voice.healthy) {
+    log(`-> Voice: a speech service is already running on this computer (${voice.url}) and will be shared, so there is nothing to download. If that service ever goes away: \`node aos.mjs stop\`, then \`node aos.mjs setup --voice yes\`, and this installation gets a voice of its own.`);
+    return 'shared';
+  }
+  log('-> Voice: installing (about 1.3 GB the first time: 800 MB of voice models plus the Python packages that run them)');
+  await installVoice(at, {log});
+  return 'installed';
+}
+
+// The services setup waits for: the ones the running monitor watches. Without a monitor answer,
+// the two every installation has.
+export const watchedServices = monitor => {
+  const ids = (monitor?.services || []).map(service => service.id).filter(id => ['bridge', 'jarvis', 'speech'].includes(id));
+  return ids.length ? ids : ['bridge', 'jarvis'];
+};
 
 export async function setup({root = projectRoot, vault, voice, autostart, rebuild = false, ci = false, adopt = false, log = console.log} = {}) {
   const at = layout(root), state = readState(at);
@@ -119,12 +151,13 @@ export async function setup({root = projectRoot, vault, voice, autostart, rebuil
   writeState(at, state);
 
   if (rebuild || hudChanged || bridgeChanged || !fs.existsSync(at.buildId)) buildHud(at, log); else log('-> Jarvis HUD: already built');
-  if (wantVoice && !speechInstalled(at)) { log('-> Voice: installing (about 800 MB of models the first time)'); await setupSpeech(at, {log}); }
+  await prepareVoice(at, {wantVoice, explicit: voice === true, log});
 
   await start({root, log});
   if (autostart === true) await startAtLogin({root, log});
-  const wanted = ['bridge', 'jarvis', ...(wantVoice && speechInstalled(at) ? ['speech'] : [])];
-  log('-> Waiting for services to come up (voice models can take a minute)');
+  // Wait for exactly what the monitor was told to run, not for what happens to be installed.
+  const wanted = watchedServices(await tryJson(`http://127.0.0.1:${PORTS.supervisor}/status`));
+  log(`-> Waiting for services to come up${wanted.includes('speech') ? ' (voice models can take a minute)' : ''}`);
   const pending = await waitForServices(wanted, {timeoutMs: 180000});
   if (pending.length) log(`  still starting: ${pending.join(', ')}`);
   // The bridge mints its access token on first start; the plugin needs a copy.
@@ -133,13 +166,16 @@ export async function setup({root = projectRoot, vault, voice, autostart, rebuil
   return doctor({root, ci, phase: 'install', log});
 }
 
-export async function update({root = projectRoot, log = console.log} = {}) {
+// get, halt, pull and install exist for the tests.
+export async function update({root = projectRoot, log = console.log, get = tryJson, halt = stop, pull, install = setup} = {}) {
   const at = layout(root), repo = path.resolve(at.root, '..'), state = readState(at);
   if (!state.vault) throw new Error('Nothing is installed here yet. Run `node aos.mjs setup --vault "<path>"` first.');
-  const git = args => runStep(`git ${args.join(' ')}`, 'git', args, {cwd: repo, log, timeout: 5 * 60 * 1000});
+  pull ||= () => runStep('git pull --ff-only', 'git', ['pull', '--ff-only'], {cwd: repo, log, timeout: 5 * 60 * 1000});
   // Stop first: packages and the HUD build are replaced on disk, and stop refuses while any task is open.
-  if (await tryJson(`http://127.0.0.1:${PORTS.bridge}/state`)) await stop({root, log});
-  else await pauseMonitor(at);
-  git(['pull', '--ff-only']);
-  return setup({root, vault: state.vault, voice: state.voice, rebuild: true, log});
+  if (await get(`http://127.0.0.1:${PORTS.bridge}/state`)) await halt({root, log});
+  else await pauseMonitor(at, get);
+  pull();
+  // No voice argument: setup takes the saved choice. Passing it would read as "the person typed
+  // --voice yes" and re-run the voice installer (network, minutes) on every update.
+  return install({root, vault: state.vault, rebuild: true, log});
 }
