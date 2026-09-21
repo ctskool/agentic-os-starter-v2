@@ -13,6 +13,9 @@ test('the saved image is picked out of "saved to <folder> as <file>" on every ki
   [`/Users/me/.codex/generated_images/${session}`,`/Users/me/.codex/generated_images/${session}/exec-current.png`],
   [`/Users/me/My Files/.codex/generated_images/${session}`,`/Users/me/My Files/.codex/generated_images/${session}/exec current.png`],
   [`/home/me/.codex/generated_images/${session}`,`/home/me/.codex/generated_images/${session}/exec-current.webp`],
+  // A Windows folder name may end in white space (here a non-breaking space) before the next slash: drive-letter paths keep the old rule.
+  [`C:/Users/Team${String.fromCharCode(160)}/.codex/generated_images/${session}`,`C:/Users/Team${String.fromCharCode(160)}/.codex/generated_images/${session}/exec-current.png`],
+  [`C:/Users/My Team /.codex/generated_images/${session}`,`C:/Users/My Team /.codex/generated_images/${session}/exec-current.png`],
  ];
  for(const [folder,file] of cases)assert.deepEqual(candidates(said(folder,file),session),[{path:file,open:true}],file);
 });

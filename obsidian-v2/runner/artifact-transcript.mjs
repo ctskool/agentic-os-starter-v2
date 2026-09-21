@@ -43,7 +43,8 @@ export function candidates(text,sessionId){
  const escaped=sessionId.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
  // Codex writes "saved to <folder> as <file>". A Windows path cannot run on into the next one (a new drive
  // letter stops it); a POSIX path needs the same stop, which is white space followed by a new root slash.
- const expression=new RegExp(`(?:[A-Za-z]:[\\\\/]|/)(?:(?![A-Za-z]:[\\\\/]|\\s/)[^\\r\\n<>"\\x00])*?generated_images[\\\\/]${escaped}[\\\\/][^\\r\\n<>"\\x00]*?\\.(?:png|jpe?g|webp|gif)(?=[\\s"<>)]|$)`,'gi');
+ // That stop applies to slash-rooted paths only: a drive-letter path is matched exactly as before.
+ const expression=new RegExp(`(?:[A-Za-z]:[\\\\/](?:(?![A-Za-z]:[\\\\/])[^\\r\\n<>"\\x00])*?|/(?:(?![A-Za-z]:[\\\\/]|\\s/)[^\\r\\n<>"\\x00])*?)generated_images[\\\\/]${escaped}[\\\\/][^\\r\\n<>"\\x00]*?\\.(?:png|jpe?g|webp|gif)(?=[\\s"<>)]|$)`,'gi');
  for(const match of text.matchAll(expression))result.push({path:match[0],open:true});
  return result.slice(0,8);
 }
