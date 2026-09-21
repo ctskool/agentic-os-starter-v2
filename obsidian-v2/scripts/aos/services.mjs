@@ -63,6 +63,11 @@ function atomicWrite(file, text) {
   fs.writeFileSync(temp, text); fs.renameSync(temp, file);
 }
 
+// Another installation's login item normally blocks a start. The one deliberate exception is a
+// side-by-side trial while that other installation is stopped: AOS_V2_TRIAL_BESIDE_OTHER_INSTALL=1.
+// The monitor is then started directly and the foreign login item is never touched.
+export const loginItemBlocks = (owner, env = process.env) => owner === 'other' && env.AOS_V2_TRIAL_BESIDE_OTHER_INSTALL !== '1';
+
 export async function start({root = projectRoot, resetRecovery = false, log = console.log} = {}) {
   const at = layout(root);
   let supervisor = await supervisorStatus();
@@ -93,7 +98,7 @@ export async function start({root = projectRoot, resetRecovery = false, log = co
   if (supervisor) { log('Recovery is already running. Existing services and conversations were retained.'); return {started: false}; }
   // A login item owns the monitor when one is installed, so it survives this shell.
   const owner = autostartOwner(at);
-  if (owner === 'other') throw new Error('A different installation owns the recovery login item.');
+  if (loginItemBlocks(owner)) throw new Error('A different installation owns the start-at-login item, so two copies would fight at the next login. Turn it off from that installation first (`node aos.mjs autostart off` in its folder). Nothing was started.');
   if (!(owner === 'ours' && kickAutostart(at))) {
     const child = spawn(process.execPath, [at.supervisor, '--config', at.config], {cwd: at.root, detached: true, windowsHide: true, stdio: 'ignore'});
     child.unref();

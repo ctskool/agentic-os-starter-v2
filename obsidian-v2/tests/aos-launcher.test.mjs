@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {parseLsofPids, parsePsLine, parseWindowsProcess, samePath, which, listener, openUrl} from '../scripts/aos/platform.mjs';
-import {layout, desiredServices, mergePrior, bridgeIsOurs, hudIsOurs, speechIsOurs, stop, PORTS} from '../scripts/aos/services.mjs';
+import {layout, desiredServices, mergePrior, bridgeIsOurs, hudIsOurs, speechIsOurs, loginItemBlocks, stop, PORTS} from '../scripts/aos/services.mjs';
 import {launchAgentPlist, scheduledTaskScript, autostartOwner, taskOwner, plistArguments, launchctlArguments, AGENT_LABEL, TASK_NAME} from '../scripts/aos/autostart.mjs';
 import {preflight} from '../scripts/aos/setup.mjs';
 import {scaffoldVault, pluginEnabled} from '../scripts/aos/vault.mjs';
@@ -217,6 +217,13 @@ test('a login item is ours only when it parses to exactly what this launcher reg
   assert.equal(autostartOwner(at, agent(file(['node', at.supervisor, '--config', at.config]), null)), 'other', 'a relative program is not what this launcher registers');
   for (const unanswered of [{status: 1, stdout: '', stderr: 'Operation not permitted'}, {status: null, stdout: '', error: new Error('ETIMEDOUT')}, {status: 113, stdout: '', stderr: ''}])
     assert.equal(autostartOwner(at, agent(file(mine), unanswered)), 'other', 'a question launchd did not answer is never "nothing is loaded"');
+});
+
+test('another installation\'s login item blocks a start unless a side-by-side trial was asked for explicitly', () => {
+  assert.equal(loginItemBlocks('other', {}), true);
+  assert.equal(loginItemBlocks('other', {AOS_V2_TRIAL_BESIDE_OTHER_INSTALL: 'yes'}), true, 'only the exact value counts');
+  assert.equal(loginItemBlocks('other', {AOS_V2_TRIAL_BESIDE_OTHER_INSTALL: '1'}), false);
+  assert.equal(loginItemBlocks('ours', {}), false); assert.equal(loginItemBlocks(null, {}), false);
 });
 
 test('a vault is completed without overwriting a note, and only a brand-new vault gets Obsidian settings', () => {
