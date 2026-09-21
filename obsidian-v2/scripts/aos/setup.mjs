@@ -23,6 +23,19 @@ function runStep(label, command, args, {cwd, log, timeout = 30 * 60 * 1000, shel
 }
 const npm = (label, args, cwd, log) => runStep(label, isWindows ? 'npm.cmd' : 'npm', args, {cwd, log, shell: isWindows});
 
+// macOS and Linux: the terminal component starts shells through a small helper program that some
+// installs unpack without its "executable" flag; every terminal then fails with "posix_spawnp failed".
+export function fixPtyHelper(dir) {
+  if (isWindows) return [];
+  const base = path.join(dir, 'node_modules', 'node-pty'), fixed = [];
+  const candidates = [path.join(base, 'build', 'Release', 'spawn-helper')];
+  try { for (const name of fs.readdirSync(path.join(base, 'prebuilds'))) candidates.push(path.join(base, 'prebuilds', name, 'spawn-helper')); } catch { /* built from source */ }
+  for (const file of candidates) {
+    try { const mode = fs.statSync(file).mode; if ((mode & 0o111) !== 0o111) { fs.chmodSync(file, mode | 0o755); fixed.push(file); } } catch { /* not present on this platform */ }
+  }
+  return fixed;
+}
+
 // Installs only when the lockfile changed since the last successful install.
 function installPackages(dir, label, log, stamps) {
   const lock = hashOf(path.join(dir, 'package-lock.json'));
@@ -91,6 +104,7 @@ export async function setup({root = projectRoot, vault, voice, autostart, rebuil
 
   const bridgeChanged = installPackages(at.root, 'Bridge and plugin', log, state.stamps);
   const hudChanged = installPackages(at.jarvis, 'Jarvis HUD', log, state.stamps);
+  if (fixPtyHelper(at.root).length) log('-> Terminal helper: made executable');
   writeState(at, state);
   npm('Obsidian plugin: building', ['run', 'build'], at.root, log);
 

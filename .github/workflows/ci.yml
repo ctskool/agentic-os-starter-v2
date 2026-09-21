@@ -26,6 +26,21 @@ jobs:
       - name: Build the plugin
         working-directory: obsidian-v2
         run: npm run build
+      # What `aos setup` does on a Mac: the terminal helper must be executable.
+      - name: Terminal helper is executable
+        shell: bash
+        run: node -e "import('./obsidian-v2/scripts/aos/setup.mjs').then(m => console.log(m.fixPtyHelper('obsidian-v2')))"
+      # macOS keeps its temp folder behind a link (/var -> /private/var); the storage checks refuse links by design.
+      - name: Temp folder without links
+        if: runner.os == 'macOS'
+        shell: bash
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Stand-in for the coding CLIs
+        # Some routing tests only need "a provider is installed"; no CLI is ever run by them.
+        shell: bash
+        run: |
+          echo "AOS_CODEX_BIN=$(node -p process.execPath)" >> "$GITHUB_ENV"
+          echo "AOS_CLAUDE_BIN=$(node -p process.execPath)" >> "$GITHUB_ENV"
       - name: Bridge tests
         working-directory: obsidian-v2
         run: node --test --test-concurrency=2 --test-timeout=90000 "tests/*.test.mjs"
