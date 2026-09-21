@@ -14,7 +14,7 @@ test('a success summary cannot stand in for a missing report',()=>{
  assert.throws(()=>parseWorkerResult({status:'ok',summary:'Weekly report generated.',markdown:'  '}),/without the report/);
  assert.deepEqual(parseWorkerResult({status:'blocked',summary:'Calendar unavailable',markdown:''}),{status:'blocked',summary:'Calendar unavailable',text:'Calendar unavailable'});
 });
-function vault(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'headless-adapter-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));return root}
+function vault(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'headless-adapter-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:200}));return root}
 
 test('full workflow CLI uses authenticated user connectors; classifiers retain isolation',()=>{
  for(const provider of ['codex','claude']){

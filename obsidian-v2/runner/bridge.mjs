@@ -26,6 +26,7 @@ import {NativeTerminalManager} from './native-terminals.mjs';
 import {readCurrentState,readConversationEpoch,setCurrent,taskInScope,reconcileCurrent} from './current-conversations.mjs';
 import {replaceDaily} from './note-edits.mjs';
 import {resolveSpeechService,spokenFlow} from './speech-service.mjs';
+import {speechEvents} from './speech-events.mjs';
 import {createBridgeAuth} from './bridge-auth.mjs';
 import {startLifecycle} from './lifecycle.mjs';
 import {waitForResponseDrain} from './stream-backpressure.mjs';
@@ -74,15 +75,10 @@ terminals.onChange=r=>{
  const attention=attentionEpisodes.next(r);
  if(attention)hub.publish(attention.id,workAttentionSpeech(r.provider,attention.state,attention.reason),{appScope:r.appScope||(r.execution==='native'?'native':'web'),kind:attention.state==='error'?'error':'attention',taskId:r.id,label:completionLabel(r)});
 };
-let speechSocket=null,speechRetry=null;
-function connectSpeechEvents(){
- if(typeof WebSocket==='undefined')return;
- speechSocket=new WebSocket(speech.replace(/^http/,'ws')+'/events');
- // A real capture start (wake) also warms the Codex binary, off this event loop; see cli-warmup.mjs.
- speechSocket.onmessage=e=>{try{preconnectJev()}catch{}let message;try{message=JSON.parse(String(e.data))}catch{return}try{warmOnWake(message)}catch{}try{hub.capture(message)}catch{}};
- speechSocket.onerror=()=>speechSocket.close();speechSocket.onclose=()=>{speechRetry=setTimeout(connectSpeechEvents,5000);speechRetry.unref()};
-}
-connectSpeechEvents();
+// A real capture start (wake) also warms the Codex binary, off this event loop; see cli-warmup.mjs.
+// Connecting, failing and retrying live in speech-events.mjs: a speech service that is not accepting
+// sockets must never be able to take the bridge down.
+const speechLink=speechEvents(speech.replace(/^http/,'ws')+'/events',e=>{try{preconnectJev()}catch{}let message;try{message=JSON.parse(String(e.data))}catch{return}try{warmOnWake(message)}catch{}try{hub.capture(message)}catch{}});
 
 const origins=new Set(['http://127.0.0.1:3217','http://localhost:3217','http://127.0.0.1:3218','app://obsidian.md']);
 const uuid=id=>typeof id==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id);
@@ -192,12 +188,12 @@ server.on('request',async(req,res)=>{
     case '/work/keep':return json(terminals.setKeep(b.id,b.keep));
    }
   }
-  if(['/services','/work/services'].includes(url.pathname)&&req.method==='GET')return json({bridge:{online:true,pid:process.pid,uptimeSeconds:Math.round(process.uptime()),memoryMiB:Math.round(process.memoryUsage().rss/1048576)},surfaces:hub.live(),providers:providerHealth(),voice:fastVoiceStatus(),speech:{eventsConnected:speechSocket?.readyState===1,url:speech,shared:speech.endsWith(':3108'),health:await speechHealth(),captureEvents:hub.captureDiagnostics()},tasks:terminals.list().map(t=>({id:t.id,title:t.title,state:t.state,provider:t.provider})),legacyQueue:{online:!!health(root),pending:list('queue').length},shutdownCommand:'scripts/services.ps1 -Action Stop',note:'Only V2-owned services are stopped. The shared speech service and original V1 services are retained.'});
+  if(['/services','/work/services'].includes(url.pathname)&&req.method==='GET')return json({bridge:{online:true,pid:process.pid,uptimeSeconds:Math.round(process.uptime()),memoryMiB:Math.round(process.memoryUsage().rss/1048576)},surfaces:hub.live(),providers:providerHealth(),voice:fastVoiceStatus(),speech:{eventsConnected:speechLink.connected(),url:speech,shared:speech.endsWith(':3108'),health:await speechHealth(),captureEvents:hub.captureDiagnostics()},tasks:terminals.list().map(t=>({id:t.id,title:t.title,state:t.state,provider:t.provider})),legacyQueue:{online:!!health(root),pending:list('queue').length},shutdownCommand:'scripts/services.ps1 -Action Stop',note:'Only V2-owned services are stopped. The shared speech service and original V1 services are retained.'});
   if(url.pathname==='/shutdown'&&req.method==='POST'){
    if([...terminals.live.keys()].some(id=>terminals.get(id).execution!=='native')||active.size||classifierProcesses().total)return json({error:'Stop active terminal tasks and voice requests first. Saved conversations and message-box drafts are retained.'},409);
    // Persist intent before releasing the port so recovery cannot undo an explicit Stop.
    fs.writeFileSync(path.join(base,'.runtime/services-paused.json'),JSON.stringify({ts:new Date().toISOString(),reason:'idle shutdown request'}));
-   json({ok:true});lifecycle?.stop('idle shutdown request');dropPreparedJev();closeClaudeSignIn();terminals.close();clearInterval(artifactTimer);if(speechRetry)clearTimeout(speechRetry);if(speechSocket){speechSocket.onclose=null;speechSocket.close()}for(const response of listeners.values())response.end();server.close();setTimeout(()=>server.closeAllConnections(),500).unref();return;
+   json({ok:true});lifecycle?.stop('idle shutdown request');dropPreparedJev();closeClaudeSignIn();terminals.close();clearInterval(artifactTimer);speechLink.stop();for(const response of listeners.values())response.end();server.close();setTimeout(()=>server.closeAllConnections(),500).unref();return;
   }
   if(url.pathname==='/status'&&req.method==='GET')return json(bridgeStatus());
   if(url.pathname==='/state'&&req.method==='GET')return json({...bridgeStatus(),runs:list('runs').sort((a,b)=>(b.ts_started||'').localeCompare(a.ts_started||'')).slice(0,20),queue:[]});
@@ -291,4 +287,4 @@ server.on('request',async(req,res)=>{
 }
 process.on('uncaughtExceptionMonitor',error=>lifecycle?.mark('uncaught-exception',{code:error.code||error.name}));
 process.on('exit',code=>{if(code===0)lifecycle?.stop('process exit');else lifecycle?.mark('exit',{exitCode:code})});
-for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{{const open=classifierProcesses();if(open.total)lifecycle?.mark('classifiers-open-at-shutdown',{reason:`running=${open.running} detached=${open.detached}`})}lifecycle?.stop(signal);closeClaudeSignIn();for(const c of active.values())c.abort();drainDetachedClassifiers({timeoutMs:12000}).then(drained=>{if(drained.remaining)console.error(`[shutdown] ${drained.remaining} classifier process(es) did not confirm closure.`)});terminals.close();clearInterval(artifactTimer);if(speechRetry)clearTimeout(speechRetry);if(speechSocket){speechSocket.onclose=null;speechSocket.close()}for(const response of listeners.values())response.end();server.close()});
+for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{{const open=classifierProcesses();if(open.total)lifecycle?.mark('classifiers-open-at-shutdown',{reason:`running=${open.running} detached=${open.detached}`})}lifecycle?.stop(signal);closeClaudeSignIn();for(const c of active.values())c.abort();drainDetachedClassifiers({timeoutMs:12000}).then(drained=>{if(drained.remaining)console.error(`[shutdown] ${drained.remaining} classifier process(es) did not confirm closure.`)});terminals.close();clearInterval(artifactTimer);speechLink.stop();for(const response of listeners.values())response.end();server.close()});
