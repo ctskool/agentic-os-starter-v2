@@ -36,12 +36,14 @@ function strings(content,depth=0){
  if(['input_image','image','image_url'].includes(content.type))return [];
  return [...strings(content.text,depth+1),...strings(content.content,depth+1)];
 }
-function candidates(text,sessionId){
+export function candidates(text,sessionId){
  const result=linkedArtifacts(text);
  // The path must occur in actual tool output and include this exact session.
  // Validate realpath, file type, size and provenance again when registering.
  const escaped=sessionId.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
- const expression=new RegExp(`(?:[A-Za-z]:[\\\\/]|/)(?:(?![A-Za-z]:[\\\\/])[^\\r\\n<>"\\x00])*?generated_images[\\\\/]${escaped}[\\\\/][^\\r\\n<>"\\x00]*?\\.(?:png|jpe?g|webp|gif)(?=[\\s"<>)]|$)`,'gi');
+ // Codex writes "saved to <folder> as <file>". A Windows path cannot run on into the next one (a new drive
+ // letter stops it); a POSIX path needs the same stop, which is white space followed by a new root slash.
+ const expression=new RegExp(`(?:[A-Za-z]:[\\\\/]|/)(?:(?![A-Za-z]:[\\\\/]|\\s/)[^\\r\\n<>"\\x00])*?generated_images[\\\\/]${escaped}[\\\\/][^\\r\\n<>"\\x00]*?\\.(?:png|jpe?g|webp|gif)(?=[\\s"<>)]|$)`,'gi');
  for(const match of text.matchAll(expression))result.push({path:match[0],open:true});
  return result.slice(0,8);
 }
