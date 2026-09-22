@@ -55,7 +55,9 @@ With this installation's own voice service enabled, use **Control–Option–J**
 
 ## How it works
 
-[![How Agentic OS works: the dashboards connect to the local bridge, agents write to your vault, and local voice and optional Jev help handle spoken requests](docs/assets/architecture.svg)](docs/assets/architecture.svg)
+[![Agentic OS overview: Obsidian and Jarvis HUD connect through the bridge, with local voice, Jev routing, and a shared vault](docs/assets/how-it-works.png)](https://raw.githubusercontent.com/ctskool/agentic-os-starter-v2/main/docs/assets/how-it-works.png)
+
+*Conceptual overview. Click the diagram to open the full-size image.*
 
 You ask or click. The bridge coordinates the work, your chosen agent carries it out, and the dashboards read the results from your vault.
 
