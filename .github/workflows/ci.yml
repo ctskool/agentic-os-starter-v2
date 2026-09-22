@@ -17,6 +17,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Voice shortcut unit tests (no microphone or OS hooks)
+        run: python obsidian-v2/tests/mac-hotkey.test.py
       - name: Bridge and plugin packages
         working-directory: obsidian-v2
         run: npm ci --no-audit --no-fund

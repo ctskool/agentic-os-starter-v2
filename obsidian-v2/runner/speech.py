@@ -1,4 +1,4 @@
-"""Standalone V2 speech and optional Windows push-to-talk; no V1 imports."""
+"""Standalone V2 speech and optional Windows/macOS voice shortcut; no V1 imports."""
 import argparse
 import asyncio
 from contextlib import asynccontextmanager

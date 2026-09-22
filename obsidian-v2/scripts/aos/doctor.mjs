@@ -16,6 +16,7 @@ const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')
 const SUPERVISOR_LOG = 'obsidian-v2/.runtime/service-supervisor.jsonl';
 const SHOW_SOMEONE = `Show your coding agent this line together with the last 30 lines of ${SUPERVISOR_LOG}, or post both in the community.`;
 const VOICE_CHECKS = ['Voice service healthy', 'Text to speech', 'Speech to text hears it back'];
+const HOTKEY_CHECK = 'Global voice shortcut';
 const STILL_STARTING = new Set(['checking', 'starting', 'waiting_for_listener', 'backoff']);
 
 // Why the voice line failed, from what the bridge, the monitor and the disk say. Pure.
@@ -36,10 +37,34 @@ export function voiceProblem({probe, speechUrl, own, installed, phase, waitedSec
   return {detail: 'its process is running but reports that it is not ready', fix: `Run \`node aos.mjs stop\`, then \`node aos.mjs start\`. If it repeats, repair the files with \`node aos.mjs setup --voice yes\`.`};
 }
 
+// The speech health response can report microphone or helper failures in hotkey.error.
+// Only known conflict codes/messages justify telling the member to change keys.
+export function hotkeyProblem({hotkey, capture, platform}) {
+  const error = String(capture?.error || hotkey?.error || '').slice(0, 300);
+  const detail = error || (capture?.available === false ? 'microphone support is unavailable' : 'the speech service could not register the shortcut');
+  const inspect = `Read the lines that mention "speech" in ${SUPERVISOR_LOG}. ${SHOW_SOMEONE}`;
+  if (/^Microphone dependency unavailable:/i.test(error) || capture?.available === false) return {detail,
+    fix: {first: 'After finishing active tasks, run `node aos.mjs stop`, then `node aos.mjs setup --voice yes` to repair microphone support.',
+      repeated: `Microphone support is still unavailable after the repair advice. ${inspect}`}};
+  if (capture?.error || /^Capture failed:/i.test(error)) return {detail,
+    fix: `Check the microphone input and microphone permission for the local Python speech process in ${platform === 'darwin' ? 'System Settings > Privacy & Security > Microphone' : 'Windows Settings > Privacy & security > Microphone (including desktop apps)'}. Then test the shortcut again. ${inspect}`};
+  const launchSetting = "Change the speech service's launch configuration; a terminal-only environment change does not save a login setting.";
+  if (/^(Use modifiers plus one letter or digit|A hotkey needs a letter or digit|Mac hotkeys (require Control or Command|support ANSI physical letter and digit keys))/i.test(error)) return {detail,
+    fix: `Correct the invalid VOICE_HOTKEY setting, or remove the custom setting to restore ctrl+alt+j. Use modifiers plus one ASCII letter or digit; on Mac include ctrl (Control) or win (Command). ${launchSetting} Restart Agentic OS after finishing active tasks.`};
+  // ERROR_HOTKEY_ALREADY_REGISTERED / eventHotKeyExistsErr. Other OS error
+  // codes use the same "another app may own it" runtime text, so do not match it.
+  if (/\(Windows error 1409\)|\(macOS error -9878\)|already (?:owned|registered)/i.test(error)) return {detail,
+    fix: `Another app has registered the key combination. Free it or choose another VOICE_HOTKEY combination. ${launchSetting} Restart Agentic OS after finishing active tasks. ${platform === 'darwin' ? 'On Mac, use Control+Option for ctrl+alt.' : 'On Windows, use Ctrl+Alt for ctrl+alt.'} The HUD microphone button is an alternative while resolving this.`};
+  if (/^(?:Mac )?hotkey (?:helper|registration timed out|event )|^Mac hotkeys must run on the macOS helper main thread/i.test(error)) return {detail,
+    fix: {first: 'The shortcut listener failed to start or keep running. After finishing active tasks, run `node aos.mjs stop`, then `node aos.mjs start` once.',
+      repeated: `The shortcut listener failed again. ${inspect}`}};
+  return {detail, fix: `The shortcut failure's cause is not identified. ${inspect}`};
+}
+
 // phase 'install' = before the user has opened Obsidian: the plugin switch is WAIT, not FAIL.
-// ports, runCommand, pause, now and voiceWaitMs exist for the tests; members never pass them.
+// ports, runCommand, pause, now, voiceWaitMs and platform exist for the tests; members never pass them.
 export async function doctor({root = projectRoot, ci = false, full = false, phase = 'ready', log = console.log,
-  ports = PORTS, runCommand = run, pause = sleep, now = Date.now, voiceWaitMs = 90000} = {}) {
+  ports = PORTS, runCommand = run, pause = sleep, now = Date.now, voiceWaitMs = 90000, platform = process.platform} = {}) {
   const at = layout(root), setup = readJson(path.join(at.runtime, 'aos-setup.json')), results = [];
   const local = port => `http://127.0.0.1:${port}`;
   const memoryFile = path.join(at.runtime, 'aos-doctor-last.json'), before = readJson(memoryFile).failures || {}, failing = {};
@@ -120,8 +145,10 @@ export async function doctor({root = projectRoot, ci = false, full = false, phas
   if (!ci && services && !installed.length) add('FAIL', 'At least one of Claude Code or Codex', 'neither found', 'Install Claude Code or Codex, sign in, then run `node aos.mjs setup` again so its location is saved.');
   else if (!ci && installed.length && !signedIn.length) add('FAIL', 'A provider that is signed in', `${installed.join(' and ')} installed, none answered`, 'Nothing can run without one. Open a terminal, run `claude` or `codex`, sign in, then run the doctor again.');
 
-  if (setup.voice === false) add('SKIP', 'Voice', 'not installed (add later: `node aos.mjs setup --voice yes`)');
-  else await group(VOICE_CHECKS, async () => {
+  if (setup.voice === false) {
+    add('SKIP', 'Voice', 'not installed (add later: `node aos.mjs setup --voice yes`)');
+    add('SKIP', HOTKEY_CHECK, 'voice was not enabled');
+  } else await group([VOICE_CHECKS[0], HOTKEY_CHECK, ...VOICE_CHECKS.slice(1)], async () => {
     if (!services?.bridge?.online) return bridgeDown;
     const healthUrl = `${local(ports.bridge)}/voice/health`, speechUrl = services.speech?.url || local(ports.speech), own = speechUrl === local(ports.speech);
     const speechPhase = () => supervisor?.services?.find(service => service.id === 'speech')?.phase || '';
@@ -149,6 +176,19 @@ export async function doctor({root = projectRoot, ci = false, full = false, phas
     }
     const whose = own ? `this installation's own service on ${ports.speech}` : `shared service at ${speechUrl}, run by another program on this computer`;
     add('PASS', VOICE_CHECKS[0], `${probe.data.engine ? probe.data.engine + ', ' : ''}${whose}`);
+    // Use the fresh health response: provider sign-in and model loading can outlive
+    // the initial /services snapshot. Registration is not proof of microphone access.
+    const hotkey = probe.data.speech?.hotkey;
+    if (!own) add('SKIP', HOTKEY_CHECK, 'the shared speech service is managed by another program');
+    else if (!['darwin', 'win32'].includes(platform)) add('SKIP', HOTKEY_CHECK, 'supported on Mac and Windows; use the voice orb on this platform');
+    else if (hotkey?.enabled === false) add('SKIP', HOTKEY_CHECK, 'disabled by the voice service configuration');
+    else if (ci) add('SKIP', HOTKEY_CHECK, 'not checked with --ci; run the doctor in your interactive desktop session');
+    else if (hotkey?.enabled !== true || typeof hotkey.ok !== 'boolean') add('WAIT', HOTKEY_CHECK, 'the running speech service does not report shortcut registration; update the starter and restart its services, then run the doctor again');
+    else if (hotkey.ok) add('PASS', HOTKEY_CHECK, `${hotkey.combo || 'configured shortcut'} registered; microphone capture and use from another app still need a hands-on test`);
+    else {
+      const problem = hotkeyProblem({hotkey, capture: probe.data.speech?.capture, platform});
+      add('FAIL', HOTKEY_CHECK, problem.detail, problem.fix, {optional: true});
+    }
     // The same two calls the bridge makes, against the same service, own or shared.
     const repair = own ? 'Run `node aos.mjs setup --voice yes` again to repair the voice files.' : `The shared speech service at ${speechUrl} answers its health check but cannot do this; restart the program that runs it.`;
     const spoken = await request(`${speechUrl}/speak?text=${encodeURIComponent('Voice check, one two three.')}`, {timeoutMs: 60000});

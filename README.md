@@ -82,7 +82,9 @@ A stock V2 starter can be updated as a complete release. V1 can move to V2 using
 Windows 10/11 and macOS.
 
 > [!WARNING]
-> **macOS is new (beta).** The install and the background services are checked automatically on a Mac; the microphone, Obsidian and the HUD have had far less real-world use there than on Windows, so reports are welcome. Known gaps: no global push-to-talk hotkey (use the microphone button) and the Claude weekly-usage meter may read "unavailable".
+> **macOS is new (beta).** The install and the background services are checked automatically on a Mac; the microphone, Obsidian and the HUD have had far less real-world use there than on Windows, so reports are welcome. The Claude weekly-usage meter may read "unavailable".
+
+With this installation's own voice service enabled, **Control–Option–J** on Mac (**Ctrl–Alt–J** on Windows) starts listening from another app. Press once, speak, then pause: about 1.6 seconds of silence stops recording and sends the request. Keep Obsidian running with the Agentic OS orb enabled, or keep the HUD visible. The shortcut starts with voice, including at login if you chose autostart. See [voice shortcut setup and testing](docs/MAC-VOICE.md).
 
 ### Prefer to do it by hand?
 

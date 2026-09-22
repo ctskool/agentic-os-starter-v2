@@ -16,6 +16,7 @@ const workers = [];
 after(async () => { await Promise.all(workers.map(worker => worker.terminate())); fs.rmSync(scratch, {recursive: true, force: true}); });
 
 const VOICE = ['Voice service healthy', 'Text to speech', 'Speech to text hears it back'];
+const HOTKEY = 'Global voice shortcut';
 const freeze = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 // Unless a test says otherwise: one coding CLI is installed and answers its sign-in check.
@@ -89,6 +90,163 @@ test('this installation\'s own speech service reads as PASS and says it is its o
   for (const name of VOICE) assert.equal(found.line(name).status, 'PASS');
 });
 
+test('Mac and Windows shortcut registration uses fresh voice health, without claiming microphone verification', async () => {
+  for (const platform of ['darwin', 'win32']) {
+    const services = await fakeServices({speech: 'own', hotkey: {enabled: true, combo: 'ctrl+alt+j', ok: false, error: 'Earlier conflict'}});
+    const found = await examine(services, installation({installed: true}), {platform,
+      runCommand: async () => {
+        await services.set({hotkey: {enabled: true, combo: 'ctrl+alt+k', ok: true, error: null}});
+        return {status: 0, stdout: 'OK'};
+      }});
+    assert.equal(found.line(HOTKEY).status, 'PASS', found.text);
+    assert.match(found.line(HOTKEY).detail, /ctrl\+alt\+k registered/);
+    assert.match(found.line(HOTKEY).detail, /microphone capture and use from another app still need a hands-on test/);
+    assert.equal(found.failed, 0, found.text);
+  }
+});
+
+test('shortcut registration failure is an optional failure while speech still gets its round trip', async () => {
+  for (const platform of ['darwin', 'win32']) {
+    const services = await fakeServices({speech: 'own'});
+    const found = await examine(services, installation({installed: true}), {platform,
+      runCommand: async () => {
+        await services.set({hotkey: {enabled: true, combo: 'ctrl+alt+j', ok: false, error: 'Already owned by another app'}});
+        return {status: 0, stdout: 'OK'};
+      }});
+    assert.equal(found.line(HOTKEY).status, 'FAIL'); assert.equal(found.line(HOTKEY).optional, true);
+    assert.match(found.line(HOTKEY).detail, /Already owned by another app/);
+    assert.match(found.text, /choose another VOICE_HOTKEY combination/);
+    for (const name of VOICE) assert.equal(found.line(name).status, 'PASS');
+    assert.equal(found.failed, 1); assert.equal(found.coreFailed, 0); assert.equal(found.ok, false);
+    assert.match(found.lines.at(-1), /1 optional part\(s\) need attention: Global voice shortcut/);
+    assert.doesNotMatch(found.lines.at(-1), /All checks passed/);
+  }
+});
+
+// These are the speech runtime's real failure messages. The doctor must diagnose
+// each without assuming that every failed registration means another app owns J.
+async function shortcutFailure(error, {capture, platform = 'darwin', services, install} = {}) {
+  services ||= await fakeServices({speech: 'own'});
+  install ||= installation({installed: true});
+  await services.set({hotkey: {enabled: true, combo: 'ctrl+alt+j', ok: false, error}, capture});
+  const found = await examine(services, install, {platform});
+  assert.equal(found.line(HOTKEY).status, 'FAIL', found.text);
+  assert.equal(found.line(HOTKEY).optional, true);
+  assert.equal(found.failed, 1); assert.equal(found.coreFailed, 0);
+  for (const name of VOICE) assert.equal(found.line(name).status, 'PASS', found.text);
+  const advice = found.lines.find(line => line.startsWith(`FAIL ${HOTKEY}`)).split('\n     fix: ')[1];
+  return {...found, advice};
+}
+
+test('shortcut advice repairs missing microphone support instead of changing keys', async () => {
+  for (const [error, capture] of [
+    ['Microphone dependency unavailable: ModuleNotFoundError', undefined],
+    [null, {available: false, error: null}],
+    ['Mac hotkey helper stopped; restart voice to register it again.', {available: false, error: 'Microphone dependency unavailable: OSError'}],
+  ]) {
+    const found = await shortcutFailure(error, {capture});
+    assert.match(found.advice, /setup --voice yes/);
+    assert.match(found.advice, /microphone support/i);
+    assert.doesNotMatch(found.advice, /another app|choose another|VOICE_HOTKEY/i);
+    if (capture?.error) assert.equal(found.line(HOTKEY).detail, capture.error);
+  }
+});
+
+test('shortcut advice checks microphone input and permission for capture failures', async () => {
+  for (const platform of ['darwin', 'win32']) {
+    const found = await shortcutFailure('Capture failed: PortAudioError', {platform, capture: {available: true, error: 'Capture failed: PortAudioError'}});
+    assert.match(found.advice, /microphone input/i);
+    assert.match(found.advice, /microphone permission/i);
+    assert.match(found.advice, /speech process/i);
+    assert.doesNotMatch(found.advice, /another app|choose another|setup --voice yes/i);
+  }
+});
+
+test('shortcut advice identifies helper failures and stops repeating restart advice', async () => {
+  const services = await fakeServices({speech: 'own'}), install = installation({installed: true});
+  for (const error of [
+    'Mac hotkey registration timed out; use the microphone button.',
+    'Hotkey registration timed out.',
+    'Mac hotkey helper exited during registration.',
+    'Mac hotkey helper stopped; restart voice to register it again.',
+    'Mac hotkey helper sent an invalid response.',
+    'Mac hotkey helper sent an unexpected response.',
+    'Mac hotkey event loop failed (macOS error -9870).',
+  ]) {
+    const found = await shortcutFailure(error, {services, install});
+    assert.match(found.advice, /shortcut (helper|listener)/i);
+    assert.match(found.advice, /node aos\.mjs stop.*node aos\.mjs start/);
+    assert.doesNotMatch(found.advice, /another app|choose another|VOICE_HOTKEY/i);
+    const repeated = await shortcutFailure(error, {services, install});
+    assert.match(repeated.advice, /service-supervisor\.jsonl/);
+    assert.match(repeated.advice, /coding agent/);
+    assert.doesNotMatch(repeated.advice, /run `node aos\.mjs (stop|start)`/i);
+  }
+});
+
+test('shortcut advice reserves key-conflict remedies for known conflicts', async () => {
+  for (const [platform, error] of [
+    ['darwin', 'Mac hotkey unavailable (macOS error -9878); another app may own it.'],
+    ['win32', 'Hotkey unavailable (Windows error 1409); another app may own it.'],
+  ]) {
+    const found = await shortcutFailure(error, {platform});
+    assert.match(found.advice, /choose another VOICE_HOTKEY combination/);
+    assert.match(found.advice, /speech service.*launch configuration/);
+    assert.match(found.advice, /does not save.*login/i);
+  }
+});
+
+test('shortcut advice fixes invalid configuration where the speech service is launched', async () => {
+  for (const error of [
+    'Use modifiers plus one letter or digit, such as ctrl+alt+j.',
+    'A hotkey needs a letter or digit.',
+    'Mac hotkeys require Control or Command (win), plus a letter or digit.',
+    'Mac hotkeys support ANSI physical letter and digit keys.',
+  ]) {
+    const found = await shortcutFailure(error);
+    assert.match(found.advice, /invalid.*VOICE_HOTKEY/i);
+    assert.match(found.advice, /launch configuration/);
+    assert.match(found.advice, /ctrl\+alt\+j/);
+    assert.match(found.advice, /does not save.*login/i);
+    assert.doesNotMatch(found.advice, /another app|key conflict/i);
+  }
+});
+
+test('shortcut advice admits unknown registration failures instead of inventing a conflict', async () => {
+  for (const error of [null, 'Unrecognized registration problem',
+    'Hotkey unavailable (Windows error 5); another app may own it.',
+    'Mac hotkey unavailable (macOS error -50); another app may own it.']) {
+    const found = await shortcutFailure(error);
+    assert.match(found.advice, /cause.*not identified/i);
+    assert.match(found.advice, /service-supervisor\.jsonl/);
+    assert.match(found.advice, /coding agent/);
+    assert.doesNotMatch(found.advice, /another app|choose another|VOICE_HOTKEY/i);
+  }
+});
+
+test('shared, disabled, unsupported and CI shortcuts explain why registration is skipped', async () => {
+  for (const [state, options, reason] of [
+    [{speech: 'shared'}, {platform: 'darwin'}, /managed by another program/],
+    [{speech: 'own', hotkey: {enabled: false, ok: false}}, {platform: 'darwin'}, /disabled/],
+    [{speech: 'own', hotkey: {enabled: true, ok: false, error: 'Unsupported'}}, {platform: 'linux'}, /supported on Mac and Windows/],
+    [{speech: 'own', hotkey: {enabled: true, ok: false, error: 'No desktop'}}, {platform: 'darwin', ci: true}, /not checked with --ci/],
+  ]) {
+    const found = await examine(await fakeServices(state), installation({installed: true}), options);
+    assert.equal(found.line(HOTKEY).status, 'SKIP', found.text); assert.match(found.line(HOTKEY).detail, reason);
+    assert.equal(found.failed, 0, found.text);
+  }
+});
+
+test('an older or incomplete own speech health response waits instead of claiming shortcut success', async () => {
+  for (const hotkey of [null, {}, {enabled: true}, {enabled: true, ok: 'true'}]) {
+    const found = await examine(await fakeServices({speech: 'own', hotkey}), installation({installed: true}), {platform: 'darwin'});
+    assert.equal(found.line(HOTKEY).status, 'WAIT', found.text);
+    assert.match(found.line(HOTKEY).detail, /does not report shortcut registration/);
+    for (const name of VOICE) assert.equal(found.line(name).status, 'PASS');
+    assert.match(found.lines.at(-1), /Waiting on the step\(s\) marked WAIT/);
+  }
+});
+
 test('a dead speech service is a FAIL that names the real reason, and the two checks behind it are printed as SKIP', async () => {
   const shared = await fakeServices({speech: 'shared', healthy: false});
   const lost = await examine(shared, installation());
@@ -96,6 +254,7 @@ test('a dead speech service is a FAIL that names the real reason, and the two ch
   assert.match(lost.line(VOICE[0]).detail, /shared speech service at http:\/\/127\.0\.0\.1:\d+ stopped answering/);
   assert.match(lost.text, /start that program again.*node aos\.mjs setup --voice yes/s);
   for (const name of VOICE.slice(1)) { assert.equal(lost.line(name).status, 'SKIP'); assert.match(lost.line(name).detail, /not run: "Voice service healthy" did not pass/); }
+  assert.equal(lost.line(HOTKEY).status, 'SKIP'); assert.match(lost.line(HOTKEY).detail, /"Voice service healthy" did not pass/);
   assert.equal(lost.coreFailed, 0); assert.equal(lost.ok, false);
   assert.match(lost.lines.at(-1), /core system is installed and working\. 1 optional part\(s\) need attention: Voice service healthy/);
 
@@ -110,7 +269,7 @@ test('a dead speech service is a FAIL that names the real reason, and the two ch
   assert.match(idle.line(VOICE[0]).detail, /the recovery monitor is not running it/);
 });
 
-test('voice that was asked for but is not installed says so; voice that was declined is one SKIP line', async () => {
+test('voice that was asked for but is not installed says so; declined voice and its shortcut are skipped', async () => {
   const services = await fakeServices({speech: 'none'});
   const missing = await examine(services, installation({installed: false}));
   assert.equal(missing.line(VOICE[0]).status, 'FAIL'); assert.equal(missing.line(VOICE[0]).detail, 'not installed');
@@ -118,6 +277,7 @@ test('voice that was asked for but is not installed says so; voice that was decl
   for (const name of VOICE.slice(1)) assert.equal(missing.line(name).status, 'SKIP');
   const declined = await examine(services, installation({voice: false}));
   assert.equal(declined.line('Voice').status, 'SKIP'); assert.equal(declined.failed, 0, declined.text);
+  assert.equal(declined.line(HOTKEY).status, 'SKIP'); assert.match(declined.line(HOTKEY).detail, /voice was not enabled/);
 });
 
 test('the doctor waits for a voice that is still loading instead of telling the person to run it again', async () => {
@@ -189,9 +349,9 @@ test('every run prints every line, even with the bridge down or no vault configu
   const install = installation(); fs.rmSync(install.at.vaultFile);
   const found = await examine(services, install, {full: true});
   const expected = ['Node.js 22 or newer', 'Vault configured', 'Vault has the daily-note schema', 'Obsidian plugin files installed', 'Plugin switched on in Obsidian',
-    'Recovery monitor running', `Bridge answering on ${services.ports.bridge}`, `Jarvis HUD answering on ${services.ports.jarvis}`, 'claude CLI', 'codex CLI', ...VOICE, 'Jev fast voice routing', 'A real workflow end to end'];
+    'Recovery monitor running', `Bridge answering on ${services.ports.bridge}`, `Jarvis HUD answering on ${services.ports.jarvis}`, 'claude CLI', 'codex CLI', VOICE[0], HOTKEY, ...VOICE.slice(1), 'Jev fast voice routing', 'A real workflow end to end'];
   assert.deepEqual(found.results.map(item => item.name), expected);
-  for (const name of ['Vault has the daily-note schema', 'claude CLI', ...VOICE, 'A real workflow end to end']) { assert.equal(found.line(name).status, 'SKIP', name); assert.match(found.line(name).detail, /not (run|checked)/); }
+  for (const name of ['Vault has the daily-note schema', 'claude CLI', ...VOICE, HOTKEY, 'A real workflow end to end']) { assert.equal(found.line(name).status, 'SKIP', name); assert.match(found.line(name).detail, /not (run|checked)/); }
   const usual = await examine(await fakeServices({speech: 'shared'}), installation());
   assert.match(usual.line('A real workflow end to end').detail, /doctor --full/);
   const ci = await examine(await fakeServices({speech: 'shared', providers: {claude: {installed: true, version: '1', command: 'x'}}}), installation(), {ci: true, full: true});

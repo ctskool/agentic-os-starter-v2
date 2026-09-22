@@ -108,6 +108,7 @@ You cannot do the sign-in for them. Everything else works without it; those work
 3. For conversations and personal-skill buttons inside Obsidian: *Community plugins → Browse → "Terminal"* (by polyipseity) → install and enable. They can skip this and use the Jarvis HUD for personal skills and conversations; bundled background workflows still work inside Obsidian. Before wiring personal skills, explain this choice.
 4. Open the HUD: http://127.0.0.1:3217
 5. First use of the microphone: the browser (and on Mac, *System Settings → Privacy & Security → Microphone*) asks for permission → allow.
+6. With this installation's own voice service on Mac, **Control–Option–J** is registered automatically. Keep Obsidian running with the Agentic OS orb enabled, or keep the HUD visible. Explain: press once, speak, then pause to send; do not hold the keys. A shared speech service keeps its owner's shortcut behavior. Follow [Mac voice setup](../docs/MAC-VOICE.md), including the separate permission check for the Python speech process.
 
 Ask them to tell you when the cockpit is visible in Obsidian.
 
@@ -124,6 +125,8 @@ Then have the user try three things themselves:
 1. Click **Plan Today** in the cockpit.
 2. Hold the microphone button in the HUD and say *"What is on my schedule today?"*
 3. Say *"Open the morning intel"* (after they have run Morning Intel once).
+
+On Mac with its own voice service, also put another app in front, press **Control–Option–J**, say a harmless request and pause. Verify recording ends, exactly one request is sent, and a reply is heard. The doctor's shortcut PASS proves registration only; do not claim the microphone or background interaction works until this hands-on test succeeds. If the user chose autostart, have them repeat at their next normal login.
 
 ## Phase 7 — Make it theirs (each item optional)
 
@@ -171,5 +174,5 @@ A short, personal wrap-up:
 - Costs: their Claude and/or Codex provider plan, optional OpenRouter usage for Jev, and any paid tools or services used by their personal skills. Local speech has no API charge.
 - Day-to-day: `node aos.mjs status | stop | start | doctor | update`. Explain that `update` maintains a stock starter as a whole; `upgrade` is read-only discovery and planning for an existing or customized system.
 - Where things land: reports in `inbox/reports/` and `inbox/research/`, daily notes in `daily-notes/`, conventions in the vault's `CLAUDE.md` / `AGENTS.md`.
-- Known limits: on Mac there is no global push-to-talk hotkey (use the microphone button) and the Claude weekly-usage meter may read "unavailable". Mac support is new — if something is off, `node aos.mjs doctor` first.
+- Voice shortcut: **Control–Option–J** on Mac, **Ctrl–Alt–J** on Windows, with this installation's own voice service. Press once, speak, pause to send. Keep Obsidian with its orb enabled or the HUD visible. On Mac the Claude weekly-usage meter may read "unavailable". Mac support is new — if something is off, `node aos.mjs doctor` first.
 - If anything breaks later: open this folder in Claude Code or Codex and say *"run the doctor"*.
