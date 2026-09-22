@@ -102,7 +102,7 @@ class HotkeyTests(unittest.TestCase):
 
 
 class ServerTests(unittest.TestCase):
-    def app(self, available=True):
+    def app(self, available=True, platform='win32'):
         captures, hotkeys = [], []
         class Capture:
             busy = False
@@ -122,7 +122,8 @@ class ServerTests(unittest.TestCase):
                 hotkeys.append(self)
             def start(self): self.starts += 1; self.ok = True
             def stop(self): self.ok = False
-        return create_app('unused', engines=(object(), object()), capture_factory=Capture, hotkey_factory=Hotkey), captures, hotkeys
+        return create_app('unused', engines=(object(), object()), capture_factory=Capture,
+            hotkey_factory=Hotkey, platform=platform), captures, hotkeys
 
     def test_event_protocol_capabilities_and_shutdown(self):
         from fastapi.testclient import TestClient
@@ -156,6 +157,28 @@ class ServerTests(unittest.TestCase):
             with self.assertRaises(WebSocketDisconnect):
                 with client.websocket_connect('/events', headers={'origin': 'https://example.com'}):
                     self.fail('Foreign web page connected')
+
+    def test_mac_shortcut_and_api_request_surface_capture_without_python_microphone(self):
+        from fastapi.testclient import TestClient
+        app, captures, hotkeys = self.app(available=False, platform='darwin')
+        self.assertEqual(captures, [])  # No Python capture dependency or device is opened.
+        with TestClient(app) as client:
+            health = client.get('/health').json()
+            self.assertEqual(health['capture'], {'method': 'surface', 'available': None, 'busy': None, 'error': None})
+            self.assertTrue(health['hotkey']['ok'])
+            self.assertIsNone(health['hotkey']['error'])
+            self.assertEqual(hotkeys[0].starts, 1)
+            self.assertEqual(client.post('/listen').status_code, 409)
+            self.assertFalse(hotkeys[0].trigger('hotkey'))
+            with client.websocket_connect('/events') as ws:
+                self.assertTrue(ws.receive_json()['hotkey'])
+                self.assertTrue(hotkeys[0].trigger('hotkey'))
+                self.assertEqual(ws.receive_json(), {'type': 'capture-request', 'source': 'hotkey'})
+                self.assertEqual(client.post('/listen').json(), {'ok': True})
+                self.assertEqual(ws.receive_json(), {'type': 'capture-request', 'source': 'api'})
+                self.assertEqual(client.post('/listen', headers={'origin': 'https://example.com'}).status_code, 403)
+        self.assertFalse(hotkeys[0].ok)
+        self.assertEqual(captures, [])
 
 
 if __name__ == '__main__':

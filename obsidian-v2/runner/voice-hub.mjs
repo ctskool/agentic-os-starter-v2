@@ -128,14 +128,23 @@ export class VoiceHub {
   delete item.lease;delete item.leasedAt;if(ok||item.started)this.finish(item,ok?'acknowledged':'attempted');this.save(this.items);
  }
  captureDiagnostics(){return this.captureEvents.map(event=>({...event}))}
- recordCapture(type,event={}){
-  const client=this.captureOwner,kind=this.clients.get(client)?.kind||null;
+ recordCapture(type,event={},client=this.captureOwner){
+  const kind=this.clients.get(client)?.kind||null;
   // Bounded, in-memory metadata only: no audio, transcript, or raw error text.
   this.captureEvents.push({at:this.now(),type,client,kind,...(type==='transcript'?{characters:Math.min(20000,typeof event.text==='string'?event.text.trim().length:0)}:{})});
   if(this.captureEvents.length>12)this.captureEvents.splice(0,this.captureEvents.length-12);
  }
  leave(id){if(this.captureOwner===id)this.recordCapture('surface-left');this.clients.delete(id);if(this.owner===id)this.owner=null;if(this.captureOwner===id)this.captureOwner=null}
  capture(event){
+  if(!event||typeof event!=='object')return;
+  if(event.type==='capture-request'){
+   // Mac microphone permission belongs to the selected app's capture API,
+   // not the background Python service. The selected surface owns this turn.
+   const client=this.preferred(true)?.id||null;this.captureOwner=null;
+   this.recordCapture('capture-request',{},client);
+   if(client){this.owner=client;this.emit({type:'owner',id:client});this.emit({type:'capture-request',client})}
+   return;
+  }
   if(event.type==='wake'){this.captureOwner=this.preferred(true)?.id||null;if(this.captureOwner){this.owner=this.captureOwner;this.emit({type:'owner',id:this.owner})}}
   if(['wake','transcript','wake_timeout','wake_error'].includes(event.type))this.recordCapture(event.type,event);
   if(this.captureOwner&&['wake','transcript','wake_timeout','wake_error'].includes(event.type))this.emit({...event,client:this.captureOwner});

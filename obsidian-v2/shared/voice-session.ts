@@ -32,6 +32,7 @@ export class VoiceSession {
  private errorTimer:ReturnType<typeof setTimeout>|null=null;private playback:AbortController|null=null;
  private unlockInstalled=false;
  private remoteCapture=false;
+ private preparingCapture:number|null=null;
  private progressTimer:ReturnType<typeof setTimeout>|null=null;
  private trace:VoiceTrace|null=null;private traceStart=0;private traceGeneration=-1;
  onState:(mode:VoiceMode)=>void=()=>{}; onMessage:(text:string,error?:boolean)=>void=()=>{}; onReply:(reply:VoiceReply)=>void|Promise<void>=()=>{}; onReveal:(reveal:VoiceReveal)=>void=()=>{};
@@ -45,6 +46,7 @@ export class VoiceSession {
    if(e.type==='owner'&&e.id!==this.surface?.id&&this.mode!=='idle')this.cancel('owner-change');
    if(e.client!==this.surface?.id)return;
    if(e.type==='artifact-error'){this.onMessage(e.message||'The file could not be opened.',true);return}
+   if(e.type==='capture-request'){if(!this.destroyed&&this.preparingCapture===null&&this.mode!=='listening')void this.start();return}
    if(e.type==='wake'){this.primeAudio();this.cancel();this.remoteCapture=true;this.beginTrace(crypto.randomUUID(),'remote-start');this.set('listening');this.onMessage('Listening…')}
    else if(e.type==='transcript'&&this.remoteCapture){this.remoteCapture=false;const text=String(e.text||'').trim();if(!text)this.mark('remote-empty');if(!text||/^(stop|never ?mind|cancel|no)[.!]?$/i.test(text))this.cancel();else void this.sendText(text)}
    else if((e.type==='wake_timeout'||e.type==='wake_error')&&this.remoteCapture){this.mark(e.type==='wake_timeout'?'remote-timeout':'error');this.cancel();if(e.type==='wake_error'){this.onMessage('Voice capture failed. Try again.',true);this.set('error')}else this.onMessage('')}
@@ -73,7 +75,7 @@ export class VoiceSession {
  private release(){if(this.silenceTimer)clearInterval(this.silenceTimer);this.silenceTimer=null;if(this.quietTimer)clearTimeout(this.quietTimer);this.quietTimer=null;this.captureGate=null;this.micNode?.disconnect();this.micNode=null;this.micAnalyser?.disconnect();this.micAnalyser=null;this.stream?.getTracks().forEach(t=>t.stop());this.stream=null;if(this.timer)clearTimeout(this.timer);this.timer=null}
  private stopOutput(){this.playback?.abort();this.playback=null;this.endPlayback?.(false);this.endPlayback=null;if(this.media){this.media.pause();this.media.removeAttribute('src');this.media.load();this.media=null}this.mediaNode?.disconnect();this.mediaNode=null;this.revealTimers.forEach(clearTimeout);this.revealTimers=[];try{this.source?.stop()}catch{}this.source=null}
  private quiet(){this.mark('no-speech');this.id=null;this.cancel();this.onMessage('')}
- cancel(reason:VoiceCancelReason='cancelled'){if(this.mode!=='idle')this.mark(reason);this.clearRequestFeedback();this.surface?.cancelArtifact();this.remoteCapture=false;this.localQueue=[];const was=this.mode!=='idle';++this.generation;this.barge?.close();this.barge=null;this.stopOutput();this.request?.abort();this.request=null;
+ cancel(reason:VoiceCancelReason='cancelled'){if(this.mode!=='idle')this.mark(reason);this.clearRequestFeedback();this.surface?.cancelArtifact();this.remoteCapture=false;this.preparingCapture=null;this.localQueue=[];const was=this.mode!=='idle';++this.generation;this.barge?.close();this.barge=null;this.stopOutput();this.request?.abort();this.request=null;
   if(this.id)void this.transport('/voice/cancel',{method:'POST',body:JSON.stringify({id:this.id})}).catch(()=>{});
   this.id=null;const r=this.recorder;this.recorder=null;if(r?.state==='recording')r.stop();this.release();
   this.set('idle');return was;
@@ -105,7 +107,7 @@ export class VoiceSession {
  async toggle(){if(this.mode==='listening')return this.finish();if(this.mode==='working'){this.cancel();this.onMessage('Request cancelled. Tasks already queued keep running.');return;}return this.start()}
  async start(){
   this.primeAudio();
-  this.cancel();if(this.destroyed)return;const token=this.generation;this.beginTrace(crypto.randomUUID(),'capture-start');this.set('working');this.onMessage('Preparing voice…');
+  this.cancel();if(this.destroyed)return;const token=this.generation;this.preparingCapture=token;this.beginTrace(crypto.randomUUID(),'capture-start');this.set('working');this.onMessage('Preparing voice…');
   try{
    await this.surface?.focus();if(token!==this.generation)return;this.mark('ownership-ready');const chosen=await this.getSelection();if(token!==this.generation)return;this.mark('selection-ready');const health=await this.checked('/voice/health');
    if(token!==this.generation)return;if(!health.json?.ok)throw new Error('Local speech is offline. Start the V2 speech service.');
@@ -138,6 +140,7 @@ export class VoiceSession {
    this.quietTimer=setTimeout(()=>{if(token===this.generation&&!gate.heardSpeech)this.quiet()},5000);
    this.timer=setTimeout(()=>{if(token===this.generation)void this.finish()},60000);
   }catch(e){if(token!==this.generation)return;this.release();this.set('error');this.onMessage(e instanceof Error?e.message:String(e),true)}
+  finally{if(this.preparingCapture===token)this.preparingCapture=null}
  }
  async finish(){if(this.barge?.interrupted){this.barge.finish();return}const r=this.recorder;if(!r)return;if(!this.captureGate?.heardSpeech){this.quiet();return}this.recorder=null;this.mark('accepted');this.set('working',false);r.stop();this.release();this.beginRequestFeedback(this.generation)}
  private async sendAudio(blob:Blob,chosen:VoiceSelection,token:number){

@@ -42,9 +42,10 @@ test('pre-roll has a fixed bound and WAV preserves the actual beginning and all 
  assert.equal(new TextDecoder().decode(buffer.slice(0,4)),'RIFF');assert.equal(view.getUint32(24,true),16000);assert.equal(view.getUint32(40,true),10);assert.deepEqual(Array.from({length:5},(_,i)=>view.getInt16(44+i*2,true)),[-16384,0,8192,32767,-32768]);
 });
 
-function audioFixture(t,{buffered=false,denied=false,pendingMic=false}={}){
- let now=0,next=1,context,streamResolve;const timers=new Map(),intervals=new Map(),processors=[],tracks=[],media=[],sources=[],nodes=[],requests=[],constraints=[];
- replace(t,'window',undefined);t.mock.method(performance,'now',()=>now);
+function audioFixture(t,{buffered=false,denied=false,pendingMic=false,surfaceKind,hidden=false}={}){
+ let now=0,next=1,context,streamResolve,eventStream;const timers=new Map(),intervals=new Map(),processors=[],tracks=[],media=[],sources=[],nodes=[],requests=[],constraints=[];
+ replace(t,'window',surfaceKind?new EventTarget():undefined);t.mock.method(performance,'now',()=>now);
+ if(surfaceKind){replace(t,'document',Object.assign(new EventTarget(),{hidden}));replace(t,'EventSource',class{readyState=1;constructor(url){eventStream=this;this.client=new URL(url).searchParams.get('client')}close(){this.readyState=2}})}
  t.mock.method(globalThis,'setTimeout',(fn,delay)=>{const id=next++;timers.set(id,{fn,at:now+delay});return id});t.mock.method(globalThis,'clearTimeout',id=>timers.delete(id));
  t.mock.method(globalThis,'setInterval',(fn,delay)=>{const id=next++;intervals.set(id,{fn,delay});return id});t.mock.method(globalThis,'clearInterval',id=>intervals.delete(id));
  const makeStream=()=>{const track={stops:0,stop(){this.stops++}};tracks.push(track);return {getTracks:()=>[track]}};
@@ -60,11 +61,45 @@ function audioFixture(t,{buffered=false,denied=false,pendingMic=false}={}){
   createBufferSource(){const value=node({stops:0,start(){},stop(){this.stops++}});sources.push(value);return value}
  });
  replace(t,'Audio',buffered?undefined:class{constructor(){media.push(this)}play(){queueMicrotask(()=>this.onplaying?.());return Promise.resolve()}pause(){this.paused=true}removeAttribute(){}load(){}});
- const voice=new VoiceSession(async(path,options)=>{requests.push({path,options});if(path==='/voice/speak')return {status:200,audio:new ArrayBuffer(2)};return {status:200,json:path==='/voice/health'?{ok:true}:{reply:''}}},async()=>chosen);
+ const voice=new VoiceSession(async(path,options)=>{requests.push({path,options});if(path==='/voice/speak')return {status:200,audio:new ArrayBuffer(2)};return {status:200,json:path==='/voice/health'?{ok:true}:{reply:''}}},async()=>chosen,surfaceKind,{heartbeat:()=>()=>{}});
+ if(surfaceKind)voice.connect();
  const tick=async(time,input=new Float32Array(4096),output=new Float32Array(4096))=>{now=time;for(const p of processors)p.onaudioprocess?.({inputBuffer:{getChannelData:channel=>channel===0?input:output}});await flush()};
  const advance=async(milliseconds)=>{now+=milliseconds;for(let pass=0;pass<10;pass++){const due=[...timers].filter(([,timer])=>timer.at<=now);if(!due.length)break;for(const [id,timer]of due){timers.delete(id);timer.fn()}await flush()}};
- return {voice,timers,intervals,processors,tracks,media,sources,nodes,requests,constraints,tick,advance,getContext:()=>context,resolveMic:()=>streamResolve?.()};
+ return {voice,timers,intervals,processors,tracks,media,sources,nodes,requests,constraints,tick,advance,getContext:()=>context,resolveMic:()=>streamResolve?.(),
+  emit:(type,fields={})=>eventStream.onmessage({data:JSON.stringify({type,client:eventStream.client,...fields})})};
 }
+
+function captureRecorder(t){const recorders=[];replace(t,'MediaRecorder',class{state='inactive';mimeType='audio/webm';constructor(){recorders.push(this)}start(){this.state='recording'}stop(){this.state='inactive';this.ondataavailable?.({data:new Blob(['x'.repeat(1500)])});queueMicrotask(()=>this.onstop?.())}});return recorders}
+
+test('Mac shortcut uses the background native microphone once and submits after speech and silence',async t=>{
+ const f=audioFixture(t,{surfaceKind:'native',hidden:true,pendingMic:true}),recorders=captureRecorder(t);await flush();
+ f.emit('capture-request',{client:'another-surface'});f.emit('unknown');await flush();assert.equal(f.constraints.length,0);
+ f.emit('capture-request');f.emit('capture-request');await flush();assert.equal(f.voice.mode,'working');assert.equal(f.constraints.length,1);
+ f.emit('capture-request');await flush();assert.equal(f.constraints.length,1);
+ f.resolveMic();await flush();assert.equal(f.voice.mode,'listening');assert.equal(recorders.length,1);
+ f.emit('capture-request');await flush();assert.equal(f.voice.mode,'listening');assert.equal(recorders.length,1);
+ const input=f.nodes.find(node=>node.getByteTimeDomainData),sample=async(time,value)=>{input.getByteTimeDomainData=array=>array.fill(value);await f.tick(time);for(const interval of f.intervals.values())if(interval.delay===80)interval.fn();await flush()};
+ for(const time of [100,180,260])await sample(time,150);
+ await sample(1859,128);assert.equal(f.requests.filter(r=>r.path==='/voice/audio').length,0);
+ await sample(1860,128);const sent=f.requests.filter(r=>r.path==='/voice/audio');assert.equal(sent.length,1);
+ assert.deepEqual(JSON.parse(sent[0].options.headers['X-V2-Selection']),chosen);assert.equal(f.voice.mode,'idle');assert.equal(f.tracks[0].stops,1);
+ await f.voice.destroy();assert.equal(f.timers.size,0);assert.equal(f.intervals.size,0);
+});
+
+test('a Mac shortcut interrupts playback and microphone denial is visible without a submission',async t=>{
+ const f=audioFixture(t,{surfaceKind:'native',hidden:true,denied:true}),messages=[];captureRecorder(t);f.voice.onMessage=(text,error)=>messages.push({text,error});
+ const spoken=f.voice.speak('Answer in progress');await flush();assert.equal(f.voice.mode,'speaking');
+ f.emit('capture-request');await flush();assert.equal(await spoken,false);assert.equal(f.voice.mode,'error');
+ assert.ok(messages.some(message=>message.error&&/Permission denied/.test(message.text)));assert.equal(f.requests.filter(r=>r.path==='/voice/audio').length,0);
+ await f.voice.destroy();assert.equal(f.timers.size,0);assert.equal(f.intervals.size,0);
+});
+
+for(const end of ['owner','disconnect','destroy'])test(`a Mac shortcut awaiting microphone permission cannot revive after ${end}`,async t=>{
+ const f=audioFixture(t,{surfaceKind:'native',hidden:true,pendingMic:true}),recorders=captureRecorder(t);await flush();f.emit('capture-request');await flush();assert.equal(f.constraints.length,1);
+ if(end==='owner')f.emit('owner',{id:'another-surface'});else if(end==='disconnect')f.emit('disconnected');else await f.voice.destroy();
+ f.resolveMic();await flush();assert.equal(recorders.length,0);assert.equal(f.tracks[0].stops,1);assert.equal(f.voice.mode,'idle');assert.equal(f.requests.filter(r=>r.path==='/voice/audio').length,0);
+ if(end!=='destroy')await f.voice.destroy();assert.equal(f.timers.size,0);assert.equal(f.intervals.size,0);
+});
 
 for(const buffered of [false,true])test(`${buffered?'buffered':'streaming'} playback yields to real speech, retains its onset and selected conversation, then submits once`,async t=>{
  const f=audioFixture(t,{buffered}),attempt={started:false},spoken=f.voice.speak('A long written answer',undefined,[],attempt);await flush();assert.equal(f.voice.mode,'speaking');assert.equal(attempt.started,true);assert.equal(f.processors.length,1);
