@@ -297,6 +297,59 @@ test('python discovery skips a stub that answers nothing and refuses versions th
   assert.equal(which('npm', {env: {PATH: 'C:\\one;C:\\n'}, exists: file => file === 'C:\\n\\npm.cmd', platform: 'win32'}), 'C:\\n\\npm.cmd');
 });
 
+function pythonPath(versions) {
+  // A relative PATH entry also works when macOS discovery is simulated on Windows.
+  const root = fs.mkdtempSync(path.join(process.cwd(), '.aos-python-test-'));
+  scratched.push(root);
+  const dir = path.basename(root), calls = [];
+  for (const name of Object.keys(versions)) fs.writeFileSync(path.join(root, name), '');
+  const file = name => path.posix.join(dir, name);
+  const run = (command, args) => {
+    calls.push(command);
+    assert.deepEqual(args, ['--version']);
+    const answer = versions[path.posix.basename(command)];
+    return typeof answer === 'string' ? {status: 0, stdout: `Python ${answer}`} : answer;
+  };
+  return {env: {PATH: dir}, run, file, calls};
+}
+
+test('macOS voice setup discovers Homebrew python3.12 when generic aliases are too old', () => {
+  const fixture = pythonPath({python3: '3.9.6', python: '2.7.18', 'python3.12': '3.12.13'});
+  assert.deepEqual(findPython({...fixture, platform: 'darwin'}), {command: fixture.file('python3.12'), prefix: [], version: '3.12.13'});
+  assert.deepEqual(fixture.calls, ['python3', 'python', 'python3.12'].map(fixture.file));
+});
+
+test('macOS voice setup discovers a versioned Python without generic aliases', () => {
+  const fixture = pythonPath({'python3.12': '3.12.13'});
+  assert.deepEqual(findPython({...fixture, platform: 'darwin'}), {command: fixture.file('python3.12'), prefix: [], version: '3.12.13'});
+  assert.deepEqual(fixture.calls, [fixture.file('python3.12')]);
+  assert.equal(findPython({...fixture, platform: 'linux'}), null, 'the Homebrew fallback is macOS-only');
+});
+
+test('an explicit Python choice takes precedence over generic and Homebrew aliases', () => {
+  const fixture = pythonPath({'chosen-python': '3.11.9', python3: '3.10.14', 'python3.12': '3.12.13'});
+  assert.deepEqual(findPython({...fixture, env: {...fixture.env, AOS_V2_PYTHON: 'chosen-python'}, platform: 'darwin'}),
+    {command: fixture.file('chosen-python'), prefix: [], version: '3.11.9'});
+  assert.deepEqual(fixture.calls, [fixture.file('chosen-python')]);
+});
+
+test('supported generic Python aliases keep their precedence over Homebrew python3.12', () => {
+  for (const [python3Version, selected] of [['3.11.9', 'python3'], ['3.9.6', 'python']]) {
+    const fixture = pythonPath({python3: python3Version, python: '3.10.14', 'python3.12': '3.12.13'});
+    assert.deepEqual(findPython({...fixture, platform: 'darwin'}),
+      {command: fixture.file(selected), prefix: [], version: selected === 'python3' ? python3Version : '3.10.14'});
+    assert.deepEqual(fixture.calls, (selected === 'python3' ? ['python3'] : ['python3', 'python']).map(fixture.file));
+  }
+});
+
+test('a versioned executable must still answer successfully with a supported Python version', () => {
+  for (const answer of ['3.9.6', {status: 1, stdout: 'Python 3.12.13'}, {status: 0, stdout: ''}]) {
+    const fixture = pythonPath({'python3.12': answer});
+    assert.equal(findPython({...fixture, platform: 'darwin'}), null);
+    assert.deepEqual(fixture.calls, [fixture.file('python3.12')]);
+  }
+});
+
 test('command-line parsing and the local-page guard', () => {
   assert.deepEqual(parseArgs(['setup', '--vault', 'C:/My Vault', '--voice', 'no', '--rebuild']), {command: 'setup', flags: {vault: 'C:/My Vault', voice: 'no', rebuild: true}, words: []});
   assert.deepEqual(parseArgs(['autostart', 'on']), {command: 'autostart', flags: {}, words: ['on']});

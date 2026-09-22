@@ -17,7 +17,9 @@ export function parsePythonVersion(text) {
 export const pythonSupported = version => !!version && version.major === 3 && version.minor >= 10;
 
 export function findPython({env = process.env, run = spawnSync, platform = process.platform} = {}) {
-  const candidates = [env.AOS_V2_PYTHON && [env.AOS_V2_PYTHON], ...(platform === 'win32' ? [['py', '-3'], ['python']] : [['python3'], ['python']])].filter(Boolean);
+  // Homebrew's python@3.12 keeps its generic aliases outside the usual bin directory.
+  const versioned = platform === 'darwin' ? [['python3.12']] : [];
+  const candidates = [env.AOS_V2_PYTHON && [env.AOS_V2_PYTHON], ...(platform === 'win32' ? [['py', '-3'], ['python']] : [['python3'], ['python']]), ...versioned].filter(Boolean);
   for (const [command, ...prefix] of candidates) {
     const file = path.isAbsolute(command) ? command : which(command, {env, platform});
     // Windows ships a `python.exe` stub that only opens the Store; a real one answers --version.
@@ -48,7 +50,7 @@ export async function setupSpeech(at, {log = console.log, run = spawnSync} = {})
   fs.mkdirSync(at.runtime, {recursive: true});
   if (!fs.existsSync(at.speechPython)) {
     const python = findPython();
-    if (!python) throw new Error('Python 3.10 or newer was not found. Install it (Windows: python.org, tick "Add to PATH"; Mac: `brew install python`) and run this again.');
+    if (!python) throw new Error('Python 3.10 or newer was not found. Install it (Windows: python.org, tick "Add to PATH"; Mac: `brew install python@3.12`) and run this again. If already installed, set AOS_V2_PYTHON to its absolute executable path.');
     step(`creating the voice environment with Python ${python.version}`, python.command, [...python.prefix, '-m', 'venv', at.venv], 5 * 60 * 1000);
   }
   step('installing voice packages (a few minutes the first time)', at.speechPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '-q', '-r', path.join(at.root, 'runner', 'speech-requirements.txt')], 30 * 60 * 1000);

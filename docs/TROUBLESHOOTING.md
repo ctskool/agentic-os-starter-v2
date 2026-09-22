@@ -16,6 +16,8 @@ Never paste `jev.json` or `bridge-auth.json` anywhere: they hold your OpenRouter
 
 ## Common situations
 
+**Python is installed, but voice setup cannot find it on Mac.** After `brew install python@3.12`, check `python3.12 --version`; `python3` can still be Apple's older Python. Setup tries the versioned name when the generic commands are missing or too old. If setup runs with a different `PATH`, prefix your original setup command with `AOS_V2_PYTHON="$(brew --prefix python@3.12)/bin/python3.12"`, keeping its other arguments. For a non-Homebrew installation, use the absolute Python executable path instead. This selects the interpreter for a new private voice environment; it does not replace an existing environment or the system Python.
+
 **The cockpit says the bridge is offline.** `node aos.mjs start`, wait 20 seconds, reload the plugin (or restart Obsidian). If it says "authentication required", run `node aos.mjs setup` again: it re-copies the local access token into the plugin.
 
 **"Stop active tasks in Terminals first."** A conversation is still open. Close its tab in the HUD (× ends it) or in Obsidian, then repeat the command.

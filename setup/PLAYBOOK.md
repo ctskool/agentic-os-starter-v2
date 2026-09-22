@@ -36,11 +36,15 @@ Check each item and fix what you can:
 |---|---|---|
 | Git | `git --version` | Windows: `winget install Git.Git`. Mac: `xcode-select --install` (the user confirms a dialog). |
 | Node.js 22+ | `node --version` | Windows: `winget install OpenJS.NodeJS.LTS`. Mac: `brew install node`. Then open a new terminal. |
-| Python 3.10–3.13 (voice only) | Windows `py -3 --version`, Mac `python3 --version` | Windows: `winget install Python.Python.3.12`. Mac: `brew install python@3.12`. |
+| Python 3.10–3.13 (voice only) | Windows `py -3 --version`, Mac `python3 --version` (also check `python3.12 --version` if missing or too old) | Windows: `winget install Python.Python.3.12`. Mac: `brew install python@3.12`. |
 | Mac only: compiler tools | `xcode-select -p` | `xcode-select --install`. Needed once for the terminal component. |
 | Mac only: Homebrew | `brew --version` | Send the user to https://brew.sh — its installer asks for their password, so they run it themselves. |
 | Obsidian | Windows: `%LOCALAPPDATA%\Programs\Obsidian` or `%LOCALAPPDATA%\Obsidian`. Mac: `/Applications/Obsidian.app` | Windows: `winget install Obsidian.Obsidian`. Mac: `brew install --cask obsidian`. Do not block on it. |
 | Claude Code and/or Codex, signed in | `claude --version`, `codex --version` | One is enough, both is best. Claude Code: the native installer from https://claude.com/claude-code (on Windows the npm install is not detected). Codex: `npm install -g @openai/codex`. The user signs in themselves by running `claude` / `codex` once. |
+
+**Mac voice setup:** ensure Homebrew is available before using the `brew` commands above. Its [Python 3.12 formula](https://formulae.brew.sh/formula/python@3.12) installs `python3.12`; `python3` can still resolve to Apple's older Python because the generic aliases live in a separate `libexec/bin` directory. After installation, check `python3.12 --version`. Setup checks that versioned name on a Mac if neither `python3` nor `python` is usable; there is no need to replace the system Python or change global aliases.
+
+If the interpreter is installed but unavailable on setup's `PATH`, prefix the same setup command with `AOS_V2_PYTHON="$(brew --prefix python@3.12)/bin/python3.12"`. Keep the vault, voice and autostart arguments already chosen. For Python installed another way, set `AOS_V2_PYTHON` to its absolute executable path instead. The chosen interpreter creates the private voice environment; an existing voice environment is reused.
 
 Location: the repository should live in a normal folder such as `~/agentic-os`. **Not** inside the vault, and **not** inside OneDrive, iCloud Drive or Dropbox (package folders and local sockets misbehave there). If it was cloned into one of those, move it before going on.
 
@@ -67,7 +71,7 @@ This takes 5–15 minutes the first time (packages, the HUD build, voice models)
 Read the output. Typical fixes:
 
 - `npm ci` fails on Mac with compiler errors → `xcode-select --install`, then run setup again.
-- Python not found or too old → install it (table above), open a new terminal, run setup again.
+- Python not found or too old → install it (table above), open a new terminal, run setup again. On Mac, verify `python3.12 --version` or use the explicit interpreter path described in Phase 0; `python3` may still be Apple's older version.
 - `Another installation of this system ... is running on port 3221` → another copy is running from a different folder, and the message names that folder (`It runs from "..."`). Keep using that copy or follow `setup/UPGRADE.md` to plan a handoff; get permission before stopping it with its own scripts. If the message names no folder, `node aos.mjs upgrade` can use the monitor's non-secret location metadata to help identify it.
 - `Voice: a speech service is already running on this computer ... and will be shared` → not an error. Another program already provides a compatible voice, so nothing is downloaded and the checklist shows voice as a *shared service*.
 - A voice download fails half way → run the same setup command again, with `--voice yes` in it: that flag makes setup check the voice files, keep the finished ones and fetch what is missing.
