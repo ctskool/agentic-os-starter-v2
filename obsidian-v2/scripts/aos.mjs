@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // One command for every install, on Windows and macOS alike:
-//   node aos.mjs setup --vault "<path>" [--voice yes|no] [--autostart yes|no]
+//   node aos.mjs setup --vault "<path>" [--provider claude|codex] [--voice yes|no] [--autostart yes|no]
 //   node aos.mjs start | stop | status | doctor [--full] | jev-key | autostart on|off | update
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -12,8 +12,9 @@ import {setup, update, startAtLogin} from './aos/setup.mjs';
 
 const HELP = `Agentic OS V2
 
-  setup --vault "<path>" [--voice yes|no] [--autostart yes|no] [--rebuild]
+  setup --vault "<path>" [--provider claude|codex] [--voice yes|no] [--autostart yes|no] [--rebuild]
                       install or repair everything, then run the checks
+                      (--provider: the coding tool buttons and voice use; default = the one installed)
   start               start the local services (bridge, Jarvis HUD, voice)
   stop                stop them (refuses while a task is open)
   status              what is running
@@ -37,10 +38,12 @@ export function parseArgs(argv) {
 }
 const yesNo = (value, name) => { if (value === undefined) return undefined; if (['yes', 'true', true].includes(value)) return true; if (['no', 'false'].includes(value)) return false; throw new Error(`--${name} takes yes or no`); };
 
+const providerFlag = value => { if (value === undefined) return undefined; if (['claude', 'codex'].includes(value)) return value; throw new Error('Use --provider claude  or  --provider codex'); };
+
 export async function main(argv = process.argv.slice(2), log = console.log) {
   const {command, flags, words} = parseArgs(argv);
   switch (command) {
-    case 'setup': return (await setup({vault: typeof flags.vault === 'string' ? flags.vault : undefined, voice: yesNo(flags.voice, 'voice'), autostart: yesNo(flags.autostart, 'autostart'), rebuild: flags.rebuild === true, ci: flags.ci === true, adopt: flags.adopt === true, log})).ok ? 0 : 1;
+    case 'setup': return (await setup({vault: typeof flags.vault === 'string' ? flags.vault : undefined, voice: yesNo(flags.voice, 'voice'), autostart: yesNo(flags.autostart, 'autostart'), provider: providerFlag(flags.provider), rebuild: flags.rebuild === true, ci: flags.ci === true, adopt: flags.adopt === true, log})).ok ? 0 : 1;
     case 'start': await start({resetRecovery: flags['reset-recovery'] === true, log}); return 0;
     case 'stop': await stop({log}); return 0;
     case 'status': log(JSON.stringify(await status(), null, 1)); return 0;

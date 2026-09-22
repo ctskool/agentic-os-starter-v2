@@ -9,7 +9,7 @@ import {launchAgentPlist, scheduledTaskScript, autostartOwner, taskOwner, plistA
 import {preflight} from '../scripts/aos/setup.mjs';
 import {scaffoldVault, pluginEnabled} from '../scripts/aos/vault.mjs';
 import {saveJevKey, hasJevKey, collectJevKey, JEV_DEFAULTS} from '../scripts/aos/jev-key.mjs';
-import {parsePythonVersion, pythonSupported, findPython} from '../scripts/aos/speech.mjs';
+import {parsePythonVersion, pythonSupported, findPython, pythonCandidates, voicePythonMissing} from '../scripts/aos/speech.mjs';
 import {parseArgs} from '../scripts/aos.mjs';
 import {supervisorConfig} from '../runner/service-supervisor.mjs';
 
@@ -316,17 +316,32 @@ function pythonPath(versions) {
   return {env: {PATH: dir}, run, file, calls};
 }
 
-test('macOS voice setup discovers Homebrew python3.12 when generic aliases are too old', () => {
-  const fixture = pythonPath({python3: '3.9.6', python: '2.7.18', 'python3.12': '3.12.13'});
-  assert.deepEqual(findPython({...fixture, platform: 'darwin'}), {command: fixture.file('python3.12'), prefix: [], version: '3.12.13'});
-  assert.deepEqual(fixture.calls, ['python3', 'python', 'python3.12'].map(fixture.file));
+test('voice setup prefers a versioned 3.12 over the generic aliases, which may be too old or too new', () => {
+  for (const platform of ['darwin', 'linux']) {
+    const fixture = pythonPath({python3: '3.14.7', python: '2.7.18', 'python3.12': '3.12.13', 'python3.13': '3.13.5'});
+    assert.deepEqual(findPython({...fixture, platform}), {command: fixture.file('python3.12'), prefix: [], version: '3.12.13'}, platform);
+    assert.deepEqual(fixture.calls, [fixture.file('python3.12')], 'the first supported interpreter ends the search');
+  }
 });
 
-test('macOS voice setup discovers a versioned Python without generic aliases', () => {
-  const fixture = pythonPath({'python3.12': '3.12.13'});
-  assert.deepEqual(findPython({...fixture, platform: 'darwin'}), {command: fixture.file('python3.12'), prefix: [], version: '3.12.13'});
-  assert.deepEqual(fixture.calls, [fixture.file('python3.12')]);
-  assert.equal(findPython({...fixture, platform: 'linux'}), null, 'the Homebrew fallback is macOS-only');
+test('voice setup falls back through 3.13, 3.11 and 3.10 before the generic aliases', () => {
+  const fixture = pythonPath({'python3.11': '3.11.9', python3: '3.10.14'});
+  assert.deepEqual(findPython({...fixture, platform: 'darwin'}), {command: fixture.file('python3.11'), prefix: [], version: '3.11.9'});
+  assert.deepEqual(fixture.calls, [fixture.file('python3.11')], 'missing versioned names are skipped without being run');
+});
+
+test('Python 3.14 and newer are refused for voice, and the refusal names what was found', () => {
+  const seen = [], fixture = pythonPath({python3: '3.14.7', python: '3.15.0'});
+  assert.equal(findPython({...fixture, platform: 'darwin', seen}), null);
+  assert.deepEqual(seen, ['3.14.7', '3.15.0']);
+  assert.match(voicePythonMissing(seen), /Found Python 3\.14\.7, 3\.15\.0, but voice needs Python 3\.10-3\.13.*winget install Python\.Python\.3\.12.*brew install python@3\.12/);
+  assert.match(voicePythonMissing([]), /^Python 3\.10-3\.13 was not found/);
+  for (const [text, ok] of [['Python 3.9.6', false], ['Python 3.10.0', true], ['Python 3.13.9', true], ['Python 3.14.0', false], ['Python 4.0.0', false]]) assert.equal(pythonSupported(parsePythonVersion(text)), ok, text);
+});
+
+test('on Windows the py launcher is asked for each supported version before `py -3`', () => {
+  assert.deepEqual(pythonCandidates({env: {}, platform: 'win32'}).map(item => item.join(' ')), ['py -3.12', 'py -3.13', 'py -3.11', 'py -3.10', 'py -3', 'python']);
+  assert.deepEqual(pythonCandidates({env: {AOS_V2_PYTHON: 'C:\\P\\python.exe'}, platform: 'darwin'}).map(item => item.join(' ')), ['C:\\P\\python.exe', 'python3.12', 'python3.13', 'python3.11', 'python3.10', 'python3', 'python']);
 });
 
 test('an explicit Python choice takes precedence over generic and Homebrew aliases', () => {
@@ -336,9 +351,9 @@ test('an explicit Python choice takes precedence over generic and Homebrew alias
   assert.deepEqual(fixture.calls, [fixture.file('chosen-python')]);
 });
 
-test('supported generic Python aliases keep their precedence over Homebrew python3.12', () => {
-  for (const [python3Version, selected] of [['3.11.9', 'python3'], ['3.9.6', 'python']]) {
-    const fixture = pythonPath({python3: python3Version, python: '3.10.14', 'python3.12': '3.12.13'});
+test('without versioned interpreters, a supported generic alias is still used', () => {
+  for (const [python3Version, selected] of [['3.11.9', 'python3'], ['3.9.6', 'python'], ['3.14.7', 'python']]) {
+    const fixture = pythonPath({python3: python3Version, python: '3.10.14'});
     assert.deepEqual(findPython({...fixture, platform: 'darwin'}),
       {command: fixture.file(selected), prefix: [], version: selected === 'python3' ? python3Version : '3.10.14'});
     assert.deepEqual(fixture.calls, (selected === 'python3' ? ['python3'] : ['python3', 'python']).map(fixture.file));

@@ -22,6 +22,12 @@ Never paste `jev.json` or `bridge-auth.json` anywhere: they hold your OpenRouter
 
 **A conversation will not open inside Obsidian, or a notice names the Terminal plugin.** Conversations inside Obsidian need the Terminal community plugin (by polyipseity), a stable 3.x release from 3.27.1 on. "Too old": update it in Settings → Community plugins. "Pre-release" or "has not been verified": install the regular release, or use the same button in the HUD (http://127.0.0.1:3217) until `node aos.mjs update` brings support. "Newer than the versions tested": it should work; if a conversation misbehaves, use the HUD and run the doctor. "Cannot follow it": the conversation may still be running in that tab, so check it and close it before trying again. The doctor's "Terminal plugin" line shows what is installed.
 
+**Services never start after choosing start-at-login on Windows ("The recovery monitor did not become available").** Older versions registered the Windows login task in a way a fresh Windows (scripts blocked by default) refuses to run. `node aos.mjs start` now repairs that task by itself and starts the services directly if the task still does nothing. If you updated from an older version, run `node aos.mjs setup` once after the update so the new setup code runs.
+
+**"Found Python 3.14 …, but voice needs Python 3.10-3.13".** The voice libraries do not support Python 3.14 yet, which python.org and Homebrew now install by default. Install 3.12 next to it (Windows `winget install Python.Python.3.12`, Mac `brew install python@3.12`) and run setup again with `--voice yes`; setup picks 3.12 by itself. If it says the voice service may still be running, run `node aos.mjs stop` first.
+
+**The buttons use Codex but you only have Claude Code (or the reverse).** `node aos.mjs setup --provider claude` (or `codex`) switches them. Setup never changes your choice on its own.
+
 **"Stop active tasks in Terminals first."** A conversation is still open. Close its tab in the HUD (× ends it) or in Obsidian, then repeat the command.
 
 **"Port 3221 belongs to another installation."** A second copy of this system is running from another folder, and only one copy can run at a time. The message names the folder (`It runs from "..."`); you can also open http://127.0.0.1:3221/status, where `runtimeDir` is that copy's `obsidian-v2/.runtime` folder. Run `node aos.mjs stop` in that copy's folder.

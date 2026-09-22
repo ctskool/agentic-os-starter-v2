@@ -49,6 +49,54 @@ export function processInfo(pid, {run = spawnSync, platform = process.platform} 
   return parsed && {pid, ...parsed};
 }
 
+// Pure. The pids of listed processes that may run from `dir`: an executable or command line inside
+// it, or one that names the folder as a path segment at all (a program started with a relative path,
+// e.g. `.runtime/speech-venv/bin/python`, shows no absolute path). Deliberately cautious: a false
+// match only postpones replacing the folder, a missed one could replace it while in use.
+export function processesInDir(rows, dir) {
+  const norm = value => String(value || '').replace(/\\/g, '/').toLowerCase();
+  const root = norm(path.resolve(dir)).replace(/\/$/, '') + '/';
+  const segment = new RegExp(`(^|[\\s"'/=])${path.basename(path.resolve(dir)).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`);
+  return rows.filter(row => [row.executable, row.commandLine].some(value => { const text = norm(value); return text.includes(root) || segment.test(text); })).map(row => row.pid);
+}
+// Every running process started from inside `dir` (a folder that is about to be replaced), or null
+// when the process list cannot be read: unknown is never treated as "nothing is running".
+export function processesUsing(dir, {run = spawnSync, platform = process.platform} = {}) {
+  if (platform === 'win32') {
+    const result = powershell(`@(Get-CimInstance Win32_Process -ErrorAction Stop|ForEach-Object{@{pid=[int]$_.ProcessId;executable=[string]$_.ExecutablePath;commandLine=[string]$_.CommandLine}})|ConvertTo-Json -Compress -Depth 3`, run);
+    if (result.status !== 0) return null;
+    let rows; try { rows = JSON.parse(String(result.stdout || '').replace(/^﻿/, '').trim()); } catch { return null; }
+    return Array.isArray(rows) ? processesInDir(rows, dir) : rows && typeof rows === 'object' ? processesInDir([rows], dir) : null;
+  }
+  const result = run('ps', ['-axww', '-o', 'pid=,command='], {encoding: 'utf8', timeout: 5000});
+  if (result.status !== 0) return null;
+  const rows = String(result.stdout || '').split('\n').map(line => /^\s*(\d+)\s+(.*)$/.exec(line)).filter(Boolean).map(match => ({pid: +match[1], commandLine: match[2]}));
+  if (!rows.length) return null;
+  return [...new Set([...processesInDir(rows, dir), ...unplacedPythons(rows, dir, {cwdOf: pid => processCwd(pid, {run})})])];
+}
+
+// A Python started as a bare `python` (an activated environment) or by a relative path such as
+// `bin/python` does not show which environment it runs from. Relative ones are resolved against the
+// process's working directory; anything that cannot be placed counts as possibly running from `dir`.
+export function unplacedPythons(rows, dir, {cwdOf}) {
+  const root = path.resolve(dir);
+  const inside = file => { const relative = path.relative(root, file); return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative)); };
+  const hits = [];
+  for (const row of rows) {
+    const program = String(row.commandLine || '').trim().split(/\s+/)[0].replace(/^["']|["']$/g, '');
+    if (!/^python(?:\d+(?:\.\d+)?)?$/i.test(path.basename(program)) || path.isAbsolute(program)) continue;
+    if (!program.includes('/')) { hits.push(row.pid); continue; }
+    const cwd = cwdOf(row.pid);
+    if (!cwd || inside(path.resolve(cwd, program))) hits.push(row.pid);
+  }
+  return hits;
+}
+function processCwd(pid, {run}) {
+  const result = run('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], {encoding: 'utf8', timeout: 5000});
+  const line = result.status === 0 ? String(result.stdout || '').split('\n').find(item => item.startsWith('n/')) : null;
+  return line ? line.slice(1) : null;
+}
+
 // The loopback listener on a port, or null. More than one listener is reported
 // as ambiguous so a caller never picks a process to stop by position.
 export function listener(port, {run = spawnSync, platform = process.platform} = {}) {

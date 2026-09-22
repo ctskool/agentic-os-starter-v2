@@ -1,8 +1,14 @@
 # Local speech service (runner/speech.py): Kokoro text-to-speech + faster-whisper speech-to-text.
-fastapi
-uvicorn[standard]
-numpy
-soundfile
-sounddevice
-kokoro-onnx
-faster-whisper
+# Python 3.10-3.13 (kokoro-onnx 0.6.x does not support 3.14). Our direct packages are pinned to
+# tested versions; the heavy libraries they pull in are bounded so pip picks the newest build that
+# exists for the member's Python and machine (Intel Macs get an older onnxruntime, for example).
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+soundfile==0.14.0
+sounddevice==0.5.6
+kokoro-onnx==0.6.1
+faster-whisper==1.2.1
+numpy>=2.0.2,<3
+onnxruntime>=1.20.1,<2
+ctranslate2>=4.5,<5
+phonemizer>=3.4,<4

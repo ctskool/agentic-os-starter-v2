@@ -37,6 +37,8 @@ node aos.mjs upgrade    # Read-only discovery and report; does not apply an upgr
 node aos.mjs update     # Changes a recognized stock starter and rebuilds it
 ```
 
+**Updating from the first public release (September 2026):** that version of `update` pulls the new files but then runs the setup code it had already loaded. Run `node aos.mjs setup` once after that update so the new setup steps run too (choosing the coding tool, the Python checks and the Windows login-task repair). Later updates run the new setup automatically.
+
 `update` refuses customized or unknown source before stopping services. If it refuses, have your agent inspect the changes and plan an integration. Do not discard your modifications just to force it through.
 
 Only one installation can own the system's fixed ports. Your agent must get your agreement before stopping the working installation, use its own scripts, and keep a way to restore it. Tests that need those occupied ports wait for that handoff. Unrelated speech services and recovery tasks should remain alone.

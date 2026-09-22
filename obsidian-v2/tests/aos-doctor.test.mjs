@@ -350,7 +350,7 @@ test('every run prints every line, even with the bridge down or no vault configu
   const install = installation(); fs.rmSync(install.at.vaultFile);
   const found = await examine(services, install, {full: true});
   const expected = ['Node.js 22 or newer', 'Vault configured', 'Vault has the daily-note schema', 'Obsidian plugin files installed', 'Plugin switched on in Obsidian',
-    TERMINAL, 'Recovery monitor running', `Bridge answering on ${services.ports.bridge}`, `Jarvis HUD answering on ${services.ports.jarvis}`, 'claude CLI', 'codex CLI', VOICE[0], HOTKEY, ...VOICE.slice(1), 'Jev fast voice routing', 'A real workflow end to end'];
+    TERMINAL, 'Python helper for conversations inside Obsidian', 'Recovery monitor running', `Bridge answering on ${services.ports.bridge}`, `Jarvis HUD answering on ${services.ports.jarvis}`, 'claude CLI', 'codex CLI', VOICE[0], HOTKEY, ...VOICE.slice(1), 'Jev fast voice routing', 'A real workflow end to end'];
   assert.deepEqual(found.results.map(item => item.name), expected);
   for (const name of ['Vault has the daily-note schema', 'claude CLI', ...VOICE, HOTKEY, 'A real workflow end to end']) { assert.equal(found.line(name).status, 'SKIP', name); assert.match(found.line(name).detail, /not (run|checked)/); }
   assert.equal(found.line(TERMINAL).status, 'SKIP'); assert.match(found.line(TERMINAL).detail, /no vault configured/);

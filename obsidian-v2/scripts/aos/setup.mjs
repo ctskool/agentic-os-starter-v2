@@ -6,10 +6,12 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {projectRoot} from '../../runner/runtime.mjs';
-import {isWindows, tryJson, sleep, listener, samePath} from './platform.mjs';
+import {isWindows, tryJson, sleep, listener, samePath, processesUsing} from './platform.mjs';
 import {layout, start, stop, waitForServices, speechInstalled, speechPlan, bridgeIsOurs, hudIsOurs, otherInstallation, PORTS} from './services.mjs';
 import {enableAutostart, autostartOwner} from './autostart.mjs';
-import {setupSpeech} from './speech.mjs';
+import {setupSpeech, setAsideUnsupportedVoice, removeSetAsideVoice, voiceRebuildMarker} from './speech.mjs';
+import {applyProviderChoice} from './provider.mjs';
+import {prepareTerminalPython} from './terminal-python.mjs';
 import {scaffoldVault} from './vault.mjs';
 import {doctor} from './doctor.mjs';
 import {assessCheckout, prepareStockUpdate} from './upgrade-checkout.mjs';
@@ -101,11 +103,27 @@ export async function preflight(at, vault, {adopt = false, get = tryJson, find =
 // asked the same way `start` asks it, so setup never downloads a voice the services would not run.
 // explicit = the person typed --voice yes this time: installed files are then checked and repaired
 // (the installer keeps what is complete and fetches what is missing, e.g. an interrupted model).
-export async function prepareVoice(at, {wantVoice, explicit = false, log = console.log, plan = speechPlan, installVoice = setupSpeech, installed = speechInstalled} = {}) {
+// The recovery monitor and the own voice port must both be down before a voice environment is replaced.
+export const voiceServicesBusy = async ({find = listener} = {}) => find(PORTS.supervisor) !== null || find(PORTS.speech) !== null;
+
+export async function prepareVoice(at, {wantVoice, explicit = false, log = console.log, plan = speechPlan, installVoice = setupSpeech, installed = speechInstalled,
+  setAside = options => setAsideUnsupportedVoice(at, options), removeAside = removeSetAsideVoice, busy = voiceServicesBusy, inUse = dir => processesUsing(dir)} = {}) {
   if (!wantVoice) return 'off';
+  // Before the installed-files shortcut, so an ordinary update repairs a 3.14 environment too.
+  const aside = await setAside({log, busy, inUse});
+  if (aside.state === 'no-python' || aside.state === 'deferred') { log(`-> Voice: ${aside.reason}`); return aside.state; }
   const voice = await plan(at);
   // Only a setting can name a shared service that does not answer; discovery never picks a dead one.
   if (voice.shared && !voice.healthy) log(`-> Voice: the AOS_V2_SPEECH_URL setting points at ${voice.url}, which is not answering. The services use that address for as long as the setting exists, so voice stays silent until you remove the setting and run \`node aos.mjs stop\`, then \`node aos.mjs start\`.`);
+  // A rebuild that did not finish (the replacement's packages failed) is never mistaken for installed voice.
+  const rebuildPending = fs.existsSync(voiceRebuildMarker(at));
+  if (rebuildPending) {
+    log('-> Voice: finishing the rebuild of the voice environment');
+    await installVoice(at, {log});
+    fs.rmSync(voiceRebuildMarker(at), {force: true});
+    removeAside(at, {inUse});
+    return 'installed';
+  }
   if (installed(at)) {
     if (!explicit) return 'present';
     log('-> Voice: already installed; checking the files and fetching anything that is missing');
@@ -118,6 +136,8 @@ export async function prepareVoice(at, {wantVoice, explicit = false, log = conso
   }
   log('-> Voice: installing (about 1.3 GB the first time: 800 MB of voice models plus the Python packages that run them)');
   await installVoice(at, {log});
+  // Only now is an environment set aside earlier no longer needed (kept if anything still runs from it).
+  removeAside(at, {inUse});
   return 'installed';
 }
 
@@ -128,7 +148,7 @@ export const watchedServices = monitor => {
   return ids.length ? ids : ['bridge', 'jarvis'];
 };
 
-export async function setup({root = projectRoot, vault, voice, autostart, rebuild = false, ci = false, adopt = false, log = console.log} = {}) {
+export async function setup({root = projectRoot, vault, voice, autostart, provider, rebuild = false, ci = false, adopt = false, log = console.log} = {}) {
   const at = layout(root), state = readState(at);
   if (Number(process.versions.node.split('.')[0]) < 22) throw new Error(`Node.js 22 or newer is required (this is ${process.versions.node}). Install the LTS from nodejs.org, open a new terminal and run setup again.`);
   if (!fs.existsSync(path.join(at.jarvis, 'package.json'))) throw new Error(`The Jarvis HUD folder is missing next to this one (${at.jarvis}). Clone the whole starter repository, not one folder.`);
@@ -147,7 +167,10 @@ export async function setup({root = projectRoot, vault, voice, autostart, rebuil
   const report = scaffoldVault(path.join(at.root, 'vault-template'), vault);
   log(`-> Vault ${report.newVault ? 'created' : 'completed'} at ${vault} (${report.created} file(s) added, ${report.kept} existing kept)`);
   const install = () => runStep('Obsidian plugin: installing into the vault', process.execPath, [path.join(at.root, 'scripts', 'install-live.mjs'), vault], {cwd: at.root, log});
+  // Before the plugin install, which otherwise seeds a Codex selection into a fresh vault.
+  applyProviderChoice(vault, {explicit: provider, runtimeDir: at.runtime, log});
   install();
+  prepareTerminalPython(at, {log});
   Object.assign(state, {vault, voice: wantVoice});
   writeState(at, state);
 
@@ -169,7 +192,17 @@ export async function setup({root = projectRoot, vault, voice, autostart, rebuil
 
 // check, get, halt, pull and install exist for the tests. Refuse customized or
 // uncertain checkouts before touching services, runtime state, or the network.
-export async function update({root = projectRoot, log = console.log, check = assessCheckout, get = tryJson, halt = stop, pull, pullRun, install = setup} = {}) {
+// After pulling, setup must run the NEW code, not the functions this process loaded before the pull:
+// a fresh Node process runs `aos.mjs setup`. Its exit status becomes the result the CLI reports.
+export function setupInFreshProcess({root, vault, rebuild, log = console.log, spawnImpl = spawnSync}) {
+  const args = [path.join(root, 'scripts', 'aos.mjs'), 'setup', '--vault', vault, ...(rebuild ? ['--rebuild'] : [])];
+  log('-> Running setup from the updated files');
+  const result = spawnImpl(process.execPath, args, {cwd: root, stdio: 'inherit', windowsHide: true});
+  if (result.error) throw new Error(`Could not run the updated setup (${process.execPath} ${args.join(' ')}): ${result.error.message}`);
+  return {ok: result.status === 0, exitCode: result.status};
+}
+
+export async function update({root = projectRoot, log = console.log, check = assessCheckout, get = tryJson, halt = stop, pull, pullRun, install = options => setupInFreshProcess(options)} = {}) {
   const assessment = check(root);
   if (assessment?.updateAllowed !== true) throw new Error('This checkout is customized or could not be confirmed as a clean stock starter. Nothing was stopped or changed. Run `node aos.mjs upgrade` to review a safe upgrade plan.');
   pull ||= prepareStockUpdate(assessment, {log, ...(pullRun ? {run: pullRun} : {})});

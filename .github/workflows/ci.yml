@@ -59,6 +59,33 @@ jobs:
           npm run typecheck
           npm test
 
+  # The pinned voice packages must install from published builds and import on the oldest and newest
+  # supported Python (the install job below runs the full speech round trip on 3.12). Package and import
+  # compatibility only: no models are downloaded here. Intel Macs have no GitHub runner and stay unverified.
+  voice-packages:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+        python: ['3.10', '3.13']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install the pinned voice packages into a fresh environment
+        run: |
+          python -m venv voice-check
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=voice-check/Scripts/python.exe; else PY=voice-check/bin/python; fi
+          "$PY" -m pip install --disable-pip-version-check --prefer-binary -r obsidian-v2/runner/speech-requirements.txt
+          "$PY" -m pip freeze
+          "$PY" -c "import kokoro_onnx, faster_whisper, onnxruntime, ctranslate2, soundfile, fastapi, uvicorn; print('voice packages import on', __import__('sys').version)"
+
   install:
     strategy:
       fail-fast: false
@@ -91,6 +118,14 @@ jobs:
           node aos.mjs setup --vault "$RUNNER_TEMP/vault" --voice yes --autostart no --ci | tee ci-logs/setup-shared.log
           grep -q "will be shared, so there is nothing to download" ci-logs/setup-shared.log
           test ! -e obsidian-v2/.runtime/speech-venv
+      # Conversations inside Obsidian: the Terminal plugin runs its helper with this managed Python
+      # (Windows needs psutil + pywinctl in it). Checked through the managed interpreter, not the runner's.
+      - name: Terminal helper Python is prepared and recorded
+        run: |
+          node -e "import('./obsidian-v2/runner/terminal-python-record.mjs').then(m => { const p = m.recordedTerminalPython(require('path').resolve('obsidian-v2/.runtime')); console.log(p); if (!p) process.exit(1); })"
+          if [ "$RUNNER_OS" = "Windows" ]; then obsidian-v2/.runtime/terminal-venv/Scripts/python.exe -c "import psutil, pywinctl"; else obsidian-v2/.runtime/terminal-venv/bin/python -c "import pty, selectors"; fi
+      - name: A fresh vault gets a provider without asking
+        run: node -e "const s=JSON.parse(require('fs').readFileSync(process.env.RUNNER_TEMP+'/vault/system/v2/provider.json','utf8'));console.log(s);if(!['claude','codex'].includes(s.provider))process.exit(1)"
       - name: Doctor with the shared voice
         run: |
           node aos.mjs doctor --ci | tee ci-logs/doctor-shared.log
@@ -112,8 +147,9 @@ jobs:
       # Now the ordinary case: nothing to share, so setup installs this installation's own voice.
       - name: Install into a fresh vault, with voice
         run: |
-          node aos.mjs setup --vault "$RUNNER_TEMP/vault" --voice yes --autostart no --ci | tee ci-logs/setup-own.log
+          node aos.mjs setup --vault "$RUNNER_TEMP/vault" --provider claude --voice yes --autostart no --ci | tee ci-logs/setup-own.log
           test -e obsidian-v2/.runtime/speech-venv
+          node -e "const s=JSON.parse(require('fs').readFileSync(process.env.RUNNER_TEMP+'/vault/system/v2/provider.json','utf8'));console.log(s);if(s.provider!=='claude'||s.model!=='opus')process.exit(1)"
       - name: Doctor
         run: |
           node aos.mjs doctor --ci | tee ci-logs/doctor-own.log

@@ -12,6 +12,8 @@ import {layout, PORTS, configuredVaultPath, speechInstalled} from './services.mj
 import {pluginInstalled, pluginEnabled} from './vault.mjs';
 import {hasJevKey} from './jev-key.mjs';
 import {terminalSupport, VERIFIED_TERMINAL_VERSIONS, JARVIS_URL} from '../../shared/terminal-support.mjs';
+import {recordedTerminalPython} from '../../runner/terminal-python-record.mjs';
+import {terminalPythonWorks} from './terminal-python.mjs';
 
 const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; } };
 const SUPERVISOR_LOG = 'obsidian-v2/.runtime/service-supervisor.jsonl';
@@ -20,6 +22,17 @@ const VOICE_CHECKS = ['Voice service healthy', 'Text to speech', 'Speech to text
 const HOTKEY_CHECK = 'Global voice shortcut';
 const STILL_STARTING = new Set(['checking', 'starting', 'waiting_for_listener', 'backoff']);
 const TERMINAL_CHECK = 'Terminal plugin (conversations inside Obsidian)';
+const TERMINAL_PYTHON_CHECK = 'Python helper for conversations inside Obsidian';
+
+// Only matters once the Terminal plugin is in use; the record exists only after setup verified it.
+export function terminalPythonCheck(runtime, {terminal, recorded = recordedTerminalPython, works = python => terminalPythonWorks(python)} = {}) {
+  if (terminal.status !== 'PASS' && terminal.status !== 'FAIL') return {status: 'SKIP', detail: 'not needed until the Terminal plugin is installed and switched on'};
+  const fix = `Run \`node aos.mjs setup\` again (it needs Python 3.12: Windows \`winget install Python.Python.3.12\`, Mac \`xcode-select --install\`), or use the same buttons in Jarvis at ${JARVIS_URL}.`;
+  const python = recorded(runtime);
+  if (!python) return {status: 'FAIL', detail: 'not prepared', fix};
+  // The record alone proves nothing today: the base Python may be gone or a module broken since.
+  return works(python) ? {status: 'PASS', detail: 'prepared by setup and loads'} : {status: 'FAIL', detail: 'prepared by setup, but it no longer runs or loads its modules', fix};
+}
 
 // The optional Terminal community plugin, from the vault's own files. Never throws: whatever
 // is wrong here, Jarvis still runs every conversation, so it can never be a core failure.
@@ -143,9 +156,11 @@ export async function doctor({root = projectRoot, ci = false, full = false, phas
     else if (pluginEnabled(vault)) add(needsUser, 'Plugin switched on in Obsidian', 'ready in this new vault, but Obsidian has not opened it yet', 'Open Obsidian -> "Open folder as vault" -> choose the vault folder -> "Trust author and enable plugins".');
     else add(needsUser, 'Plugin switched on in Obsidian', 'needs the user', 'In Obsidian: Settings > Community plugins -> turn on community plugins -> enable "Agentic OS V2".');
   });
-  await group([TERMINAL_CHECK], () => {
+  await group([TERMINAL_CHECK, TERMINAL_PYTHON_CHECK], () => {
     const check = terminalPluginCheck(vault);
     add(check.status, TERMINAL_CHECK, check.detail, check.fix || '', {optional: true});
+    const python = terminalPythonCheck(at.runtime, {terminal: check});
+    add(python.status, TERMINAL_PYTHON_CHECK, python.detail, python.fix || '', {optional: true});
   }, {optional: true});
 
   add(supervisor ? 'PASS' : 'FAIL', 'Recovery monitor running', supervisor ? `${supervisor.services.length} services watched` : '', 'Run `node aos.mjs start`.');
@@ -247,7 +262,7 @@ export async function doctor({root = projectRoot, ci = false, full = false, phas
     if (!services?.bridge?.online) return bridgeDown;
     const token = JSON.parse(fs.readFileSync(at.auth, 'utf8')).token, id = crypto.randomUUID();
     const started = await fetchJson(`${local(ports.bridge)}/work/skill`, {method: 'POST', headers: {'X-V2-Token': token, 'X-V2-App': 'web'}, body: {id, skill: 'vault-summary'}, timeoutMs: 15000});
-    if (!started.ok) { add('FAIL', WORKFLOW, started.data?.error || `status ${started.status}`, 'Sign in to the selected provider, then run `node aos.mjs doctor --full` again.'); return; }
+    if (!started.ok) { add('FAIL', WORKFLOW, started.data?.error || `status ${started.status}`, 'Sign in to the selected provider, then run `node aos.mjs doctor --full` again. If the selected provider is not the one you use, switch with `node aos.mjs setup --provider claude` (or `codex`).'); return; }
     for (let waited = 0; waited < 300; waited += 3) {
       await pause(3000);
       const task = (await tryJson(`${local(ports.bridge)}/work`, {timeoutMs: 8000}))?.tasks?.find(item => item.id === id);

@@ -69,12 +69,24 @@ if(!$taskSupervisor){
  [System.IO.File]::WriteAllText($taskTemporary,($taskConfig | ConvertTo-Json -Depth 8),[System.Text.UTF8Encoding]::new($false))
  Move-Item -LiteralPath $taskTemporary -Destination $taskConfigFile -Force
 }
+# Same rule as scripts/aos/autostart.mjs taskOwner: parse the exact shape this launcher registers
+# (with or without the policy bypass) and require our wrapper and configuration file; never a substring.
+function Test-OurRecoveryTask($task){
+ $actions=@($task.Actions)
+ if($actions.Count -ne 1){return $false}
+ if(([string]$actions[0].Execute).Trim('"') -notmatch '(^|[\\/])powershell\.exe$'){return $false}
+ $shape='^-NoProfile -NonInteractive (?:-ExecutionPolicy Bypass )?-WindowStyle Hidden -File "([^"]+)" -NodeExecutable "([^"]+)" -ConfigFile "([^"]+)"$'
+ if(([string]$actions[0].Arguments).Trim() -notmatch $shape){return $false}
+ $same={param($a,$b) [System.IO.Path]::GetFullPath($a).TrimEnd('\').Equals([System.IO.Path]::GetFullPath($b).TrimEnd('\'),[System.StringComparison]::OrdinalIgnoreCase)}
+ return (& $same $Matches[1] $taskWrapper) -and (& $same $Matches[3] $taskConfigFile)
+}
 if($InstallAtLogon){
  $taskPowerShell=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
  if(!(Test-Path -LiteralPath $taskPowerShell)){throw 'Windows PowerShell is unavailable for the recovery task.'}
- $taskArguments='-NoProfile -NonInteractive -WindowStyle Hidden -File "'+$taskWrapper+'" -NodeExecutable "'+$taskNode+'" -ConfigFile "'+$taskConfigFile+'"'
+ # Bypass applies to this one process: a fresh Windows (policy Restricted) otherwise refuses -File. No policy is changed.
+ $taskArguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "'+$taskWrapper+'" -NodeExecutable "'+$taskNode+'" -ConfigFile "'+$taskConfigFile+'"'
  $taskExisting=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
- if($taskExisting -and @($taskExisting.Actions | Where-Object {$_.Arguments -like ('*"'+$taskWrapper+'"*')}).Count -ne 1){throw 'A different installation owns the recovery task; nothing replaced.'}
+ if($taskExisting -and !(Test-OurRecoveryTask $taskExisting)){throw 'A different installation owns the recovery task; nothing replaced.'}
  $taskIdentity=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name
  $taskAction=New-ScheduledTaskAction -Execute $taskPowerShell -Argument $taskArguments -WorkingDirectory $taskRoot
  $taskTrigger=New-ScheduledTaskTrigger -AtLogOn -User $taskIdentity
@@ -86,7 +98,7 @@ if(Test-Path -LiteralPath $taskPauseFile){Remove-Item -LiteralPath $taskPauseFil
 if($taskSupervisor){Write-Output 'Recovery is already running. Existing services and conversations were retained.';return}
 $taskScheduled=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if($taskScheduled){
- if(@($taskScheduled.Actions | Where-Object {$_.Arguments -like ('*"'+$taskWrapper+'"*')}).Count -ne 1){throw 'A different installation owns the recovery task.'}
+ if(!(Test-OurRecoveryTask $taskScheduled)){throw 'A different installation owns the recovery task.'}
  # Let a previous intentional stop finish before asking Task Scheduler to start again.
  for($taskAttempt=0;$taskAttempt -lt 20 -and (Get-ScheduledTask -TaskName $taskName).State -eq 'Running';$taskAttempt++){Start-Sleep -Milliseconds 500}
  Start-ScheduledTask -TaskName $taskName

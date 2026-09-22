@@ -45,7 +45,8 @@ export function scheduledTaskScript({node, config, wrapper, cwd}) {
   return [
     `$ErrorActionPreference='Stop'`,
     `$ps=Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'`,
-    `$arguments='-NoProfile -NonInteractive -WindowStyle Hidden -File "'+${q(wrapper)}+'" -NodeExecutable "'+${q(node)}+'" -ConfigFile "'+${q(config)}+'"'`,
+    // Bypass applies to this one process: a fresh Windows (policy Restricted) otherwise refuses -File. No policy is changed.
+    `$arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "'+${q(wrapper)}+'" -NodeExecutable "'+${q(node)}+'" -ConfigFile "'+${q(config)}+'"'`,
     `$identity=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name`,
     `$action=New-ScheduledTaskAction -Execute $ps -Argument $arguments -WorkingDirectory ${q(cwd)}`,
     `$trigger=New-ScheduledTaskTrigger -AtLogOn -User $identity`,
@@ -63,16 +64,25 @@ function powershell(script, run = spawnSync) {
 // Ownership is decided by PARSING the exact shape this launcher registers, never by searching
 // for our paths inside someone else's command. Anything that exists and does not parse to our
 // wrapper / monitor AND our configuration file is 'other'; so is a question that cannot be answered.
-const TASK_ARGUMENTS = /^-NoProfile -NonInteractive -WindowStyle Hidden -File "([^"]+)" -NodeExecutable "([^"]+)" -ConfigFile "([^"]+)"$/;
-export function taskOwner(text, at) {
-  let task; try { task = JSON.parse(String(text || '').replace(/^\uFEFF/, '').trim()); } catch { return 'other'; }
-  if (task?.exists === false && !task.error) return null;
-  if (task?.exists !== true || task.error) return 'other';
+// Tasks registered before the policy fix lack "-ExecutionPolicy Bypass": still ours, but a fresh Windows
+// (execution policy Restricted) refuses their -File, so they are re-registered (taskNeedsPolicyRefresh).
+const TASK_ARGUMENTS = /^-NoProfile -NonInteractive (?:-ExecutionPolicy Bypass )?-WindowStyle Hidden -File "([^"]+)" -NodeExecutable "([^"]+)" -ConfigFile "([^"]+)"$/;
+const taskAction = text => {
+  let task; try { task = JSON.parse(String(text || '').replace(/^\uFEFF/, '').trim()); } catch { return {owner: 'other'}; }
+  if (task?.exists === false && !task.error) return {owner: null};
+  if (task?.exists !== true || task.error) return {owner: 'other'};
   const actions = Array.isArray(task.actions) ? task.actions : [];
-  if (actions.length !== 1 || !/(^|[\\/])powershell\.exe$/i.test(String(actions[0].execute || '').replace(/^"|"$/g, ''))) return 'other';
-  const parsed = TASK_ARGUMENTS.exec(String(actions[0].arguments || '').trim());
+  if (actions.length !== 1 || !/(^|[\\/])powershell\.exe$/i.test(String(actions[0].execute || '').replace(/^"|"$/g, ''))) return {owner: 'other'};
+  return {owner: 'parse', args: String(actions[0].arguments || '').trim()};
+};
+export function taskOwner(text, at) {
+  const {owner, args} = taskAction(text);
+  if (owner !== 'parse') return owner;
+  const parsed = TASK_ARGUMENTS.exec(args);
   return parsed && samePath(parsed[1], wrapperOf(at)) && samePath(parsed[3], at.config) ? 'ours' : 'other';
 }
+// Pure. True only for a task that is ours and was registered without the execution-policy bypass.
+export const taskNeedsPolicyRefresh = (text, at) => taskOwner(text, at) === 'ours' && !/ -ExecutionPolicy Bypass /.test(taskAction(text).args);
 const TASK_QUERY = `try{$t=@(Get-ScheduledTask -ErrorAction Stop|Where-Object{$_.TaskName -eq '${TASK_NAME}'});if($t.Count -eq 0){'{"exists":false}'}elseif($t.Count -gt 1){'{"error":true}'}else{@{exists=$true;actions=@($t[0].Actions|ForEach-Object{@{execute=[string]$_.Execute;arguments=[string]$_.Arguments}})}|ConvertTo-Json -Compress -Depth 4}}catch{'{"error":true}'}`;
 
 const unxml = value => String(value).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
@@ -110,6 +120,16 @@ export function autostartOwner(at, {platform = process.platform, run = spawnSync
   const loaded = loadedAgent(run), job = loaded === null ? null : loaded !== false && monitorArguments(launchctlArguments(loaded), at) ? 'ours' : 'other';
   if (file === 'other' || job === 'other') return 'other';
   return file || job;
+}
+
+// Windows only: re-register OUR login task when it predates the execution-policy bypass. Never
+// touches a foreign, ambiguous or unreadable task; never starts or stops the monitor. True = refreshed.
+export function refreshAutostartPolicy(at, {platform = process.platform, run = spawnSync, enable = enableAutostart} = {}) {
+  if (platform !== 'win32') return false;
+  const result = powershell(TASK_QUERY, run);
+  if (result.status !== 0 || !taskNeedsPolicyRefresh(result.stdout, at)) return false;
+  enable(at, {platform, run});
+  return true;
 }
 
 // Ask the login item to run the monitor now. False = caller starts it directly.

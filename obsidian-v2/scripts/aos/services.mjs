@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {projectRoot} from '../../runner/runtime.mjs';
 import {listener, processInfo, samePath, tryJson, fetchJson, sleep} from './platform.mjs';
-import {autostartOwner, kickAutostart} from './autostart.mjs';
+import {autostartOwner, kickAutostart, refreshAutostartPolicy} from './autostart.mjs';
 
 export const PORTS = {jarvis: 3217, preview: 3218, bridge: 3219, speech: 3220, supervisor: 3221};
 const local = port => `http://127.0.0.1:${port}`;
@@ -113,18 +113,35 @@ export async function start({root = projectRoot, resetRecovery = false, log = co
     atomicWrite(at.config, JSON.stringify({runtimeDir: at.runtime, lockPort: PORTS.supervisor, services}, null, 1));
   }
   fs.rmSync(at.pause, {force: true});
+  // Before the "already running" return, so installations that are up right now are repaired too.
+  refreshLoginItem(at, {log});
   if (supervisor) { log('Recovery is already running. Existing services and conversations were retained.'); return {started: false}; }
-  // A login item owns the monitor when one is installed, so it survives this shell.
-  const owner = autostartOwner(at);
+  return launchMonitor(at, {log});
+}
+
+// Windows login tasks registered before the execution-policy fix are re-registered (ours only).
+// A failure here never blocks starting: the direct-start fallback below still brings services up.
+export function refreshLoginItem(at, {log = console.log, refresh = refreshAutostartPolicy} = {}) {
+  try { if (refresh(at)) log('-> Start at login: updated the Windows login task so it also runs where scripts are blocked by default.'); }
+  catch (error) { log(`-> Start at login: could not update the Windows login task (${String(error.message || error).slice(0, 200)}). Services still start now; run \`node aos.mjs autostart on\` later.`); }
+}
+
+// A login item owns the monitor when one is installed, so it survives this shell. When the kicked
+// login item does not bring the monitor up (a task Windows refused to run, a stale LaunchAgent), the
+// monitor is started directly; its exclusive lock makes a late login-item start exit harmlessly.
+export async function launchMonitor(at, {log = console.log, owner = autostartOwner(at), kick = kickAutostart, spawnMonitor, status = supervisorStatus, wait = sleep, kickGraceAttempts = 12, attempts = 24} = {}) {
   if (loginItemBlocks(owner)) throw new Error('A different installation owns the start-at-login item, so two copies would fight at the next login. Turn it off from that installation first (`node aos.mjs autostart off` in its folder). Nothing was started.');
-  if (!(owner === 'ours' && kickAutostart(at))) {
-    const child = spawn(process.execPath, [at.supervisor, '--config', at.config], {cwd: at.root, detached: true, windowsHide: true, stdio: 'ignore'});
-    child.unref();
-  }
-  for (let attempt = 0; attempt < 24; attempt++) {
-    await sleep(500);
-    const ready = await supervisorStatus(1000);
+  spawnMonitor ||= () => spawn(process.execPath, [at.supervisor, '--config', at.config], {cwd: at.root, detached: true, windowsHide: true, stdio: 'ignore'}).unref();
+  let direct = !(owner === 'ours' && kick(at));
+  if (direct) spawnMonitor();
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    await wait(500);
+    const ready = await status(1000);
     if (ready && samePath(ready.runtimeDir, at.runtime)) { log('Local service recovery is active on 127.0.0.1:3221.'); return {started: true}; }
+    if (!direct && attempt + 1 >= kickGraceAttempts) {
+      log('-> The login item did not start the recovery monitor; starting it directly.');
+      direct = true; spawnMonitor();
+    }
   }
   throw new Error('The recovery monitor did not become available. Inspect .runtime/service-supervisor.jsonl.');
 }

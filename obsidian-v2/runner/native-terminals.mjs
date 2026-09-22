@@ -5,6 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {TerminalManager,terminalSpec,cleanPrompt,workId} from './terminals.mjs';
 import {projectRoot} from './runtime.mjs';
+import {recordedTerminalPython} from './terminal-python-record.mjs';
 import {findCli} from './adapters.mjs';
 import {TerminalInputBoundary,TerminalPromptDetector} from './terminal-transport.mjs';
 import {WORKER_SPOKEN_STYLE,artifactHandoffInstructions} from './spoken-answer.mjs';
@@ -19,6 +20,8 @@ const UNCONFIRMED='The native terminal has not reconnected. It may still be runn
 export class NativeTerminalManager extends TerminalManager {
  constructor(root,options={}){
   super(root,options);this.resolveNativeCli=options.resolveNativeCli||findCli;
+  // The managed Python the Terminal plugin runs its helper with; only a verified record counts.
+  this.terminalPython=options.terminalPython||(()=>recordedTerminalPython(path.join(projectRoot,'.runtime')));
   for(const r of this.records.values())if(native(r)&&r.native){
    if(!r.native.ended){this.live.set(r.id,this.nativeLive(r,true));if(r.recoveryAvailable){r.recoveryAvailable=false;this.save(r)}}
    else if(r.native.launchCancelled&&!r.recoveryAvailable){r.recoveryAvailable=true;this.save(r)}
@@ -91,7 +94,7 @@ export class NativeTerminalManager extends TerminalManager {
   fs.writeFileSync(ticket,JSON.stringify({version:1,taskId:r.id,instance,cwd:this.root,command:spec.command,args:spec.args,env,events}),{flag:'wx',mode:0o600});
   r.native={instance,startedAt:this.now(),lastSeen:0,ended:false,actions:[],ticket,cli:{command:cli.command,source:cli.source}};
   r.state='starting';r.pid=null;r.error=null;r.recoveryAvailable=false;delete r.inputReason;this.touch(r,{conversation:true});this.live.set(r.id,this.nativeLive(r));
-  this.command(r,'launch',{launch:{executable:process.execPath,args:[path.join(projectRoot,'runner','native-launch.mjs'),'--ticket',ticket],cwd:this.root,environment:[['AOS_V2_TASK_ID',r.id],['AOS_V2_TASK_PROVIDER',r.provider],['AOS_V2_NATIVE_INSTANCE',instance],['AOS_V2_NATIVE_DIRECT','1']]}});
+  this.command(r,'launch',{launch:{executable:process.execPath,args:[path.join(projectRoot,'runner','native-launch.mjs'),'--ticket',ticket],cwd:this.root,environment:[['AOS_V2_TASK_ID',r.id],['AOS_V2_TASK_PROVIDER',r.provider],['AOS_V2_NATIVE_INSTANCE',instance],['AOS_V2_NATIVE_DIRECT','1']],...(()=>{const python=this.terminalPython();return python?{pythonExecutable:python}:{}})()}});
   return r;
  }
  send(id,text,{resumeStopped=false,spoken=false,openWhenDone=false}={}){

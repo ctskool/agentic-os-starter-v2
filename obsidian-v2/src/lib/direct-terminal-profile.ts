@@ -1,6 +1,8 @@
 import {NATIVE_TERMINAL_VIEW} from './native-terminal';
 export interface DirectLaunch {
  executable:string;args:string[];cwd:string;environment?:Array<[string,string]>;
+ /** The bridge's verified managed Python for Terminal's own helper (resize on Windows, the shell itself elsewhere). */
+ pythonExecutable?:string;
 }
 export interface DirectAction {
  id:string;taskId:string;instance:string;type:'launch'|'send'|'stop';
@@ -8,6 +10,7 @@ export interface DirectAction {
 }
 export const directId=(value:unknown):value is string=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const absolute=(value:unknown):value is string=>typeof value==='string'&&!/[\x00-\x1f\x7f]/.test(value)&&(/^[A-Za-z]:[\\/]/.test(value)||value.startsWith('/'));
+const pythonPath=(value:unknown):value is string=>absolute(value)&&/(?:^|[\\/])python(?:3(?:\.\d+)?)?(?:\.exe)?$/i.test(value);
 function ticketProfile(profile:Record<string,any>){return absolute(profile.executable)&&/(?:^|[\\/])node(?:\.exe)?$/i.test(profile.executable)&&Array.isArray(profile.args)&&profile.args.length===3&&absolute(profile.args[0])&&/[\\/]native-launch\.mjs$/i.test(profile.args[0])&&profile.args[1]==='--ticket'&&absolute(profile.args[2])}
 export function directTerminalMetadata(leaf:{getViewState():any}):{id:string;instance:string;provider:'codex'|'claude'}|null {
  try{
@@ -23,6 +26,7 @@ export function directTerminalViewState(action:DirectAction,base:Record<string,u
  // Terminal 3.27.x builds a Windows batch file. Its argv encoder does not
  // support literal newlines; a one-use launch ticket carries full prompt text.
  if(!ticketProfile(launch))throw new Error('The native launch ticket is invalid.');
+ if(launch.pythonExecutable!==undefined&&!pythonPath(launch.pythonExecutable))throw new Error('The native launch Python is invalid.');
  if(launch.environment&&(!Array.isArray(launch.environment)||launch.environment.some(entry=>!Array.isArray(entry)||entry.length!==2||entry.some(value=>typeof value!=='string'||/[\x00\r\n]/.test(value)))))throw new Error('The native launch environment is invalid.');
  const platform=/^[A-Za-z]:[\\/]/.test(launch.executable)?'win32':typeof process!=='undefined'?process.platform:'darwin';
  const title=`${action.provider==='codex'?'Codex':'Claude'} · ${(action.title||'Conversation').replace(/[\x00-\x1f\x7f]/g,' ').replace(/\s+/g,' ').trim().slice(0,70)}`;
@@ -30,7 +34,8 @@ export function directTerminalViewState(action:DirectAction,base:Record<string,u
  environment.push(['AOS_V2_NATIVE_DIRECT','1'],['AOS_V2_TASK_ID',action.taskId],['AOS_V2_TASK_PROVIDER',action.provider!],['AOS_V2_NATIVE_INSTANCE',action.instance]);
  return {type:NATIVE_TERMINAL_VIEW,active:false,state:{[NATIVE_TERMINAL_VIEW]:{cwd:launch.cwd,focus:false,profileSourceId:null,serial:null,userTitle:title,profile:{
   type:'integrated',name:title,executable:launch.executable,args:[...launch.args],environment,platforms:{[platform]:true},
-  pythonExecutable:typeof base.pythonExecutable==='string'?base.pythonExecutable:platform==='win32'?'python':'python3',
+  // The bridge's verified managed Python first: a fresh computer's bare `python` is often a Store stub or lacks the helper's modules.
+  pythonExecutable:launch.pythonExecutable??(typeof base.pythonExecutable==='string'?base.pythonExecutable:platform==='win32'?'python':'python3'),
   useWin32Conhost:true,followTheme:typeof base.followTheme==='boolean'?base.followTheme:true,
   rightClickAction:base.rightClickAction||'copyPaste',terminalOptions:base.terminalOptions&&typeof base.terminalOptions==='object'?structuredClone(base.terminalOptions):{documentOverride:null},
   restoreHistory:false,successExitCodes:['0','SIGINT','SIGTERM'],

@@ -36,7 +36,7 @@ You do not need to know your installation's path. The agent helps find it, recom
 
 - **Claude Code or Codex**, signed in with a plan that supports it. One is enough.
 - **[Obsidian](https://obsidian.md)** and a new or existing vault.
-- **Node.js 22+ and Git**, plus **Python 3.10–3.13** for voice. Your agent helps install missing software.
+- **Node.js 22+ and Git**, plus **Python 3.12** (3.10–3.13) for voice and conversations inside Obsidian. Python 3.14, the current default download, is not supported by the voice libraries yet. Your agent helps install missing software.
 - About **3 GB of disk space and 8 GB of RAM**. Local voice accounts for roughly 1.3 GB of downloads.
 - Optional: an **[OpenRouter](https://openrouter.ai) key** for Jev. Enter it in the local setup page, never chat.
 
