@@ -12,6 +12,7 @@ import {enableAutostart, autostartOwner} from './autostart.mjs';
 import {setupSpeech} from './speech.mjs';
 import {scaffoldVault} from './vault.mjs';
 import {doctor} from './doctor.mjs';
+import {assessCheckout, prepareStockUpdate} from './upgrade-checkout.mjs';
 
 const hashOf = file => fs.existsSync(file) ? crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex') : '';
 
@@ -166,11 +167,14 @@ export async function setup({root = projectRoot, vault, voice, autostart, rebuil
   return doctor({root, ci, phase: 'install', log});
 }
 
-// get, halt, pull and install exist for the tests.
-export async function update({root = projectRoot, log = console.log, get = tryJson, halt = stop, pull, install = setup} = {}) {
-  const at = layout(root), repo = path.resolve(at.root, '..'), state = readState(at);
+// check, get, halt, pull and install exist for the tests. Refuse customized or
+// uncertain checkouts before touching services, runtime state, or the network.
+export async function update({root = projectRoot, log = console.log, check = assessCheckout, get = tryJson, halt = stop, pull, pullRun, install = setup} = {}) {
+  const assessment = check(root);
+  if (assessment?.updateAllowed !== true) throw new Error('This checkout is customized or could not be confirmed as a clean stock starter. Nothing was stopped or changed. Run `node aos.mjs upgrade` to review a safe upgrade plan.');
+  pull ||= prepareStockUpdate(assessment, {log, ...(pullRun ? {run: pullRun} : {})});
+  const at = layout(root), state = readState(at);
   if (!state.vault) throw new Error('Nothing is installed here yet. Run `node aos.mjs setup --vault "<path>"` first.');
-  pull ||= () => runStep('git pull --ff-only', 'git', ['pull', '--ff-only'], {cwd: repo, log, timeout: 5 * 60 * 1000});
   // Stop first: packages and the HUD build are replaced on disk, and stop refuses while any task is open.
   if (await get(`http://127.0.0.1:${PORTS.bridge}/state`)) await halt({root, log});
   else await pauseMonitor(at, get);

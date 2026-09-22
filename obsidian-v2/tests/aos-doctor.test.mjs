@@ -263,7 +263,7 @@ test('setup and start decide about voice the same way: a healthy shared service 
   // which would re-run the voice installer (network, minutes) on every update.
   const updating = installation({installed: true}), calls = [];
   fs.writeFileSync(path.join(updating.at.runtime, 'aos-setup.json'), JSON.stringify({vault: updating.vault, voice: true}));
-  await update({root: updating.root, log: () => {}, get: async () => null, pull: () => calls.push('pull'), install: async options => { calls.push(options); return {ok: true}; }});
+  await update({root: updating.root, log: () => {}, check: () => ({updateAllowed: true}), get: async () => null, pull: () => calls.push('pull'), install: async options => { calls.push(options); return {ok: true}; }});
   assert.equal(calls[0], 'pull'); assert.equal('voice' in calls[1], false); assert.equal(calls[1].rebuild, true); assert.equal(calls[1].vault, updating.vault);
 
   assert.deepEqual(watchedServices({services: [{id: 'bridge'}, {id: 'jarvis'}]}), ['bridge', 'jarvis'], 'a borrowed voice is not waited for');

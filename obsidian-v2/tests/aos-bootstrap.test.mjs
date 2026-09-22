@@ -18,4 +18,10 @@ test('the one-paste launcher still loads before npm dependencies exist', t => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /setup --vault/);
   assert.match(result.stdout, /dashboard/);
+  assert.match(result.stdout, /upgrade/);
+  const upgrade = spawnSync(process.execPath, ['--no-warnings', '--loader', pathToFileURL(loader).href, launcher, 'upgrade', '--help'], {
+    encoding: 'utf8', timeout: 15000, windowsHide: true,
+  });
+  assert.equal(upgrade.status, 0, upgrade.stderr);
+  assert.match(upgrade.stdout, /does not install/);
 });

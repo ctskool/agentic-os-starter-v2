@@ -21,6 +21,7 @@ const HELP = `Agentic OS V2
   jev-key             open a local page to save your OpenRouter key (never shown to an agent)
   autostart on|off    start at login
   update              get the latest version and rebuild
+  upgrade             find your existing system and assess an upgrade (read only)
   dashboard           list buttons; discover, add, select or reset dashboard skills
 `;
 
@@ -57,6 +58,7 @@ export async function main(argv = process.argv.slice(2), log = console.log) {
       return 0;
     }
     case 'update': return (await update({log})).ok ? 0 : 1;
+    case 'upgrade': return (await import('./aos/upgrade.mjs')).upgradeCommand({words, flags, log});
     case 'dashboard': return (await import('./aos/dashboard.mjs')).dashboardCommand({words, flags, log});
     default: log(HELP); return command === 'help' ? 0 : 1;
   }

@@ -38,13 +38,33 @@ Runs on **your** Claude Code and/or Codex subscription. Everything local, on `12
 
 ## Install — let your coding agent do it
 
-Open **Claude Code** or **Codex** in any folder and say:
+Open **Claude Code** or **Codex**. There are two starting points: a first installation, or an upgrade to the Agentic OS you already use. If you just say "set this up," the agent asks which you mean.
+
+### First installation
+
+Say:
 
 ```
 Clone https://github.com/ctskool/agentic-os-starter-v2 into ~/agentic-os and set it up for me.
 ```
 
-The agent reads `CLAUDE.md` / `AGENTS.md`, follows `setup/PLAYBOOK.md`, and walks you through it: prerequisites, where your vault lives, voice, your OpenRouter key (typed into a local page, never into the chat), the two clicks in Obsidian, and a final test run. Plan for 15–25 minutes, most of it downloads.
+The agent reads `CLAUDE.md` / `AGENTS.md`, follows `setup/PLAYBOOK.md`, and walks you through prerequisites, your vault, optional voice and Jev, the clicks in Obsidian, dashboard personalization, and a final test run. Keys are typed into a local page, never into chat. A first install usually takes 15–25 minutes, most of it downloads. You can use an Obsidian vault you already have.
+
+### Already use Agentic OS?
+
+Say:
+
+```text
+Use https://github.com/ctskool/agentic-os-starter-v2 to help upgrade the Agentic OS I already use. Find my installation and vault, explain what I can add, and preserve my customizations. Show me the plan before changing my setup.
+```
+
+The agent starts by finding your existing installation and vault. You should not need to know their paths; if it finds several, it asks which vault you use. Then it explains available features and recommends compatible changes. You can ask for particular capabilities, such as personal skill buttons or voice, while keeping the parts you have customized. Some changes need matching bridge, plugin and HUD versions, so the agent checks the code before promising they fit.
+
+```text
+Find your system -> choose improvements -> review plan -> apply and test
+```
+
+A stock V2 starter can be updated as a complete release. V1 can move to V2 using the same vault. A customized project needs an integration plan and focused implementation; there is no universal automatic merge. Your agent asks before interrupting your running system and keeps a rollback route. See [Upgrading an existing system](docs/UPGRADING.md).
 
 > [!NOTE]
 > **Codex users:** allow the session to install software and use the network when it asks. The default sandbox cannot do an install.
@@ -151,13 +171,16 @@ Hold the microphone in the HUD (or the cockpit) and speak. Recording stops when 
 | `node aos.mjs doctor --full` | the above, plus one real workflow on your subscription |
 | `node aos.mjs stop` | stop the services. Refuses while a conversation is open (see below) |
 | `node aos.mjs start` | start them again |
-| `node aos.mjs update` | get the latest version and rebuild |
+| `node aos.mjs upgrade` | discover existing installations and vaults; report only, without applying changes |
+| `node aos.mjs update` | update a recognized stock starter and rebuild; refuses customized or unknown source before stopping services |
 | `node aos.mjs jev-key` | add or replace your OpenRouter key, via a local page |
 | `node aos.mjs autostart on\|off` | start everything at login, or stop doing that |
 
 `stop` never throws away work. If a conversation is still open it changes nothing and says `Stop active tasks in Terminals first. No service was stopped.` Close that conversation's tab in the HUD (the × ends it) or in Obsidian, then run `stop` again.
 
 Something broken? Open this folder in your coding agent and say **"run the doctor"**. See also [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
+
+`upgrade` and `update` do different jobs. Use **upgrade** when you want your agent to find and assess an existing system; use **update** for an approved whole-release update to an unmodified starter. A customized integration may need manual future upgrades.
 
 ### Make the dashboard yours
 
@@ -188,6 +211,7 @@ Requests to your own Claude / Codex account can include note content a workflow 
 ```
 aos.mjs            the one command
 setup/PLAYBOOK.md  what the installing agent follows
+setup/UPGRADE.md   discovery, upgrade choices and preserving customizations
 obsidian-v2/       the local bridge, the Obsidian plugin, workflows, voice service, vault template
 jarvis-v2/         the HUD (Next.js)
 docs/              troubleshooting, optional settings
@@ -196,12 +220,12 @@ docs/              troubleshooting, optional settings
 Ports, all on `127.0.0.1` and nowhere else: **3217** HUD · **3218** preview · **3219** bridge · **3220** speech · **3221** monitor.
 
 > [!IMPORTANT]
-> Only one copy of this system runs on a computer, because those ports are fixed. If you already have an installation, stop it before starting another. Not sure where the other copy lives? Setup tells you its folder when it refuses, and <http://127.0.0.1:3221/status> shows it as `runtimeDir` while that copy is running.
+> Only one copy of this system runs on a computer, because those ports are fixed. If you already have an installation, let your agent identify it and plan the handoff before starting another. `node aos.mjs upgrade` helps find it without stopping anything. A service interruption needs your approval; your agent should use the existing installation's own scripts and leave unrelated speech services alone.
 
 <br/>
 
 ---
 
 <div align="center">
-<sub>Coming from the first starter kit? Use the same vault — your notes and settings stay as they are. Disable the old "Chase Command Center" plugin once V2 works.</sub>
+<sub>Coming from the first starter kit? Ask for an upgrade. Keep the same vault and old plugin until V2 is verified, then approve the handoff.</sub>
 </div>

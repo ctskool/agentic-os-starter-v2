@@ -1,17 +1,27 @@
-# Setup playbook (for the coding agent doing the install)
+# Fresh-install playbook (for the coding agent)
 
 You are the installer, guide and doctor for Agentic OS V2. The person you are helping cloned this repository (or asked you to) and wants the whole system working: an Obsidian cockpit, the Jarvis HUD in the browser, voice, and background workflows that run on their own Claude Code and/or Codex subscription. Get them there with as little typing on their side as possible.
 
-**If `obsidian-v2/.runtime/aos-setup.json` already exists this is a re-run:** go straight to [Phase 6](#phase-6--prove-it-works) and repair only what fails.
+## Choose the right route first
+
+Honor an explicit fresh-install or upgrade request. If the member simply says "set this up" and their intent is unclear, ask: *"Are we setting up Agentic OS for the first time, or upgrading a version you already use?"* Do not ask them to find folders before answering this.
+
+- **Fresh install:** continue below. An existing Obsidian vault does not by itself mean Agentic OS is already installed.
+- **Upgrade an existing Agentic OS, including V1 or customized versions:** follow [UPGRADE.md](UPGRADE.md). It starts with read-only discovery and a plan that preserves their customizations. Feature choices belong in that conversation.
+- **Repair an identified installation:** use [Phase 6](#phase-6--prove-it-works), explaining that `--full` runs a real workflow. If you do not know which installation they mean, discover it first without starting or stopping anything.
+
+An `obsidian-v2/.runtime/aos-setup.json` marker records a previous setup. It must never short-circuit an upgrade request into repair. If it conflicts with a fresh-install request, explain that an installation already exists and resolve the intended target before making changes.
 
 ## Rules
 
 - One question at a time. If a fix is safe and reversible, do it and say what you did.
-- **Never ask for a secret in chat and never print one.** Keys are typed by the user into a local page or a file they open themselves. Never read, print or copy `obsidian-v2/.runtime/jev.json`, `bridge-auth.json` or `~/.claude/.env`. If the user pastes a key into the chat anyway, tell them to revoke it and make a new one.
+- **Never ask for a secret in chat and never print one.** Keys are typed by the user into a local page or a file they open themselves. Never read, print or copy `jev.json`, `bridge-auth.json`, `providers.json`, `.credentials.json` or `~/.claude/.env`. If the user pastes a key into the chat anyway, tell them to revoke it and make a new one.
 - Never overwrite a note, and never edit the `.obsidian/` settings of a vault that already exists. `aos setup` already guarantees both; keep the guarantee in anything you do by hand.
 - Everything runs on this computer, on `127.0.0.1` ports 3217–3221. Do not open firewall ports, tunnels or remote access.
 - If the same step fails twice with the same error, stop looping: show the exact error and your best next step.
 - All commands below run from the repository root (the folder with `aos.mjs`).
+- Keep the stock application's source unchanged during installation and repair. Intentional custom integration is a separate, explicitly approved workflow in `setup/UPGRADE.md`, not a workaround for a failed setup.
+- If an existing installation owns the ports, identify it and explain the choices. Do not stop it automatically: a service handoff requires the member's permission and that installation's own scripts.
 
 ## Phase 0 — Permissions and prerequisites
 
@@ -39,7 +49,7 @@ Location: the repository should live in a normal folder such as `~/agentic-os`. 
 Ask: *"Where should your vault live? I can create a new one at `~/agentic-vault`, or use an Obsidian vault you already have — nothing in it gets overwritten."*
 
 - An existing vault keeps every note and all of its Obsidian settings. Missing template folders are added.
-- **Members coming from the first starter kit:** use the same vault. The old "Chase Command Center" plugin and the new "Agentic OS V2" plugin can both be installed, but only one cockpit should be switched on: tell them to disable the old one after V2 works. The old background runner is separate and harmless; they can leave it or remove its login item later.
+- **Members coming from the first starter kit:** take the upgrade route in `setup/UPGRADE.md` before running setup. Keep their vault and the old plugin; disable the old cockpit only after V2 is verified and the member approves the handoff. Do not assume an old runner or login item is harmless or remove it automatically.
 
 Then two yes/no questions, one at a time:
 
@@ -58,7 +68,7 @@ Read the output. Typical fixes:
 
 - `npm ci` fails on Mac with compiler errors → `xcode-select --install`, then run setup again.
 - Python not found or too old → install it (table above), open a new terminal, run setup again.
-- `Another installation of this system ... is running on port 3221` → another copy is running from a different folder, and the message names that folder (`It runs from "..."`). Run `node aos.mjs stop` in that folder, or keep using that copy instead of installing a second one. If the message names no folder, open http://127.0.0.1:3221/status: `runtimeDir` is the other copy's `obsidian-v2/.runtime` folder.
+- `Another installation of this system ... is running on port 3221` → another copy is running from a different folder, and the message names that folder (`It runs from "..."`). Keep using that copy or follow `setup/UPGRADE.md` to plan a handoff; get permission before stopping it with its own scripts. If the message names no folder, `node aos.mjs upgrade` can use the monitor's non-secret location metadata to help identify it.
 - `Voice: a speech service is already running on this computer ... and will be shared` → not an error. Another program already provides a compatible voice, so nothing is downloaded and the checklist shows voice as a *shared service*.
 - A voice download fails half way → run the same setup command again, with `--voice yes` in it: that flag makes setup check the voice files, keep the finished ones and fetch what is missing.
 
@@ -155,7 +165,7 @@ A short, personal wrap-up:
 
 - What now runs by itself: the bridge, the HUD and voice (and at login, if they chose that). Explain the requests to their Claude / Codex account, optional Jev routing through OpenRouter, and any web searches or connected services. Review the data access and external actions required by their selected personal skills.
 - Costs: their Claude and/or Codex provider plan, optional OpenRouter usage for Jev, and any paid tools or services used by their personal skills. Local speech has no API charge.
-- Day-to-day: `node aos.mjs status | stop | start | doctor | update`.
+- Day-to-day: `node aos.mjs status | stop | start | doctor | update`. Explain that `update` maintains a stock starter as a whole; `upgrade` is read-only discovery and planning for an existing or customized system.
 - Where things land: reports in `inbox/reports/` and `inbox/research/`, daily notes in `daily-notes/`, conventions in the vault's `CLAUDE.md` / `AGENTS.md`.
 - Known limits: on Mac there is no global push-to-talk hotkey (use the microphone button) and the Claude weekly-usage meter may read "unavailable". Mac support is new — if something is off, `node aos.mjs doctor` first.
 - If anything breaks later: open this folder in Claude Code or Codex and say *"run the doctor"*.
