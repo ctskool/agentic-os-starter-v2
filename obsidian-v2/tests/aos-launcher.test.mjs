@@ -267,10 +267,13 @@ test('the key page saves a well-formed key with the live settings, keeps tuned s
   while (!address) await new Promise(resolve => setTimeout(resolve, 20));
   const origin = new URL(address).origin, form = key => ({method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded', Origin: origin}, body: new URLSearchParams({key}).toString()});
   assert.equal((await fetch(`${origin}/wrong-token`)).status, 404);
+  const page = await fetch(address); assert.equal(page.status, 200); assert.equal(page.headers.get('cache-control'), 'no-store');
+  assert.equal(page.headers.get('referrer-policy'), 'same-origin', 'the initial form must preserve the browser POST origin'); html += await page.text();
   assert.equal((await fetch(address, {...form(FAKE_KEY), headers: {'Content-Type': 'application/x-www-form-urlencoded', Origin: 'http://127.0.0.1:3217'}})).status, 403, 'another local page cannot post a key');
   assert.equal((await fetch(address, {...form(FAKE_KEY), headers: {'Content-Type': 'application/x-www-form-urlencoded'}})).status, 403, 'a post without an Origin is refused');
-  const bad = await fetch(address, form('hello')); assert.equal(bad.status, 400); html += await bad.text();
-  const page = await fetch(address); assert.equal(page.headers.get('cache-control'), 'no-store'); html += await page.text();
+  assert.equal((await fetch(address, {...form(FAKE_KEY), headers: {'Content-Type': 'application/x-www-form-urlencoded', Origin: 'null'}})).status, 403, 'an opaque Origin is refused');
+  const bad = await fetch(address, form('hello')); assert.equal(bad.status, 400);
+  assert.equal(bad.headers.get('referrer-policy'), 'same-origin', 'the retry form must preserve the browser POST origin'); html += await bad.text();
   const good = await fetch(address, form(FAKE_KEY)); assert.equal(good.status, 200); html += await good.text();
   assert.deepEqual(await pending, {saved: true});
   assert.equal(html.includes(FAKE_KEY), false); assert.equal(html.includes('hello'), false);

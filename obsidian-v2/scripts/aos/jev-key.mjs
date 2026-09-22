@@ -47,7 +47,9 @@ export function collectJevKey({runtimeDir, timeoutMs = 5 * 60 * 1000, open = ope
     const finish = result => { if (done) return; done = true; clearTimeout(timer); server.close(); server.closeAllConnections?.(); resolve(result); };
     const server = http.createServer((req, res) => {
       const port = server.address().port, origin = `http://127.0.0.1:${port}`;
-      const headers = {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
+      // no-referrer makes browser form POSTs send Origin: null, failing our check below.
+      // Keep the local form's origin while withholding referrers from other origins.
+      const headers = {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin',
         'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'"};
       const reply = (code, html) => { res.writeHead(code, headers); res.end(html); };
       const supplied = Buffer.from(String(req.url || '').slice(1)), wanted = Buffer.from(token);
