@@ -134,8 +134,10 @@ test('a caller waits only as long as its own patience; the renewal carries on an
  const b=await bench(t);b.write(stale());let child;b.cli.onLaunch=value=>{child=value};
  let started=performance.now();const slow=await b.usage({renewWaitMs:40});
  assert.match(slow.message,/refresh its sign-in/);assert.ok(performance.now()-started<4000);assert.equal(b.signin.claudeSignInState().renewing,true);
- const gone=new AbortController();setTimeout(()=>gone.abort(),20);started=performance.now();
- assert.match((await b.usage({signal:gone.signal})).message,/refresh its sign-in/);assert.ok(performance.now()-started<1000,'an aborted caller stops waiting');
+ const gone=new AbortController();let joined=false;
+ // Cancel once this caller has joined the renewal, after its asynchronous sign-in read.
+ const renew=given=>{const flight=b.renew()(given);assert.ok(flight,'the caller joins the shared renewal');joined=true;started=performance.now();queueMicrotask(()=>gone.abort());return flight};
+ assert.match((await b.usage({signal:gone.signal,renew})).message,/refresh its sign-in/);assert.equal(joined,true);assert.ok(performance.now()-started<1000,'an aborted caller stops waiting');
  assert.equal(b.stops.length,0,'and the shared renewal was not stopped');assert.equal(b.launches.length,1);
  b.write(fresh());child.finish(0);await tick(20);
  assert.equal((await b.usage()).status,'ok','the next read picks the renewed pass up');assert.equal(b.launches.length,1);
