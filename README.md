@@ -66,3 +66,7 @@ You ask or click. The bridge coordinates the work, your chosen agent carries it 
 Ask your coding agent to **“run the doctor”** if something is not working.
 
 [Dashboard skills](docs/DASHBOARD.md) · [Upgrading](docs/UPGRADING.md) · [Mac voice](docs/MAC-VOICE.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Commands and reference](docs/REFERENCE.md)
+
+## License
+
+[MIT](LICENSE). Copyright (c) 2026 Chase AI. Third-party components retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.md).
