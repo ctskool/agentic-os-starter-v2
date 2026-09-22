@@ -7,7 +7,7 @@ import { assertTestVault, readSelection, type Health, type Provider } from './pr
 import { assertVoiceVault, v2VoiceTransport } from './v2-voice';
 import { openWork, publishWorkTask, workConversations, type WorkTask } from './work';
 import { writeIntent } from './queue';
-import { SUPPORTED_TERMINAL_VERSION } from './native-terminal';
+import { terminalPluginStatus } from './native-terminal';
 
 export interface DashboardSkill {
  id: string;
@@ -151,9 +151,12 @@ export async function launchDashboardSkill(app: App, skill: DashboardSkill, inpu
  // Native work needs Terminal to own the CLI. Fail before creating a pending
  // task; browser previews use their bridge-owned terminal and need no plugin.
  const native = !!(app.vault.adapter as typeof app.vault.adapter & { getBasePath?: () => string }).getBasePath;
- const terminal = (app as App & { plugins?: { plugins?: { terminal?: { manifest?: { version?: string } } } } }).plugins?.plugins?.terminal;
- if (native && terminal?.manifest?.version !== SUPPORTED_TERMINAL_VERSION) {
-  throw new Error(`Enable the supported Terminal community plugin (${SUPPORTED_TERMINAL_VERSION}) to run personal skills inside Obsidian, or use the same skill button in Jarvis at http://127.0.0.1:3217.`);
+ // A newer, untested Terminal is allowed; the native host shows its one notice.
+ const { plugin: terminal, support } = terminalPluginStatus(app);
+ if (native && (!terminal || support.status === 'missing' || support.status === 'unsupported')) {
+  throw new Error(support.status === 'missing'
+   ? 'Enable the Terminal community plugin (by polyipseity) to run personal skills inside Obsidian, or use the same skill button in Jarvis at http://127.0.0.1:3217.'
+   : support.message);
  }
  await workConversations.startSession();
  const task = await request('/launch', { id: crypto.randomUUID(), skill: skill.id, request: input.trim(), selection }) as WorkTask;

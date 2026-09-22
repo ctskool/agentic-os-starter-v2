@@ -1,7 +1,14 @@
 import {TerminalInputBoundary,TerminalPromptDetector} from '../../runner/terminal-transport.mjs';
 
-/** Internal surface verified against Terminal 3.27.1. Its ChildProcess owns the
- * conhost/Python terminal host; hostPid is deliberately not called a CLI PID. */
+/** Internal surface verified against the Terminal versions in
+ * shared/terminal-support.mjs. Its ChildProcess owns the conhost/Python
+ * terminal host; hostPid is deliberately not called a CLI PID. */
+/** Terminal opened, but its emulator or process is not reachable the way this
+ * integration expects. The CLI may be running in that tab. */
+export class TerminalAccessError extends Error {
+ static readonly NAME='TerminalAccessError';
+ constructor(message:string){super(message);this.name=TerminalAccessError.NAME}
+}
 interface Disposable {dispose():void}
 interface Stream {on(event:'data',listener:(data:Uint8Array|string)=>void):unknown;removeListener(event:'data',listener:(data:Uint8Array|string)=>void):unknown}
 interface NativeProcess {
@@ -74,7 +81,7 @@ export function bindDirectTerminal(view:DirectTerminalView,callbacks:DirectTermi
  }
  async function attach(candidate:Emulator){
   emulator=candidate;
-  if(typeof candidate.terminal?.onData!=='function'||typeof candidate.pseudoterminal?.then!=='function')throw new Error('Terminal 3.27.1 process access is unavailable.');
+  if(typeof candidate.terminal?.onData!=='function'||typeof candidate.pseudoterminal?.then!=='function')throw new TerminalAccessError('This Terminal version does not expose the process access Agentic OS needs.');
   // Attach the human-input observer before awaiting the process so a draft
   // typed while the terminal starts cannot be mistaken for an empty composer.
   input=candidate.terminal.onData(data=>{
@@ -85,12 +92,12 @@ export function bindDirectTerminal(view:DirectTerminalView,callbacks:DirectTermi
   pty=await candidate.pseudoterminal;
   if(!active)return;
   if(view.emulator!==candidate){finish('replaced');return}
-  if(typeof pty?.kill!=='function'||typeof pty.onExit?.then!=='function'||typeof pty.shell?.then!=='function')throw new Error('Terminal 3.27.1 process access is unavailable.');
+  if(typeof pty?.kill!=='function'||typeof pty.onExit?.then!=='function'||typeof pty.shell?.then!=='function')throw new TerminalAccessError('This Terminal version does not expose the process access Agentic OS needs.');
   void pty.onExit.then(code=>{if(active&&view.emulator===candidate){notify('exit',code);finish('closed')}},error=>{if(active){notify('error',message(error));finish('disposed',new Error(message(error)))}});
   const process=await pty.shell;
   if(!active)return;
   if(view.emulator!==candidate){finish('replaced');return}
-  if(!process?.stdin||typeof process.stdin.write!=='function'||!process.stdout||typeof process.stdout.on!=='function'||typeof process.stdout.removeListener!=='function'||!process.stderr||typeof process.stderr.on!=='function'||typeof process.stderr.removeListener!=='function')throw new Error('Terminal 3.27.1 process streams are unavailable.');
+  if(!process?.stdin||typeof process.stdin.write!=='function'||!process.stdout||typeof process.stdout.on!=='function'||typeof process.stdout.removeListener!=='function'||!process.stderr||typeof process.stderr.on!=='function'||typeof process.stderr.removeListener!=='function')throw new TerminalAccessError('This Terminal version does not expose the process streams Agentic OS needs.');
   child=process;assertCurrent();
   hostPid=Number.isInteger(process.pid)&&process.pid!>0?process.pid!:null;
   observe(process.stdout);observe(process.stderr);
@@ -104,8 +111,10 @@ export function bindDirectTerminal(view:DirectTerminalView,callbacks:DirectTermi
  function poll(){
   timer=undefined;if(!active)return;
   if(emulator&&view.emulator!==emulator){finish('replaced');return}
-  if(!emulator&&view.emulator){void attach(view.emulator).catch(error=>{if(active){notify('error',message(error));finish('disposed',new Error(message(error)))}})}
-  if(!settled&&Date.now()-started>=timeoutMs){const error=new Error(emulator?'Terminal did not expose its process before the launch timeout.':'Terminal did not open before the launch timeout.');notify('error',error.message);finish('disposed',error);return}
+  if(!emulator&&view.emulator){void attach(view.emulator).catch(error=>{if(active){notify('error',message(error));finish('disposed',error instanceof Error?error:new Error(message(error)))}})}
+  // Either way the tab exists and its CLI may have started: an unknown Terminal can
+  // simply hide its emulator. Only a closed or replaced view is a plain Error.
+  if(!settled&&Date.now()-started>=timeoutMs){const error=new TerminalAccessError(emulator?'Terminal did not expose its process before the launch timeout.':'Terminal did not open before the launch timeout.');notify('error',error.message);finish('disposed',error);return}
   timer=setTimeout(poll,pollMs);timer.unref?.();
  }
  view.register(()=>finish('closed'));poll();

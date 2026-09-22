@@ -65,7 +65,7 @@ Use this capability list as a guide to discussion, not as an automatic compatibi
 
 | Capability | What the member gets | Dependencies to check |
 |---|---|---|
-| Obsidian cockpit | Daily plan, metrics and workflow controls in the vault | Compatible plugin and bridge; existing note/parser conventions; Obsidian. Personal-skill conversations inside Obsidian also require the supported Terminal community plugin. |
+| Obsidian cockpit | Daily plan, metrics and workflow controls in the vault | Compatible plugin and bridge; existing note/parser conventions; Obsidian. Personal-skill conversations inside Obsidian also require the Terminal community plugin, a stable 3.x release from 3.27.1 on. |
 | Jarvis HUD | Browser dashboard and agent terminals | Compatible HUD, bridge and launcher/monitor configuration; selected Claude Code or Codex CLI. |
 | Local voice | Speech recognition and spoken replies on the computer | Compatible bridge and voice client, Python/model requirements, microphone permission, and either owned speech or an already compatible shared service. |
 | Optional Jev | Routing for spoken requests through OpenRouter | Compatible voice routing; member's OpenRouter account and credit; key entered locally. Voice can work without Jev. |

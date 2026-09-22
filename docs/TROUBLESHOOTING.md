@@ -20,6 +20,8 @@ Never paste `jev.json` or `bridge-auth.json` anywhere: they hold your OpenRouter
 
 **The cockpit says the bridge is offline.** `node aos.mjs start`, wait 20 seconds, reload the plugin (or restart Obsidian). If it says "authentication required", run `node aos.mjs setup` again: it re-copies the local access token into the plugin.
 
+**A conversation will not open inside Obsidian, or a notice names the Terminal plugin.** Conversations inside Obsidian need the Terminal community plugin (by polyipseity), a stable 3.x release from 3.27.1 on. "Too old": update it in Settings → Community plugins. "Pre-release" or "has not been verified": install the regular release, or use the same button in the HUD (http://127.0.0.1:3217) until `node aos.mjs update` brings support. "Newer than the versions tested": it should work; if a conversation misbehaves, use the HUD and run the doctor. "Cannot follow it": the conversation may still be running in that tab, so check it and close it before trying again. The doctor's "Terminal plugin" line shows what is installed.
+
 **"Stop active tasks in Terminals first."** A conversation is still open. Close its tab in the HUD (× ends it) or in Obsidian, then repeat the command.
 
 **"Port 3221 belongs to another installation."** A second copy of this system is running from another folder, and only one copy can run at a time. The message names the folder (`It runs from "..."`); you can also open http://127.0.0.1:3221/status, where `runtimeDir` is that copy's `obsidian-v2/.runtime` folder. Run `node aos.mjs stop` in that copy's folder.

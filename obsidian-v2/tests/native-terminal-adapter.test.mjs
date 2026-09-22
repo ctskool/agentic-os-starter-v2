@@ -81,6 +81,14 @@ test('disabled or unverified Terminal reports a notice without reading configura
  f.app.plugins.plugins.terminal={manifest:{version:'4.0.0'}};await f.adapter.open(codex,f.create);await f.adapter.open(codex,f.create);
  assert.equal(f.notices.length,2);assert.match(f.notices[1],/not been verified/);assert.equal(f.snapshots(),0);assert.equal(f.created.length,0);assert.doesNotMatch(f.notices.join('\n'),/opening the built-in/i);
 });
+test('a verified Terminal attaches silently; a newer untested one attaches with a single notice; older and pre-release ones are refused',async()=>{
+ const verified=fixture();verified.app.plugins.plugins.terminal.manifest.version='3.27.2';assert.ok(await verified.adapter.open(codex,verified.create));assert.deepEqual(verified.notices,[]);
+ const newer=fixture();newer.app.plugins.plugins.terminal.manifest.version='3.28.0';assert.ok(await newer.adapter.open(codex,newer.create));assert.ok(await newer.adapter.open(claude,newer.create));
+ assert.equal(newer.notices.length,1);assert.match(newer.notices[0],/Terminal 3\.28\.0 is newer than the versions tested/);assert.equal(newer.created.length,2);
+ for(const [version,reason] of [['3.26.0',/too old/],['3.28.0-beta.1',/Pre-release/],['',/need the Terminal community plugin/]]){
+  const f=fixture();f.app.plugins.plugins.terminal.manifest.version=version;assert.equal(await f.adapter.open(codex,f.create),null);assert.match(f.notices[0],reason);assert.equal(f.created.length,0);assert.equal(f.snapshots(),0);
+ }
+});
 test('configuration and bridge must both name the actual vault before any attachment can start',async()=>{
  const f=fixture();f.app.vault.adapter.read=async()=>JSON.stringify({...config,vault:'C:\\another vault'});assert.equal(await f.adapter.open(codex,f.create),null);assert.equal(f.snapshots(),0);
  f.app.vault.adapter.read=async()=>JSON.stringify(config);f.snapshot.vault='C:\\another vault';assert.equal(await f.adapter.open(codex,f.create),null);assert.equal(f.created.length,0);assert.match(f.notices.at(-1),/different vault/);

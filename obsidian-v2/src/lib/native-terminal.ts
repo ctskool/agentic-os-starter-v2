@@ -1,18 +1,25 @@
 import type {App, WorkspaceLeaf} from 'obsidian';
 import {bindTerminalLifetime,createTerminalLifetime,lifetimeForView,type TerminalLifetime} from './terminal-lifetime';
+import {terminalSupport} from '../../shared/terminal-support.mjs';
 
 // This is a deliberately versioned view-state adapter, not a public Terminal
-// automation API. Schema checked against the installed/tagged 3.27.1 sources:
-// src/terminal/view.ts (State, spawn) and src/terminal/profile-properties.ts.
+// automation API. Schema checked against the tagged sources of every version in
+// shared/terminal-support.mjs: src/terminal/view.ts (State, spawn) and
+// src/terminal/profile-properties.ts.
 export const NATIVE_TERMINAL_VIEW='terminal:terminal';
-export const SUPPORTED_TERMINAL_VERSION='3.27.1';
 type Provider='codex'|'claude';
 interface Task {id:string;provider:Provider;title?:string;state:string;pid?:number|null;execution?:string}
 interface Snapshot {vault:string;tasks:Task[];attachmentProtocol?:number}
 export interface TerminalRuntime {version:1;nodeExecutable:string;attachmentScript:string;runtimeDir:string;vault:string}
 interface Profile extends Record<string,unknown> {type:string;args?:unknown;environment?:unknown;executable?:unknown;platforms?:Record<string,boolean>}
-interface TerminalPlugin {manifest:{version:string};settings?:{value?:{defaultProfile?:string;profiles?:Record<string,Profile>}}}
+interface TerminalPlugin {manifest?:{version?:unknown};settings?:{value?:{defaultProfile?:string;profiles?:Record<string,Profile>}}}
 interface Options {pluginDir:string;readSnapshot:()=>Promise<Snapshot>;notice:(message:string)=>void;createLifetime?:()=>Promise<TerminalLifetime>}
+/** The Terminal plugin and what its version allows. A plugin without a readable
+ * version counts as missing. */
+export function terminalPluginStatus(app:App):{plugin?:TerminalPlugin;support:ReturnType<typeof terminalSupport>} {
+ const plugin=(app as App&{plugins?:{plugins?:Record<string,TerminalPlugin>}}).plugins?.plugins?.terminal;
+ return {plugin,support:terminalSupport(plugin?plugin.manifest?.version:undefined)};
+}
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const canonical=(value:string)=>{const normalized=value.replace(/\\/g,'/').replace(/\/$/,'');return /^[A-Za-z]:\//.test(normalized)?normalized.toLowerCase():normalized};
 const absolute=(value:unknown):value is string=>typeof value==='string'&&!/[\x00-\x1f\x7f]/.test(value)&&(/^[A-Za-z]:[\\/]/.test(value)||value.startsWith('/'));
@@ -45,7 +52,7 @@ export function attachmentViewState(config:TerminalRuntime,task:Task,base:Profil
    environment:[['AOS_V2_TASK_ID',task.id],['AOS_V2_TASK_PROVIDER',task.provider],...(lifetimeEndpoint?[['AOS_V2_TERMINAL_LIFETIME',lifetimeEndpoint]]:[])],platforms:{[platform]:true},
    pythonExecutable:typeof base.pythonExecutable==='string'?base.pythonExecutable:platform==='win32'?'python':'python3',
    // Our Windows attachment needs real TTY handles for raw input and resize.
-   // Verified with the exact 3.27.1 conhost+batch launch; never inherit its
+   // Verified with the 3.27.x conhost+batch launch; never inherit its
    // optional pipe-only backend. This does not change the user's own profiles.
    useWin32Conhost:platform==='win32'?true:typeof base.useWin32Conhost==='boolean'?base.useWin32Conhost:true,
    followTheme:typeof base.followTheme==='boolean'?base.followTheme:true,rightClickAction:base.rightClickAction||'copyPaste',
@@ -90,8 +97,9 @@ export class NativeTerminalTabs {
  // while it opened, so navigation must not recreate it.
  async open(id:string|null,createLeaf:()=>WorkspaceLeaf,replaceLeaf?:WorkspaceLeaf):Promise<WorkspaceLeaf|null|undefined> {
   if(!id)return null;
-  const plugin=this.plugin();if(!plugin)return this.fallback('Enable the Terminal plugin in Obsidian to view this agent.');
-  if(plugin.manifest.version!==SUPPORTED_TERMINAL_VERSION)return this.fallback(`Terminal ${plugin.manifest.version} has not been verified with this integration.`);
+  const {plugin,support}=terminalPluginStatus(this.app);
+  if(!plugin||support.status==='missing'||support.status==='unsupported')return this.fallback(support.message);
+  if(support.status==='untested')this.fallback(support.message);
   const direct=this.app.workspace.getLeavesOfType(NATIVE_TERMINAL_VIEW).find(leaf=>terminalConversation(leaf)?.id===id&&profileState(leaf)?.profile?.environment?.some((entry:unknown)=>Array.isArray(entry)&&entry[0]==='AOS_V2_NATIVE_DIRECT'&&entry[1]==='1'));
   // Direct conversations belong to Terminal itself. Selecting their existing
   // view must never reapply launch state or start a legacy attachment process.

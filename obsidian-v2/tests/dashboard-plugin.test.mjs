@@ -129,11 +129,27 @@ test('custom launch rejects empty requests and provider mismatches before creati
  assert.equal(f.opened.length, 0);
 });
 
+test('verified and newer untested Terminal versions both launch personal skills natively', async () => {
+ for (const version of ['3.27.1', '3.27.2', '3.28.0']) {
+  const f = fixture();
+  f.handler = () => ({ status: 200, json: { id: 'task-' + version, provider: 'codex', model: 'gpt-6-astra', execution: 'native', state: 'starting', turns: [] } });
+  await dashboard.launchDashboardSkill(nativeApp(version), installed, 'Write a proposal');
+  assert.deepEqual(f.opened, [['task-' + version]], version);
+ }
+});
+
 test('missing or unsupported native Terminal prevents session writes and pending custom tasks', async () => {
  const f = fixture();
- for (const app of [nativeApp(null), nativeApp('0.0.0')]) {
-  await assert.rejects(dashboard.launchDashboardSkill(app, installed, 'Write a proposal'), /Enable the supported Terminal community plugin.*Jarvis at http:\/\/127\.0\.0\.1:3217/);
- }
+ const withoutManifest = { ...nativeApp(null), plugins: { plugins: { terminal: {} } } };
+ const expected = [
+  [nativeApp(null), /Enable the Terminal community plugin \(by polyipseity\).*Jarvis at http:\/\/127\.0\.0\.1:3217/],
+  [withoutManifest, /Enable the Terminal community plugin/],
+  [nativeApp(''), /Enable the Terminal community plugin/],
+  [nativeApp('0.0.0'), /too old.*Jarvis at http:\/\/127\.0\.0\.1:3217/],
+  [nativeApp('3.28.0-beta.1'), /Pre-release/],
+  [nativeApp('4.0.0'), /has not been verified.*Jarvis at http:\/\/127\.0\.0\.1:3217/],
+ ];
+ for (const [app, message] of expected) await assert.rejects(dashboard.launchDashboardSkill(app, installed, 'Write a proposal'), message);
  assert.equal(f.events.includes('session'), false);
  assert.equal(f.calls.length, 0);
  assert.equal(f.opened.length, 0);

@@ -76,3 +76,25 @@ test('exit and real view unload close once and never stop an unrelated process',
 test('a child which has already exited cannot be reported ready or accept input',async t=>{
  const f=fixture(t);f.process.exitCode=1;await assert.rejects(f.binding.ready,/changed or exited/);assert.equal(f.binding.active,false);assert.equal(f.writes.length,0);
 });
+test('a Terminal whose emulator or process cannot be reached is a TerminalAccessError; a closed or replaced tab is not',async t=>{
+ // The binding's timers are unref'd on purpose; keep the loop alive while it times out.
+ const alive=setInterval(()=>{},1000);t.after(()=>clearInterval(alive));
+ const onData=()=>({dispose(){}}),stream={on(){},removeListener(){}};
+ const view=emulator=>{const cleanup=[];return {emulator,register(fn){cleanup.push(fn)},close(){for(const fn of cleanup)fn()}}};
+ const outcome=async(made,{close=false,replace=false}={})=>{
+  const binding=bindDirectTerminal(made,{},{timeoutMs:40,pollMs:5});
+  if(close)made.close();
+  if(replace){await tick();made.emulator={terminal:{onData},pseudoterminal:new Promise(()=>{})}}
+  return binding.ready.then(()=>assert.fail('should not be ready'),error=>error);
+ };
+ const access=[
+  ['no emulator ever appears',view(null)],
+  ['emulator without terminal input',view({pseudoterminal:new Promise(()=>{})})],
+  ['process access without kill',view({terminal:{onData},pseudoterminal:Promise.resolve({shell:Promise.resolve({}),onExit:new Promise(()=>{})})})],
+  ['process without streams',view({terminal:{onData},pseudoterminal:Promise.resolve({kill:async()=>{},onExit:new Promise(()=>{}),shell:Promise.resolve({pid:1,exitCode:null,stdin:{write(){}},stdout:stream})})})],
+  ['process never exposed',view({terminal:{onData},pseudoterminal:new Promise(()=>{})})],
+ ];
+ for(const [label,made] of access){const error=await outcome(made);assert.equal(error.name,'TerminalAccessError',label)}
+ const closed=await outcome(view(null),{close:true});assert.equal(closed.name,'Error');assert.match(closed.message,/closed before its process was ready/);
+ const replaced=await outcome(view({terminal:{onData},pseudoterminal:new Promise(()=>{})}),{replace:true});assert.equal(replaced.name,'Error');
+});

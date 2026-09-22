@@ -52,6 +52,11 @@ test('Ctrl+C is received by the console group once; SIGTERM ends the owned child
  p.signals.emit('SIGINT');assert.deepEqual(p.kills,[]);p.signals.emit('SIGTERM');assert.equal(await running,143);assert.deepEqual(p.kills,['SIGTERM']);
  assert.equal(f.readEvents().find(event=>event.type==='native-exit').signal,'SIGTERM');
 });
+test('a hangup (Terminal 3.27.2 closing a Mac pane sends SIGHUP first) stops the owned child and reports its exit once',async t=>{
+ const f=fixture(t),p=fake(),running=runNativeLaunch(f.file,{...p,platform:'darwin'});await tick();
+ p.signals.emit('SIGHUP');p.signals.emit('SIGHUP');assert.equal(await running,143);assert.deepEqual(p.kills,['SIGTERM']);
+ assert.equal(f.readEvents().filter(event=>event.type==='native-exit').length,1);
+});
 test('Windows termination targets only this launcher child tree and never a reported or restored PID',async t=>{
  const f=fixture(t),p=fake(),killer=new EventEmitter();killer.kill=()=>{};
  const spawnImpl=(command,args,options)=>{if(command===f.ticket.command)return p.spawnImpl(command,args,options);p.calls.push([command,args,options]);queueMicrotask(()=>p.child.emit('exit',null,'SIGTERM'));return killer};

@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {Worker} from 'node:worker_threads';
-import {doctor, voiceProblem} from '../scripts/aos/doctor.mjs';
+import {doctor, voiceProblem, terminalPluginCheck} from '../scripts/aos/doctor.mjs';
 import {fetchJson, request, run} from '../scripts/aos/platform.mjs';
 import {speechPlan, layout, PORTS} from '../scripts/aos/services.mjs';
 import {prepareVoice, watchedServices, update} from '../scripts/aos/setup.mjs';
@@ -17,6 +17,7 @@ after(async () => { await Promise.all(workers.map(worker => worker.terminate()))
 
 const VOICE = ['Voice service healthy', 'Text to speech', 'Speech to text hears it back'];
 const HOTKEY = 'Global voice shortcut';
+const TERMINAL = 'Terminal plugin (conversations inside Obsidian)';
 const freeze = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 // Unless a test says otherwise: one coding CLI is installed and answers its sign-in check.
@@ -349,13 +350,57 @@ test('every run prints every line, even with the bridge down or no vault configu
   const install = installation(); fs.rmSync(install.at.vaultFile);
   const found = await examine(services, install, {full: true});
   const expected = ['Node.js 22 or newer', 'Vault configured', 'Vault has the daily-note schema', 'Obsidian plugin files installed', 'Plugin switched on in Obsidian',
-    'Recovery monitor running', `Bridge answering on ${services.ports.bridge}`, `Jarvis HUD answering on ${services.ports.jarvis}`, 'claude CLI', 'codex CLI', VOICE[0], HOTKEY, ...VOICE.slice(1), 'Jev fast voice routing', 'A real workflow end to end'];
+    TERMINAL, 'Recovery monitor running', `Bridge answering on ${services.ports.bridge}`, `Jarvis HUD answering on ${services.ports.jarvis}`, 'claude CLI', 'codex CLI', VOICE[0], HOTKEY, ...VOICE.slice(1), 'Jev fast voice routing', 'A real workflow end to end'];
   assert.deepEqual(found.results.map(item => item.name), expected);
   for (const name of ['Vault has the daily-note schema', 'claude CLI', ...VOICE, HOTKEY, 'A real workflow end to end']) { assert.equal(found.line(name).status, 'SKIP', name); assert.match(found.line(name).detail, /not (run|checked)/); }
+  assert.equal(found.line(TERMINAL).status, 'SKIP'); assert.match(found.line(TERMINAL).detail, /no vault configured/);
   const usual = await examine(await fakeServices({speech: 'shared'}), installation());
   assert.match(usual.line('A real workflow end to end').detail, /doctor --full/);
   const ci = await examine(await fakeServices({speech: 'shared', providers: {claude: {installed: true, version: '1', command: 'x'}}}), installation(), {ci: true, full: true});
   assert.equal(ci.line('claude signed in').status, 'SKIP'); assert.equal(ci.line('A real workflow end to end').status, 'SKIP'); assert.equal(ci.failed, 0, ci.text);
+});
+
+test('the Terminal plugin line reports every state from the vault files and never throws', () => {
+  const vault = installation().vault, folder = path.join(vault, '.obsidian', 'plugins', 'terminal'), enabledFile = path.join(vault, '.obsidian', 'community-plugins.json');
+  const set = ({manifest, enabled = '["agentic-os-v2","terminal"]'}) => {
+    fs.rmSync(folder, {recursive: true, force: true});
+    if (manifest !== undefined) { fs.mkdirSync(folder, {recursive: true}); fs.writeFileSync(path.join(folder, 'manifest.json'), typeof manifest === 'string' ? manifest : JSON.stringify(manifest)); }
+    if (enabled === null) fs.rmSync(enabledFile, {force: true}); else fs.writeFileSync(enabledFile, enabled);
+    return terminalPluginCheck(vault);
+  };
+  const cases = [
+    [{}, 'SKIP', /not installed \(optional: .*Jarvis/],
+    [{manifest: {id: 'terminal', version: '3.27.2'}}, 'PASS', /^3\.27\.2$/],
+    [{manifest: {id: 'terminal', version: '3.27.1'}}, 'PASS', /^3\.27\.1$/],
+    [{manifest: {id: 'terminal', version: '3.28.0'}}, 'PASS', /3\.28\.0, newer than the tested 3\.27\.1 and 3\.27\.2; it should work/],
+    [{manifest: {id: 'terminal', version: '3.27.2'}, enabled: '["agentic-os-v2"]'}, 'SKIP', /switched off/],
+    [{manifest: {id: 'terminal', version: '3.27.2'}, enabled: null}, 'SKIP', /switched off/],
+    [{manifest: {id: 'terminal', version: '4.0.0'}}, 'FAIL', /version 4\.0\.0/],
+    [{manifest: {id: 'terminal', version: '3.26.0'}}, 'FAIL', /version 3\.26\.0/],
+    [{manifest: {id: 'terminal'}}, 'FAIL', /no version/],
+    [{manifest: '{not json'}, 'FAIL', /could not be read/],
+    [{manifest: {id: 'someone-else', version: '1.0.0'}}, 'SKIP', /different plugin/],
+    [{manifest: {id: 'terminal', version: '3.27.2'}, enabled: '{not json'}, 'SKIP', /could not read the enabled-plugins list/],
+  ];
+  for (const [state, status, detail] of cases) { const check = set(state); assert.equal(check.status, status, JSON.stringify(state)); assert.match(check.detail, detail, JSON.stringify(state)); if (status === 'FAIL') assert.match(check.fix, /Jarvis at http:\/\/127\.0\.0\.1:3217/); }
+  assert.match(set({manifest: {id: 'terminal', version: '3.26.0'}}).fix, /too old/);
+  assert.equal(terminalPluginCheck(path.join(vault, 'missing')).status, 'SKIP');
+  assert.equal(terminalPluginCheck(undefined).status, 'SKIP');
+});
+
+test('a Terminal problem is an optional line and never adds a core failure', async () => {
+  const services = await fakeServices({speech: 'shared'});
+  const baseline = await examine(services, installation());
+  const install = installation(), folder = path.join(install.vault, '.obsidian', 'plugins', 'terminal');
+  fs.mkdirSync(folder, {recursive: true}); fs.writeFileSync(path.join(folder, 'manifest.json'), '{not json');
+  fs.writeFileSync(path.join(install.vault, '.obsidian', 'community-plugins.json'), '["agentic-os-v2","terminal"]');
+  const damaged = await examine(services, install);
+  assert.equal(damaged.line(TERMINAL).status, 'FAIL'); assert.equal(damaged.line(TERMINAL).optional, true);
+  assert.equal(damaged.coreFailed, baseline.coreFailed);
+  const noVault = installation(); fs.rmSync(noVault.at.vaultFile);
+  const without = await examine(services, noVault);
+  assert.equal(without.line('Vault configured').status, 'FAIL', 'the missing vault stays the core failure it was');
+  assert.equal(without.line(TERMINAL).status, 'SKIP'); assert.equal(without.results.filter(item => item.name === TERMINAL && item.status === 'FAIL').length, 0);
 });
 
 test('the plugin line is only PASS once Obsidian has opened the vault or the cockpit is connected', async () => {

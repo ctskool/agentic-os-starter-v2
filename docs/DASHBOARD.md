@@ -15,7 +15,7 @@ Use **Find installed skills** to discover skills in the standard folders for you
 
 Personal skills open an ordinary conversation in Claude Code or Codex. Enter what you want the skill to do; questions and approvals appear in the terminal. A registered file is not a guarantee that its connectors, helper tools or accounts are ready. If they are missing, finish that setup in the conversation.
 
-Running a personal skill inside Obsidian needs its supported **Terminal** community plugin enabled. If you prefer not to install it, use the same button in the Jarvis HUD. Bundled background workflows do not need that plugin.
+Running a personal skill inside Obsidian needs the **Terminal** community plugin (by polyipseity) enabled: any stable 3.x release from 3.27.1 on; 3.27.1 and 3.27.2 are tested, newer ones show a one-time notice, pre-releases are not supported. If you prefer not to install it, use the same button in the Jarvis HUD. Bundled background workflows do not need that plugin.
 
 A skill is tied to the provider or providers it was registered for. Switching providers can disable an incompatible button. A missing or changed skill file is also disabled; re-register the reviewed file to use its new version. Skills are never downloaded or executed merely because they were found.
 

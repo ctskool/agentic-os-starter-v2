@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 const built=await build({entryPoints:['src/lib/native-direct-host.ts'],bundle:true,platform:'node',format:'esm',write:false});
 const {NativeDirectHost}=await import('data:text/javascript;base64,'+Buffer.from(built.outputFiles[0].text).toString('base64'));
+// The real binding from a separate bundle: its error class is not the host's, so only the name check can recognise it.
+const ptyBuilt=await build({entryPoints:['src/lib/direct-terminal-pty.ts'],bundle:true,platform:'node',format:'esm',write:false});
+const {bindDirectTerminal}=await import('data:text/javascript;base64,'+Buffer.from(ptyBuilt.outputFiles[0].text).toString('base64'));
 const task='11111111-1111-4111-8111-111111111111',instance='22222222-2222-4222-8222-222222222222',launchId='33333333-3333-4333-8333-333333333333',sendId='44444444-4444-4444-8444-444444444444',key='55555555-5555-4555-8555-555555555555';
 function fixture(){
  const leaves=[],calls=[],notices=[],revealed=[],bindings=[],pending=[],lifetimes=[];
@@ -53,8 +56,48 @@ test('failed launch claim is never retried, and a lost input ACK retries only th
 test('V2 reload retains live controllers and human drafts without reapplying Terminal launch state',async()=>{
  const f=fixture();f.queue(f.launch);await f.host.sync();f.bindings[0].binding.hasDraft=true;f.host.dispose();const reloaded=new NativeDirectHost(f.options);await reloaded.sync();assert.equal(await reloaded.open(task),f.leaves[0]);assert.equal(f.bindings.length,1);assert.equal(f.leaves[0].sets,1);assert.equal(f.bindings[0].binding.stops,0);assert.equal(f.bindings[0].binding.hasDraft,true);
 });
-test('unknown Terminal version fails before claiming actions or changing ordinary shell tabs',async()=>{
- const f=fixture();f.app.plugins.plugins.terminal.manifest.version='3.28.0';f.queue(f.launch);await assert.rejects(f.host.sync(),/has not been verified/);assert.equal(f.calls.length,0);assert.equal(f.leaves.length,0);
+test('a missing or unsupported Terminal fails before claiming actions or changing ordinary shell tabs',async()=>{
+ const cases=[[f=>{f.app.plugins.plugins.terminal.manifest.version='4.0.0'},/has not been verified/],[f=>{f.app.plugins.plugins.terminal.manifest.version='3.27.0'},/too old/],
+  [f=>{f.app.plugins.plugins.terminal.manifest.version='3.28.0-beta.1'},/Pre-release/],[f=>{f.app.plugins.plugins.terminal.manifest.version=''},/need the Terminal community plugin/],
+  [f=>{delete f.app.plugins.plugins.terminal.manifest},/need the Terminal community plugin/],[f=>{delete f.app.plugins.plugins.terminal},/need the Terminal community plugin/]];
+ for(const [change,reason] of cases){
+  const f=fixture();change(f);f.queue(f.launch);await assert.rejects(f.host.sync(),reason);
+  // Only the read-only look at waiting work: nothing claimed, reported or opened.
+  assert.deepEqual(f.calls.map(call=>call.path),['/native/pending']);assert.equal(f.leaves.length,0);
+ }
+});
+test('a refused Terminal says why once, only when a conversation is waiting to open, also across plugin reloads',async()=>{
+ const f=fixture();f.app.plugins.plugins.terminal.manifest.version='4.0.0';
+ await assert.rejects(f.host.sync());assert.deepEqual(f.notices,[],'no waiting launch: a member who uses Jarvis is not nagged');
+ for(let tick=0;tick<3;tick++){f.queue(f.launch);await assert.rejects(f.host.sync(),/has not been verified/)}
+ assert.equal(f.notices.length,1);assert.match(f.notices[0],/Terminal 4\.0\.0 has not been verified.*Jarvis at http:\/\/127\.0\.0\.1:3217/);
+ f.host.dispose();const reloaded=new NativeDirectHost(f.options);f.queue(f.launch);await assert.rejects(reloaded.sync());
+ assert.equal(f.notices.length,1,'the same session does not repeat it after a reload');
+ assert.equal(f.calls.some(call=>call.path!=='/native/pending'),false);assert.equal(f.leaves.length,0);
+});
+test('a newer untested Terminal opens conversations with one notice for the session',async()=>{
+ const f=fixture();f.app.plugins.plugins.terminal.manifest.version='3.28.0';f.queue(f.launch);await f.host.sync();
+ assert.equal(f.leaves.length,1);assert.equal(events(f).filter(event=>event.type==='launched').length,1);
+ assert.equal(f.notices.length,1);assert.match(f.notices[0],/Terminal 3\.28\.0 is newer than the versions tested/);
+ const second={...f.launch,id:'66666666-6666-4666-8666-666666666666',taskId:'77777777-7777-4777-8777-777777777777',instance:'88888888-8888-4888-8888-888888888888'};
+ f.queue(second);await f.host.sync();assert.equal(f.leaves.length,2);assert.equal(f.notices.length,1);
+});
+test('an untested Terminal that opened a tab it does not let us follow says the conversation may be running and never relaunches',async t=>{
+ // Through the real binding: the fixture's Terminal views expose no emulator, as a changed Terminal might.
+ const alive=setInterval(()=>{},1000);t.after(()=>clearInterval(alive));
+ const outcomes=[['3.28.0',false,/opened this conversation, but Agentic OS cannot follow it.*may still be running/,1],
+  ['3.28.0',true,/^The terminal closed before its process was ready\.$/,0],
+  ['3.27.2',false,/^Terminal did not open before the launch timeout\.$/,1]];
+ for(const [version,closeTab,expected,tabs] of outcomes){
+  const f=fixture();f.app.plugins.plugins.terminal.manifest.version=version;
+  f.options.bind=(view,callbacks,options)=>bindDirectTerminal(view,callbacks,{...options,timeoutMs:60,pollMs:5});
+  f.queue(f.launch);const syncing=f.host.sync();
+  if(closeTab){while(!f.leaves.length)await new Promise(resolve=>setTimeout(resolve,2));f.leaves[0].detach()}
+  await syncing;f.queue(f.launch);await f.host.sync();
+  const reported=events(f).filter(event=>event.type==='error');assert.ok(reported.length>=1,version);assert.ok(reported.some(event=>expected.test(event.reason)),JSON.stringify(reported));
+  assert.ok(f.notices.some(notice=>expected.test(notice)),JSON.stringify(f.notices));
+  assert.equal(f.leaves.length,tabs,'a started tab stays for inspection');assert.equal(f.calls.filter(call=>call.path==='/native/claim').length,1,'claimed once, never relaunched');
+ }
 });
 test('closed or mismatched native views can never receive a follow-up',async()=>{
  const f=fixture();f.queue(f.launch);await f.host.sync();f.leaves[0].view={};f.send();await f.host.sync();assert.equal(f.bindings[0].binding.writes.length,0);assert.ok(events(f).some(event=>event.type==='error'));

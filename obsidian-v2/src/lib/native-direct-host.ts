@@ -1,12 +1,13 @@
 import type {App,WorkspaceLeaf} from 'obsidian';
-import {NATIVE_TERMINAL_VIEW,SUPPORTED_TERMINAL_VERSION} from './native-terminal';
-import {bindDirectTerminal,type DirectTerminalBinding,type DirectTerminalView} from './direct-terminal-pty';
+import {NATIVE_TERMINAL_VIEW,terminalPluginStatus} from './native-terminal';
+import {untrackedLaunchMessage} from '../../shared/terminal-support.mjs';
+import {bindDirectTerminal,TerminalAccessError,type DirectTerminalBinding,type DirectTerminalView} from './direct-terminal-pty';
 import {directId,directTerminalMetadata,directTerminalViewState,type DirectAction} from './direct-terminal-profile';
 import {bindTerminalLifetime,createTerminalLifetime,lifetimeForView,type TerminalLifetime} from './terminal-lifetime';
 
 interface NativeEvent {taskId:string;instance:string;actionId?:string;type:string;reason?:string;hasDraft?:boolean;hostPid?:number|null}
 interface Session {taskId:string;instance:string;leaf:WorkspaceLeaf;view:DirectTerminalView;binding:DirectTerminalBinding;lifetime:TerminalLifetime;revision:number;closed:boolean}
-interface Registry {sessions:Map<string,Session>;claimed:Set<string>;events:NativeEvent[];queue:Promise<void>}
+interface Registry {sessions:Map<string,Session>;claimed:Set<string>;events:NativeEvent[];queue:Promise<void>;notified?:Set<string>}
 interface HostOptions {
  app:App;request:(path:string,body?:unknown)=>Promise<any>;createLeaf:()=>WorkspaceLeaf;
  reveal?:(leaf:WorkspaceLeaf)=>Promise<void>;notice:(message:string)=>void;
@@ -26,11 +27,13 @@ export class NativeDirectHost {
  private registry:Registry;
  private disposed=false;
  constructor(private options:HostOptions){
-  this.registry=registries.get(options.app)??{sessions:new Map(),claimed:new Set(),events:[],queue:Promise.resolve()};
+  this.registry=registries.get(options.app)??{sessions:new Map(),claimed:new Set(),events:[],queue:Promise.resolve(),notified:new Set()};
   registries.set(options.app,this.registry);
  }
- private plugin(){return (this.options.app as App&{plugins?:{plugins?:Record<string,{manifest:{version:string};settings?:{value?:{defaultProfile?:string;profiles?:Record<string,Record<string,unknown>>}}}>}}).plugins?.plugins?.terminal}
- private verified(){const plugin=this.plugin();if(!plugin)throw new Error('Enable the Terminal plugin in Obsidian to open this agent.');if(plugin.manifest.version!==SUPPORTED_TERMINAL_VERSION)throw new Error(`Terminal ${plugin.manifest.version} has not been verified with this integration.`);return plugin}
+ /** One notice per reason for the whole Obsidian session, also across plugin reloads. */
+ private noticeOnce(reason:string){const notified=this.registry.notified??=new Set();if(notified.has(reason))return;notified.add(reason);this.options.notice(reason)}
+ /** A missing or unsupported Terminal refuses before any action is claimed. */
+ private verified(){const status=terminalPluginStatus(this.options.app);if(!status.plugin||status.support.status==='missing'||status.support.status==='unsupported')throw new Error(status.support.message);return {plugin:status.plugin,support:status.support}}
  private layout<T>(operation:()=>Promise<T>){return this.options.withLayout?this.options.withLayout(operation):operation()}
  private alive(session:Session){const target=directTerminalMetadata(session.leaf);return !session.closed&&session.binding.active&&session.lifetime.active&&session.leaf.view===session.view&&this.options.app.workspace.getLeavesOfType(NATIVE_TERMINAL_VIEW).includes(session.leaf)&&target?.id===session.taskId&&target.instance===session.instance}
  private enqueue(event:NativeEvent){
@@ -69,7 +72,8 @@ export class NativeDirectHost {
   }
  }
  private async launch(action:DirectAction){
-  const plugin=this.verified(),launch=action.launch;
+  const {plugin,support}=this.verified(),launch=action.launch;
+  if(support.status==='untested')this.noticeOnce(support.message);
   const vault=(this.options.app.vault.adapter as typeof this.options.app.vault.adapter&{getBasePath?:()=>string}).getBasePath?.();
   if(!vault||!launch||canonical(launch.cwd)!==canonical(vault))throw new Error('The native terminal launch names a different vault.');
   const prior=this.registry.sessions.get(action.instance);
@@ -95,6 +99,9 @@ export class NativeDirectHost {
    // The profile may already have launched a process. Leave that Terminal view
    // visible for inspection instead of reconstructing it or relaunching.
    if(leaf&&leaf.getViewState().type==='empty')leaf.detach();
+   // An untested Terminal may have started the CLI in a tab we cannot follow.
+   // Say so plainly; a closed or replaced tab keeps its own message.
+   if(support.status==='untested'&&(error as Error|undefined)?.name===TerminalAccessError.NAME&&leaf&&this.options.app.workspace.getLeavesOfType(NATIVE_TERMINAL_VIEW).includes(leaf))throw new Error(untrackedLaunchMessage(support.version));
    throw error;
   }
  }
@@ -135,7 +142,17 @@ export class NativeDirectHost {
  async sync():Promise<void>{
   if(this.disposed)return;
   const run=this.registry.queue.catch(()=>{}).then(async()=>{
-   if(this.disposed)return;this.verified();this.adopt();await this.flush();
+   if(this.disposed)return;
+   try{this.verified()}catch(error){
+    // The poll that calls sync() stays quiet on errors, so a refused Terminal
+    // would otherwise leave a requested conversation silently unopened. Only a
+    // waiting launch earns the notice: a member who uses Jarvis is not nagged.
+    // Read-only: nothing is claimed, reported or opened.
+    const waiting=await this.options.request('/native/pending').catch(()=>null);
+    if(Array.isArray(waiting?.actions)&&waiting.actions.some((action:{type?:string}|null)=>action?.type==='launch'))this.noticeOnce(message(error));
+    throw error;
+   }
+   this.adopt();await this.flush();
    const sessions=[...this.registry.sessions.values()].filter(session=>this.alive(session)).map(session=>({taskId:session.taskId,instance:session.instance,hostPid:session.binding.hostPid,hasDraft:session.binding.hasDraft,approval:session.binding.approval}));
    const presence=await this.options.request('/native/presence',{sessions});
    // The bridge's completion hooks can clear an old observed approval. A human

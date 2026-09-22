@@ -11,6 +11,7 @@ import {tryJson, probeJson, fetchJson, request, run, sleep} from './platform.mjs
 import {layout, PORTS, configuredVaultPath, speechInstalled} from './services.mjs';
 import {pluginInstalled, pluginEnabled} from './vault.mjs';
 import {hasJevKey} from './jev-key.mjs';
+import {terminalSupport, VERIFIED_TERMINAL_VERSIONS, JARVIS_URL} from '../../shared/terminal-support.mjs';
 
 const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; } };
 const SUPERVISOR_LOG = 'obsidian-v2/.runtime/service-supervisor.jsonl';
@@ -18,6 +19,28 @@ const SHOW_SOMEONE = `Show your coding agent this line together with the last 30
 const VOICE_CHECKS = ['Voice service healthy', 'Text to speech', 'Speech to text hears it back'];
 const HOTKEY_CHECK = 'Global voice shortcut';
 const STILL_STARTING = new Set(['checking', 'starting', 'waiting_for_listener', 'backoff']);
+const TERMINAL_CHECK = 'Terminal plugin (conversations inside Obsidian)';
+
+// The optional Terminal community plugin, from the vault's own files. Never throws: whatever
+// is wrong here, Jarvis still runs every conversation, so it can never be a core failure.
+export function terminalPluginCheck(vault) {
+  const reinstall = `Reinstall "Terminal" by polyipseity from Settings > Community plugins, or use the same buttons in Jarvis at ${JARVIS_URL}.`;
+  if (!vault || !fs.existsSync(vault)) return {status: 'SKIP', detail: 'no vault configured'};
+  const manifestFile = path.join(vault, '.obsidian', 'plugins', 'terminal', 'manifest.json');
+  if (!fs.existsSync(manifestFile)) return {status: 'SKIP', detail: 'not installed (optional: conversations and personal-skill buttons run in Jarvis; to have them inside Obsidian, install "Terminal" by polyipseity from Settings > Community plugins)'};
+  let manifest;
+  try { manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8')); } catch { return {status: 'FAIL', detail: 'its manifest.json could not be read', fix: reinstall}; }
+  if (manifest?.id !== 'terminal') return {status: 'SKIP', detail: 'a different plugin occupies the .obsidian/plugins/terminal folder'};
+  let enabled = false;
+  try { const list = JSON.parse(fs.readFileSync(path.join(vault, '.obsidian', 'community-plugins.json'), 'utf8')); enabled = Array.isArray(list) && list.includes('terminal'); }
+  catch (error) { if (error.code !== 'ENOENT') return {status: 'SKIP', detail: 'could not read the enabled-plugins list (.obsidian/community-plugins.json)'}; }
+  const support = terminalSupport(manifest.version);
+  if (!enabled) return {status: 'SKIP', detail: `${support.version || 'installed'}, but switched off (optional: turn it on in Settings > Community plugins for conversations inside Obsidian)`};
+  if (support.status === 'verified') return {status: 'PASS', detail: support.version};
+  if (support.status === 'untested') return {status: 'PASS', detail: `${support.version}, newer than the tested ${VERIFIED_TERMINAL_VERSIONS.join(' and ')}; it should work`};
+  if (support.status === 'missing') return {status: 'FAIL', detail: 'its manifest has no version', fix: reinstall};
+  return {status: 'FAIL', detail: `version ${support.version}`, fix: support.message};
+}
 
 // Why the voice line failed, from what the bridge, the monitor and the disk say. Pure.
 //   probe     - the answer of the bridge's /voice/health: {status, data, error}
@@ -120,6 +143,10 @@ export async function doctor({root = projectRoot, ci = false, full = false, phas
     else if (pluginEnabled(vault)) add(needsUser, 'Plugin switched on in Obsidian', 'ready in this new vault, but Obsidian has not opened it yet', 'Open Obsidian -> "Open folder as vault" -> choose the vault folder -> "Trust author and enable plugins".');
     else add(needsUser, 'Plugin switched on in Obsidian', 'needs the user', 'In Obsidian: Settings > Community plugins -> turn on community plugins -> enable "Agentic OS V2".');
   });
+  await group([TERMINAL_CHECK], () => {
+    const check = terminalPluginCheck(vault);
+    add(check.status, TERMINAL_CHECK, check.detail, check.fix || '', {optional: true});
+  }, {optional: true});
 
   add(supervisor ? 'PASS' : 'FAIL', 'Recovery monitor running', supervisor ? `${supervisor.services.length} services watched` : '', 'Run `node aos.mjs start`.');
   add(services?.bridge?.online ? 'PASS' : 'FAIL', `Bridge answering on ${ports.bridge}`, '', `Run \`node aos.mjs start\`, wait 20 seconds, then look at ${SUPERVISOR_LOG}.`);
