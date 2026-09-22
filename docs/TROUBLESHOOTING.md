@@ -28,7 +28,7 @@ Never paste `jev.json` or `bridge-auth.json` anywhere: they hold your OpenRouter
 
 **Voice: the microphone does nothing.** Check the browser's site permission for `127.0.0.1:3217`. Mac: *System Settings → Privacy & Security → Microphone* must list your browser and Obsidian. The first request after a start can take a minute while the speech models load.
 
-**Mac global voice shortcut.** With this installation's own voice service, press **Control–Option–J** once, speak, and pause to send. Keep the Obsidian orb enabled or the HUD visible. The shortcut records through the Python speech process, so its microphone permission is separate from the browser's. `node aos.mjs doctor` reports registration failures, including a combination owned by another app. See [Mac voice setup and testing](MAC-VOICE.md).
+**Mac global voice shortcut.** With this installation's own voice service, press **Control–Option–J** once, speak, and pause to send. Keep the Obsidian orb enabled or the HUD visible. The selected app records, so allow microphone access for Obsidian or your browser. Rebuild/reload both cockpits when updating the shortcut protocol. `node aos.mjs doctor` reports registration failures, including a combination owned by another app. See [Mac voice setup and testing](MAC-VOICE.md).
 
 **Voice answers are slow to start.** Without an OpenRouter key every request is routed by your Claude/Codex model (about five seconds). `node aos.mjs jev-key` fixes that. `node aos.mjs doctor` tells you if the key is refused or out of credit.
 

@@ -108,7 +108,7 @@ You cannot do the sign-in for them. Everything else works without it; those work
 3. For conversations and personal-skill buttons inside Obsidian: *Community plugins → Browse → "Terminal"* (by polyipseity) → install and enable. They can skip this and use the Jarvis HUD for personal skills and conversations; bundled background workflows still work inside Obsidian. Before wiring personal skills, explain this choice.
 4. Open the HUD: http://127.0.0.1:3217
 5. First use of the microphone: the browser (and on Mac, *System Settings → Privacy & Security → Microphone*) asks for permission → allow.
-6. With this installation's own voice service on Mac, **Control–Option–J** is registered automatically. Keep Obsidian running with the Agentic OS orb enabled, or keep the HUD visible. Explain: press once, speak, then pause to send; do not hold the keys. A shared speech service keeps its owner's shortcut behavior. Follow [Mac voice setup](../docs/MAC-VOICE.md), including the separate permission check for the Python speech process.
+6. With this installation's own voice service on Mac, **Control–Option–J** is registered automatically. Keep Obsidian running with the Agentic OS orb enabled, or keep the HUD visible. Explain: press once, speak, then pause to send; do not hold the keys. A shared speech service keeps its owner's shortcut behavior. Follow [Mac voice setup](../docs/MAC-VOICE.md): the selected cockpit records, so verify Obsidian or browser microphone permission. Build/reload the plugin and HUD together with the speech service when upgrading this feature.
 
 Ask them to tell you when the cockpit is visible in Obsidian.
 
