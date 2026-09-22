@@ -57,15 +57,7 @@ With this installation's own voice service enabled, use **Control–Option–J**
 
 ## How it works
 
-```mermaid
-flowchart LR
-    UI["Obsidian cockpit<br/>Jarvis HUD"] --> B["Local bridge"]
-    B --> A["Claude Code<br/>or Codex"]
-    A -- "notes and reports" --> V[("Your vault")]
-    V --> UI
-    S["Local voice<br/>Whisper + Kokoro"] <--> B
-    B -. "routing" .-> J["Jev / OpenRouter<br/>optional"]
-```
+[![How Agentic OS works: the dashboards connect to the local bridge, agents write to your vault, and local voice and optional Jev help handle spoken requests](docs/assets/architecture.svg)](docs/assets/architecture.svg)
 
 You ask or click. The bridge coordinates the work, your chosen agent carries it out, and the dashboards read the results from your vault.
 

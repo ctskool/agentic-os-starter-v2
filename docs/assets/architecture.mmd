@@ -1,0 +1,8 @@
+%% Editable source for architecture.svg. Render with Mermaid using htmlLabels: false.
+flowchart LR
+    UI["Obsidian cockpit<br/>Jarvis HUD"] --> B["Local bridge"]
+    B --> A["Claude Code<br/>or Codex"]
+    A -- "notes and reports" --> V[("Your vault")]
+    V --> UI
+    S["Local voice<br/>Whisper + Kokoro"] <--> B
+    B -. "routing" .-> J["Jev / OpenRouter<br/>optional"]
