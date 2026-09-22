@@ -1,6 +1,6 @@
 export const MARKER = '.agentic-os-v2-test-vault';
 export const ROOT = 'system/v2';
-export const MODELS = {codex:['gpt-6-astra','gpt-5.6-luna'],claude:['sonnet','haiku','opus','claude-fable-5-1']};
+export const MODELS = {codex:['gpt-6-astra','gpt-5.6-luna'],claude:['opus','sonnet','haiku','claude-fable-5-1']};
 export const VOICE_MODELS = Object.freeze({codex:'gpt-5.6-luna',claude:'haiku'});
 /** @type {Record<string,{label:string,instruction:string,arg?:string,direct?:boolean}>} */
 export const SKILLS = {

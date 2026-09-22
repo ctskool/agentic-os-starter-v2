@@ -16,7 +16,7 @@ export interface WorkTask {
 export const workRequest=(path='',body?:unknown)=>bridge('/work'+path,body);
 const conversationSessionId=crypto.randomUUID();
 const feed=createWorkFeed(async(path:string)=>{await workConversations.startSession();return workRequest(path)});
-const models={codex:'gpt-6-astra',claude:'sonnet'};
+const models={codex:'gpt-6-astra',claude:'opus'};
 const changed=()=>{if(typeof window!=='undefined')window.dispatchEvent(new Event('jarvis-work-target'))};
 export const workConversations=createWorkConversations({
   getSnapshot:()=>feed.getSnapshot(),readFresh:()=>workRequest('?summary=1'),
