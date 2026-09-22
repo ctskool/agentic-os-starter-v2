@@ -8,11 +8,13 @@ import {assessCheckout, prepareStockUpdate} from '../scripts/aos/upgrade-checkou
 import {update} from '../scripts/aos/setup.mjs';
 
 const official = 'https://github.com/ctskool/agentic-os-starter-v2.git';
-const tempRoot = fs.realpathSync(os.tmpdir());
+// Windows CI can expose TEMP as RUNNER~1; use the same native canonical form
+// as the assessor instead of comparing that alias with its runneradmin path.
+const tempRoot = fs.realpathSync.native(os.tmpdir());
 const gitNull = process.platform === 'win32' ? 'NUL' : os.devNull;
 const env = {...Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key))), GIT_CONFIG_GLOBAL: gitNull, GIT_CONFIG_NOSYSTEM: '1', GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0'};
 function scratch(t) {
-  const folder = fs.mkdtempSync(path.join(tempRoot, 'aos-upgrade-checkout-'));
+  const folder = fs.realpathSync.native(fs.mkdtempSync(path.join(tempRoot, 'aos-upgrade-checkout-')));
   t.after(() => {
     assert.equal(path.dirname(folder), tempRoot);
     assert.ok(path.basename(folder).startsWith('aos-upgrade-checkout-'));
@@ -46,6 +48,7 @@ const blocked = result => { assert.equal(result.updateAllowed, false); assert.no
 
 test('clean official main tracking origin/main is eligible from the repository root or bridge child', t => {
   const {root, child, head} = fixture(t);
+  assert.equal(root, fs.realpathSync.native(root), 'Fixture paths use the assessor’s native canonical form.');
   const value = assessCheckout(root);
   assert.equal(value.kind, 'stock-starter'); assert.equal(value.updateAllowed, true);
   assert.equal(value.repositoryPath, root); assert.equal(value.head, head); assert.equal(value.branch, 'main');
@@ -221,18 +224,21 @@ test('the default update pull reuses its assessment executable and sanitized con
   const {root, child} = fixture(t), calls = [], reads = [];
   fs.mkdirSync(path.join(child, '.runtime')); fs.writeFileSync(path.join(child, '.runtime', 'aos-setup.json'), JSON.stringify({vault: path.join(root, 'example-vault')}));
   const hostileEnv = {...env, GIT_DIR: path.join(root, 'wrong-git'), GIT_WORK_TREE: path.join(root, 'wrong-tree'), GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.fsmonitor', GIT_CONFIG_VALUE_0: 'must-not-run', GIT_EXEC_PATH: root, GIT_SSH_COMMAND: 'must-not-run'};
-  let assessment;
+  let assessment, pullInvocation;
   await update({root: child, log: () => {}, check: target => {
     assessment = assessCheckout(target, {env: hostileEnv, run: (command, args, options) => {reads.push({command, args, options}); return spawnSync(command, args, options);}});
     assert.equal(assessment.updateAllowed, true); calls.push('check'); return assessment;
   }, get: async () => {calls.push('get'); return {};}, halt: async () => calls.push('halt'), pullRun: (command, args, options) => {
-    calls.push('pull'); assert.equal(command, reads[0].command); assert.deepEqual(options.env, reads[0].options.env); assert.equal(options.cwd, root);
-    assert.equal(options.env.GIT_DIR, undefined); assert.equal(options.env.GIT_WORK_TREE, undefined); assert.equal(options.env.GIT_EXEC_PATH, undefined); assert.equal(options.env.GIT_CONFIG_COUNT, undefined); assert.equal(options.env.GIT_SSH_COMMAND, undefined);
-    assert.equal(options.env.GIT_CONFIG_GLOBAL, gitNull); assert.equal(options.env.GIT_CONFIG_NOSYSTEM, '1'); assert.equal(options.env.GIT_NO_LAZY_FETCH, '1');
-    for (const expected of ['core.fsmonitor=false', 'core.hooksPath=' + gitNull, 'credential.helper=', 'protocol.allow=never', 'protocol.https.allow=always', 'pull', '--ff-only', '--no-rebase', '--no-autostash', '--no-recurse-submodules', official, 'refs/heads/main:refs/remotes/origin/main']) assert.ok(args.includes(expected), expected);
-    assert.equal(options.timeout, 300000); assert.equal(options.maxBuffer, 2 * 1024 * 1024); return {status: 0, stdout: '', stderr: ''};
+    calls.push('pull'); pullInvocation = {command, args, options}; return {status: 0, stdout: '', stderr: ''};
   }, install: async () => {calls.push('install'); return {ok: true};}});
   assert.deepEqual(calls, ['check', 'get', 'halt', 'pull', 'install']);
+  assert.ok(pullInvocation, 'The default update dispatched its Git pull.');
+  const {command, args, options} = pullInvocation;
+  assert.equal(command, reads[0].command); assert.deepEqual(options.env, reads[0].options.env); assert.equal(options.cwd, root);
+  assert.equal(options.env.GIT_DIR, undefined); assert.equal(options.env.GIT_WORK_TREE, undefined); assert.equal(options.env.GIT_EXEC_PATH, undefined); assert.equal(options.env.GIT_CONFIG_COUNT, undefined); assert.equal(options.env.GIT_SSH_COMMAND, undefined);
+  assert.equal(options.env.GIT_CONFIG_GLOBAL, gitNull); assert.equal(options.env.GIT_CONFIG_NOSYSTEM, '1'); assert.equal(options.env.GIT_NO_LAZY_FETCH, '1');
+  for (const expected of ['core.fsmonitor=false', 'core.hooksPath=' + gitNull, 'credential.helper=', 'protocol.allow=never', 'protocol.https.allow=always', 'pull', '--ff-only', '--no-rebase', '--no-autostash', '--no-recurse-submodules', official, 'refs/heads/main:refs/remotes/origin/main']) assert.ok(args.includes(expected), expected);
+  assert.equal(options.timeout, 300000); assert.equal(options.maxBuffer, 2 * 1024 * 1024);
   assert.doesNotMatch(JSON.stringify(assessment), /GIT_CONFIG|executable|must-not-run/);
   assert.throws(() => prepareStockUpdate({...assessment}), /fresh trusted checkout assessment/);
   let serviceRead = false;
