@@ -1,10 +1,8 @@
 # Agentic OS V2
 
-**Your AI command center in Obsidian — powered by Claude Code, Codex, and optional Jev voice routing.**
+**Your AI command center in Obsidian — powered by Claude Code, Codex, and Jev.**
 
 Plan your day, talk to your agents, run your favorite skills, and keep the results in your vault. Use the Obsidian cockpit or the Jarvis HUD: two views of the same system.
-
-**Windows 10/11 · macOS (beta)**
 
 | Jarvis HUD | Obsidian cockpit |
 |:--:|:--:|
@@ -50,7 +48,7 @@ You do not need to know your installation's path. The agent helps find it, recom
 | **Jarvis HUD** | A full-screen browser dashboard with Claude Code and Codex terminals, provider switching, system vitals, and usage meters. |
 | **Your skill buttons** | Starter workflows such as Plan Today, Morning Intel, and Deep Research, plus your own skills. Change them later with **Customize dashboard**. |
 | **Local voice** | Click the microphone or use the shortcut, speak, then pause. Whisper transcribes; Kokoro speaks the reply. |
-| **Optional Jev** | Helps route eligible voice requests to the right destination. |
+| **Jev** | Helps route eligible voice requests to the right destination. |
 | **Health checks and autostart** | A doctor to diagnose problems, a monitor to recover services, and optional startup at login. |
 
 With this installation's own voice service enabled, use **Control–Option–J** on Mac or **Ctrl–Alt–J** on Windows. On Mac, keep the Obsidian orb enabled or the HUD visible. [Voice setup and permissions →](docs/MAC-VOICE.md)
