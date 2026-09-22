@@ -1,5 +1,9 @@
 """V2-owned push-to-talk. Importing this module opens no device or OS hook."""
 import math
+import json
+import pathlib
+import queue
+import subprocess
 import struct
 import sys
 import threading
@@ -129,6 +133,91 @@ class WindowsHotkeyBackend:
         self.user32.UnregisterHotKey(None, 0xA0B2)
 
 
+class MacHotkeyBackend:
+    """Carbon runs in a child main thread; speech keeps its asyncio event loop."""
+    def __init__(self, command=None, startup_timeout=2, stop_timeout=.3):
+        self.command = command or [sys.executable, '-u', str(pathlib.Path(__file__).with_name('macos_hotkey.py'))]
+        self.startup_timeout, self.stop_timeout = startup_timeout, stop_timeout
+        self.process, self.reader = None, None
+        self.messages = queue.Queue()
+
+    def _read(self):
+        try:
+            while True:
+                line = self.process.stdout.readline(4097)
+                if not line:
+                    break
+                if len(line) > 4096:
+                    raise ValueError('oversized message')
+                message = json.loads(line)
+                if not isinstance(message, dict) or message.get('type') not in ('ready', 'pressed', 'error'):
+                    raise ValueError('unknown message')
+                self.messages.put(message)
+        except (ValueError, OSError):
+            self.messages.put({'type': 'error', 'error': 'Mac hotkey helper sent an invalid response.'})
+        finally:
+            self.messages.put({'type': 'error', 'error': 'Mac hotkey helper stopped; restart voice to register it again.'})
+
+    @staticmethod
+    def _check(message, expected):
+        if message.get('type') == 'error':
+            raise RuntimeError(str(message.get('error') or 'Mac hotkey helper failed.')[:500])
+        if message.get('type') != expected:
+            raise RuntimeError('Mac hotkey helper sent an unexpected response.')
+
+    def register(self, mask, key):
+        try:
+            self.process = subprocess.Popen([*self.command, str(mask), str(key)], stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, close_fds=True, bufsize=0)
+            self.reader = threading.Thread(target=self._read, daemon=True, name='v2-mac-hotkey-protocol')
+            self.reader.start()
+            try:
+                message = self.messages.get(timeout=self.startup_timeout)
+            except queue.Empty:
+                raise RuntimeError('Mac hotkey registration timed out; use the microphone button.') from None
+            self._check(message, 'ready')
+            if self.process.poll() is not None:
+                raise RuntimeError('Mac hotkey helper exited during registration.')
+        except Exception:
+            self.unregister()
+            raise
+
+    def fired(self):
+        if self.process.poll() is not None:
+            raise RuntimeError('Mac hotkey helper stopped; restart voice to register it again.')
+        try:
+            message = self.messages.get_nowait()
+        except queue.Empty:
+            if self.process.poll() is not None:
+                raise RuntimeError('Mac hotkey helper stopped; restart voice to register it again.')
+            return False
+        self._check(message, 'pressed')
+        return True
+
+    def unregister(self):
+        if self.process is None:
+            return
+        process = self.process
+        if process.stdin:
+            process.stdin.close()  # EOF releases the helper's registration, even after parent death.
+        for action in (None, process.terminate, process.kill):
+            if process.poll() is not None:
+                break
+            if action:
+                try:
+                    action()
+                except ProcessLookupError:
+                    break
+            try:
+                process.wait(timeout=self.stop_timeout)
+            except subprocess.TimeoutExpired:
+                continue
+        if self.reader:
+            self.reader.join(timeout=self.stop_timeout)
+        if process.stdout:
+            process.stdout.close()
+
+
 class HotkeyListener:
     def __init__(self, trigger, combo='ctrl+alt+j', backend_factory=None):
         self.trigger, self.combo = trigger, combo
@@ -141,12 +230,12 @@ class HotkeyListener:
     def start(self):
         if not self.enabled or self._thread is not None:
             return
-        if self._backend_factory is None and sys.platform != 'win32':
-            self.error = 'Standalone global hotkey is supported on Windows; click-to-talk remains available.'
+        if self._backend_factory is None and sys.platform not in ('win32', 'darwin'):
+            self.error = 'Standalone global hotkey is supported on Windows and macOS; click-to-talk remains available.'
             return
         self._thread = threading.Thread(target=self._run, daemon=True, name='v2-voice-hotkey')
         self._thread.start()
-        if not self._ready.wait(2):
+        if not self._ready.wait(4):
             self.error = 'Hotkey registration timed out.'
             self._stop.set()
 
@@ -154,9 +243,13 @@ class HotkeyListener:
         backend, registered = None, False
         try:
             mask, key = parse_hotkey(self.combo)
-            backend = (self._backend_factory or WindowsHotkeyBackend)()
+            factory = MacHotkeyBackend if sys.platform == 'darwin' else WindowsHotkeyBackend
+            backend = (self._backend_factory or factory)()
             backend.register(mask, key)
-            registered, self.ok = True, True
+            registered = True
+            if self._stop.is_set():
+                return
+            self.ok = True
             self._ready.set()
             while not self._stop.wait(.05):
                 if backend.fired():
@@ -165,11 +258,13 @@ class HotkeyListener:
             self.error = str(exc)
         finally:
             self._ready.set()
-            if registered:
-                backend.unregister()
-            self.ok = False
+            try:
+                if registered:
+                    backend.unregister()
+            finally:
+                self.ok = False
 
     def stop(self):
         self._stop.set()
         if self._thread:
-            self._thread.join(timeout=2)
+            self._thread.join(timeout=4)

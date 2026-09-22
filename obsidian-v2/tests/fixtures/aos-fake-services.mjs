@@ -10,7 +10,8 @@ import {parentPort, workerData} from 'node:worker_threads';
 import {createFakeSpeech} from './fake-speech.mjs';
 
 // speech: 'shared' (another program's service), 'own' (on the port the doctor treats as ours), or 'none'
-const state = {speech: 'shared', speechPhase: 'online', providers: {}, surfaces: [], keepAliveMs: 5000, bridgeOnline: true, ...workerData};
+const state = {speech: 'shared', speechPhase: 'online', providers: {}, surfaces: [], keepAliveMs: 5000, bridgeOnline: true,
+  hotkey: {enabled: true, combo: 'ctrl+alt+j', ok: true, error: null}, ...workerData};
 const options = {keepAliveTimeout: state.keepAliveMs};
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
 // Time is compressed for the tests: like a real local server these advertise the usual five-second
@@ -34,7 +35,7 @@ const bridge = http.createServer(options, async (req, res) => {
   bridgeSeen.push(`${req.method} ${req.url}`);
   if (!state.bridgeOnline) { req.socket.destroy(); return; }
   // The same rule as the real bridge: healthy only when the speech service says so within 1.5 s.
-  const speechHealth = async () => { try { const response = await fetch(`${speechUrl()}/health`, {signal: AbortSignal.timeout(1500)}); return response.ok ? await response.json() : null; } catch { return null; } };
+  const speechHealth = async () => { try { const response = await fetch(`${speechUrl()}/health`, {signal: AbortSignal.timeout(1500)}); return response.ok ? {...await response.json(), ...(state.hotkey ? {hotkey: state.hotkey} : {})} : null; } catch { return null; } };
   if (req.url === '/services') return json(res, 200, {bridge: {online: true}, surfaces: state.surfaces, providers: state.providers,
     speech: {url: speechUrl(), shared: state.speech === 'shared', health: await speechHealth()}});
   if (req.url === '/voice/health') { const found = await speechHealth(); return json(res, 200, {ok: !!found?.ok && !!found?.stt?.ok, engine: 'Whisper / Kokoro', speech: found}); }
