@@ -59,12 +59,6 @@ With this installation's own voice service enabled, use **Control–Option–J**
 
 You ask or click. The bridge coordinates the work, your chosen agent carries it out, and the dashboards read the results from your vault.
 
-### What Jev adds
-
-Jev is an optional router: it helps decide where a spoken request should go, reducing routing delay for supported requests. **Claude Code or Codex still does the work.** Voice works without Jev.
-
-Speech recognition and speech generation run locally. AI requests use your provider account; Jev sends request text and limited context to OpenRouter and is billed separately. Personal skills can use additional services. [Data and costs →](docs/REFERENCE.md#data-and-costs)
-
 ## Help and customization
 
 Ask your coding agent to **“run the doctor”** if something is not working.
