@@ -84,7 +84,7 @@ The checklist at the end shows `WAIT  Plugin switched on in Obsidian` — that i
 
 ## Phase 3 — Jev, the fast voice router (optional, recommended)
 
-Explain in two or three sentences: *voice requests are routed by a small model on OpenRouter called Jev. It answers in about a fifth of a second instead of five, and costs a fraction of a cent per request. It is sent what you said, the last two turns of that voice conversation, the title and last lines of the selected conversation and the file names of recent reports, never your notes. Without it everything still works, only slower.*
+Explain in three sentences: *Jev is an optional model on OpenRouter that can reduce routing delay for eligible voice requests; it does not generate the answer or perform the work, and voice works without it. It receives what you said, brief excerpts from the last two voice exchanges, the selected conversation's title and latest reply excerpt, and report names; it does not receive full note files, though quoted note content can appear in those excerpts. OpenRouter usage is billed separately, and routing speed and cost vary.*
 
 1. The user creates an account at https://openrouter.ai, adds a few dollars of credit, and creates a key at https://openrouter.ai/keys.
 2. You run `node aos.mjs jev-key`. A page opens in **their** browser and they paste the key there; tell them that is all they have to do. The command prints only `{"saved":true}` or `{"saved":false}`.
