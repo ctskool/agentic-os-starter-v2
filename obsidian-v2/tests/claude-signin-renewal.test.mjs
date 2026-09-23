@@ -252,6 +252,6 @@ test('the bridge closes renewals only after /shutdown passed its own guard, and 
  const handler=bridge.slice(bridge.indexOf("url.pathname==='/shutdown'")),guard=handler.indexOf('},409)'),latch=handler.indexOf('closeClaudeSignIn()');
  assert.ok(guard>0&&latch>guard,'a refused shutdown must not disable later renewals');
  assert.match(bridge,/lifecycle\?\.stop\(signal\);closeClaudeSignIn\(\);/);
- assert.match(bridge,/getClaudeUsage\(\{signal:gone\.signal\}\)/);
+ assert.match(bridge,/claudeUsageReading\(\{signal:gone\.signal,getUsage:getClaudeUsage\}\)/); // forwards the signal: tests/claude-login-notice.test.mjs
  assert.match(router,/usage\[provider\]\(\{wait:false,signal\}\)/);
 });

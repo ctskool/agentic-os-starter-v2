@@ -9,6 +9,7 @@ import {createJiti} from 'jiti';
 import {readVoiceReport} from './voice-documents.mjs';
 import {getCodexUsage} from './codexUsage.mjs';
 import {getClaudeUsage} from './claudeUsage.mjs';
+import {claudeUsageReading} from './claude-login.mjs';
 import {closeClaudeSignIn} from './claude-signin.mjs';
 import {taskSummary} from '../shared/work-feed.mjs';
 import {readDashboard,saveDashboard,registerDashboardSkill,discoverDashboardSkills,prepareDashboardSkill,assertDashboardReplay} from './dashboard.mjs';
@@ -179,7 +180,7 @@ server.on('request',async(req,res)=>{
    if(b.id.startsWith('run:')&&terminals.records.has(b.id.slice(4)))return json({ok:true});
    hub.publish(b.id,speechText(b.text,700),{appScope});return json({ok:true});
   }
-  if(url.pathname==='/usage'&&req.method==='GET'){const provider=url.searchParams.get('provider')||'codex';if(!['codex','claude'].includes(provider))return json({error:'Unknown provider'},400);const gone=new AbortController();res.on('close',()=>gone.abort());return json(await (provider==='codex'?getCodexUsage():getClaudeUsage({signal:gone.signal})))}
+  if(url.pathname==='/usage'&&req.method==='GET'){const provider=url.searchParams.get('provider')||'codex';if(!['codex','claude'].includes(provider))return json({error:'Unknown provider'},400);const gone=new AbortController();res.on('close',()=>gone.abort());if(provider==='codex')return json(await getCodexUsage());return json(await claudeUsageReading({signal:gone.signal,getUsage:getClaudeUsage}))}
   if(url.pathname==='/notes/replace'&&req.method==='POST')return json(replaceDaily(root,JSON.parse((await body(req,1100000)).toString())));
   if(url.pathname==='/work'&&req.method==='GET'){const {revision,...current}=reconcileCurrent(root,terminals,{scope:appScope});return json({tasks:url.searchParams.get('summary')==='1'?terminals.list().filter(t=>taskInScope(t,appScope)).map(taskSummary):terminals.list().filter(t=>taskInScope(t,appScope)),vault:root,current,currentRevision:revision,attachmentProtocol:1})}
   if(url.pathname==='/work/current'&&req.method==='GET')return json(reconcileCurrent(root,terminals,{scope:appScope}));

@@ -24,7 +24,7 @@ export function ProviderUsage({provider}:{provider:Provider}){
  const issue=usage&&usage.status!=='ok'?usage.message:undefined;
  return <section className="weekly-gauge aos-v2-cc-tokenburn" data-provider={provider} aria-label={name+' weekly usage'} title={usage?.status!=='ok'?usage?.message:undefined}>
   {['tl','tr','bl','br'].map(corner=><span key={corner} aria-hidden="true" className={'aos-v2-cc-tokenburn-corner aos-v2-cc-tokenburn-corner--'+corner}/>)}
-  <header className="aos-v2-cc-tokenburn-head"><span className="aos-v2-cc-tokenburn-title">{name} · Weekly usage</span>{usage?.status==='stale'&&<small tabIndex={0} title={issue} aria-label={'Last known. '+issue}>Last known</small>}</header>
+  <header className="aos-v2-cc-tokenburn-head"><span className="aos-v2-cc-tokenburn-title">{name} · Weekly usage</span>{usage?.notice&&<small className="aos-v2-usage-login" data-level={usage.notice.level} tabIndex={0} title={usage.notice.text} aria-label={usage.notice.text}>{usage.notice.level==='expired'?'Log in':'Login soon'}</small>}{usage?.status==='stale'&&<small tabIndex={0} title={issue} aria-label={'Last known. '+issue}>Last known</small>}</header>
   <div className="aos-v2-cc-tokenburn-meter">
    <div className="aos-v2-cc-tokenburn-pct"><span className="aos-v2-cc-tokenburn-pct-num">{pct===undefined?'—':Math.round(pct)}</span><span tabIndex={pct===undefined&&issue?0:undefined} title={pct===undefined?issue:undefined} aria-label={pct===undefined&&issue?'Unavailable. '+issue:undefined} className={'aos-v2-cc-tokenburn-pct-unit'+(pct===undefined?' weekly-gauge-unavailable':'')}>{pct===undefined?(!usage?'Loading':'Unavailable'):'%'}</span></div>
    <div className="aos-v2-cc-tokenburn-bar-wrap">

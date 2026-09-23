@@ -4271,6 +4271,8 @@
 .weekly-gauge{min-width:0;margin:0 0 14px;font-family:var(--cc-mono);--tb-glow:255,211,181}
 .weekly-gauge .aos-v2-cc-tokenburn-head{justify-content:space-between;gap:10px}
 .weekly-gauge header small{font-size:10px;color:var(--cc-fg-2)}
+.weekly-gauge header .aos-v2-usage-login{margin-left:auto;color:var(--cc-warn);font-weight:600;cursor:help}
+.weekly-gauge header .aos-v2-usage-login~small{margin-left:0}
 .weekly-gauge .aos-v2-cc-tokenburn-meter{grid-template-columns:auto minmax(0,1fr)}
 .weekly-gauge .weekly-gauge-unavailable{font-size:11px;margin-left:7px}
 .weekly-gauge .aos-v2-cc-tokenburn-bar-endpoint{z-index:3}
@@ -4289,6 +4291,7 @@
 .aos-v2-pane--lit .weekly-gauge::before,.aos-v2-pane--lit .weekly-gauge .aos-v2-cc-tokenburn-corner{display:none}
 .aos-v2-pane--lit .weekly-gauge .aos-v2-cc-tokenburn-title{font-size:10px;letter-spacing:.16em;color:var(--aos-v2-muted-dark)}
 .aos-v2-pane--lit .weekly-gauge header small{color:var(--aos-v2-muted-dark)}
+.aos-v2-pane--lit .weekly-gauge header .aos-v2-usage-login{color:#8a6d1f}
 .aos-v2-pane--lit .weekly-gauge .aos-v2-cc-tokenburn-meter{grid-template-columns:auto minmax(0,1fr);gap:22px}
 .aos-v2-pane--lit .weekly-gauge .aos-v2-cc-tokenburn-pct{color:var(--aos-v2-text-dark);text-shadow:none;font-family:var(--aos-v2-display,var(--cc-mono));gap:4px}
 .aos-v2-pane--lit .weekly-gauge .aos-v2-cc-tokenburn-pct-num{font-weight:500;font-size:64px}
