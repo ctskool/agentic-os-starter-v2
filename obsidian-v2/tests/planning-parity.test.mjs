@@ -71,6 +71,19 @@ test('new plans retain frozen frontmatter, conditional drivers and Notes in the 
  }
 });
 
+test('a stray <markdown> wrapper tag around a new plan is dropped, not rejected',t=>{
+ for(const wrap of [text=>text+'</markdown>',text=>text+'\n</markdown>\n',text=>'<markdown>\n'+text+'\n</markdown>',text=>'<markdown>\n'+text]){
+  const f=fixture(t,'plan-today'),answer=wrap(note(f.date)),run=saveWorkflowResult(f.root,f.record,answer);
+  assert.equal(run.status,'ok',run.summary);
+  assert.equal(fs.readFileSync(f.file,'utf8'),note(f.date).trim());
+ }
+ // Real text in the reflection is still refused; only a bare wrapper line at the very end is dropped.
+ for(const tail of ['Invented reflection','Invented reflection\n</markdown>','</markdown>\nInvented reflection']){
+  const f=fixture(t,'plan-today'),run=saveWorkflowResult(f.root,f.record,note(f.date)+tail);
+  assert.equal(run.status,'error');assert.equal(fs.existsSync(f.file),false);
+ }
+});
+
 test('invalid frozen fields, duplicate YAML, section order and automatic completion cannot create a daily note',t=>{
  const mutations=[
   text=>text.replace('focus: "A concrete focus"\n',''),

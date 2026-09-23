@@ -65,7 +65,10 @@ export function saveWorkflowResult(root,record,text,{ownsDestination=false}={}){
  const run={...job,model:record.execution==='script'?'none':job.model,ts_queued:job.ts,ts_started:new Date(record.workflow.startedAt??record.created).toISOString(),ts_completed:new Date().toISOString(),status:'ok',summary:`${SKILLS[job.skill].label} completed`,execution:record.execution||'terminal',...(record.appScope?{appScope:record.appScope}:{}),task_id:record.id,artifact_path:artifact,deliverable_path:null};
  try{
   if(/^BLOCKED:/i.test(text.trim()))throw new Error(text.trim().slice(0,400));
-  const content=text.trim().replace(/^```(?:text|markdown)?\s*\r?\n([\s\S]*?)\r?\n```$/i,'$1').trim();
+  // Models sometimes wrap the note in a code fence or leave a <markdown> / </markdown> tag line
+  // at the very start or end; those wrappers are not part of the deliverable.
+  const content=text.trim().replace(/^```(?:text|markdown)?\s*\r?\n([\s\S]*?)\r?\n```$/i,'$1').trim()
+   .replace(/^<markdown>[^\S\r\n]*(?:\r?\n|$)/i,'').replace(/(?:^|\r?\n)[^\S\r\n]*<\/markdown>$/i,'').trim();
   const lines=content.split(/\r?\n/).map(line=>line.trim()).filter(Boolean);
   if(!lines.length||lines.every(line=>/^(?:(?:SAVED|PLANNED)\b[^\r\n]*|(?:done|complete|completed)[.!]?)$/i.test(line)))throw new Error('Worker returned a completion receipt instead of the deliverable. Original destination preserved; response saved for review.');
   let output=text,dailyResult=null;
