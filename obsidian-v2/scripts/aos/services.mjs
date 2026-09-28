@@ -128,7 +128,9 @@ export function refreshLoginItem(at, {log = console.log, refresh = refreshAutost
 
 // A login item owns the monitor when one is installed, so it survives this shell. When the kicked
 // login item does not bring the monitor up (a task Windows refused to run, a stale LaunchAgent), the
-// monitor is started directly; its exclusive lock makes a late login-item start exit harmlessly.
+// monitor is started directly. A late login-item start then finds our monitor holding 3221 and exits
+// normally (code 0), so launchd does not keep retrying it; a stranger on the port still makes it exit
+// with an error.
 export async function launchMonitor(at, {log = console.log, owner = autostartOwner(at), kick = kickAutostart, spawnMonitor, status = supervisorStatus, wait = sleep, kickGraceAttempts = 12, attempts = 24} = {}) {
   if (loginItemBlocks(owner)) throw new Error('A different installation owns the start-at-login item, so two copies would fight at the next login. Turn it off from that installation first (`node aos.mjs autostart off` in its folder). Nothing was started.');
   spawnMonitor ||= () => spawn(process.execPath, [at.supervisor, '--config', at.config], {cwd: at.root, detached: true, windowsHide: true, stdio: 'ignore'}).unref();

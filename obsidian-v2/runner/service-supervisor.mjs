@@ -51,6 +51,27 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
 }
 
+// True only when the process on the lock port answers /status as a supervisor for this same
+// runtime directory. A stranger on the port, or another installation's monitor, never qualifies.
+export function ownMonitorHolds(config, timeoutMs = 1000) {
+  return new Promise(resolve => {
+    const request = http.get({host:'127.0.0.1', port:config.lockPort, path:'/status', timeout:timeoutMs}, response => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', chunk => { if (body.length < 65536) body += chunk; });
+      response.on('end', () => {
+        try {
+          const status = JSON.parse(body);
+          resolve(response.statusCode === 200 && status.kind === 'agentic-os-service-supervisor'
+            && typeof status.runtimeDir === 'string' && path.resolve(status.runtimeDir) === path.resolve(config.runtimeDir));
+        } catch { resolve(false); }
+      });
+    });
+    request.once('error', () => resolve(false));
+    request.once('timeout', () => request.destroy());
+  });
+}
+
 export async function startSupervisor(input, options = {}) {
   const config = supervisorConfig(input);
   const pauseFile = path.join(config.runtimeDir, 'services-paused.json');
@@ -185,8 +206,22 @@ async function main() {
   const args = process.argv.slice(2);
   const at = args.indexOf('--config');
   if (at < 0 || !args[at + 1]) throw new Error('Use --config <absolute JSON file>');
-  const supervisor = await startSupervisor(readJson(args[at + 1]), {resetRecovery:args.includes('--reset-recovery')});
-  const signal = () => { void supervisor.stop({pause:true, reason:'signal'}).catch(() => { process.exitCode = 1; }); };
+  const input = readJson(args[at + 1]);
+  let supervisor;
+  try { supervisor = await startSupervisor(input, {resetRecovery:args.includes('--reset-recovery')}); }
+  catch (error) {
+    // A login item and a direct start can race for the lock. When the winner is our own monitor
+    // the loser leaves normally, so launchd does not retry it every ten seconds until the port frees.
+    if (error.code !== 'EADDRINUSE') throw error;
+    const config = supervisorConfig(input);
+    if (!await ownMonitorHolds(config)) throw error;
+    try { fs.appendFileSync(path.join(config.runtimeDir, 'service-supervisor.jsonl'), `${JSON.stringify({at:new Date().toISOString(), event:'already_running', pid:process.pid})}\n`); } catch { /* diagnostic only */ }
+    console.log(`Service recovery is already running for ${config.runtimeDir}; this copy exits.`);
+    return;
+  }
+  // Logout and shutdown deliver the same signal as a manual kill. None of them asks to pause:
+  // an explicit `aos stop` pauses through the bridge, which writes the marker itself.
+  const signal = () => { void supervisor.stop({reason:'signal'}).catch(() => { process.exitCode = 1; }); };
   process.once('SIGINT', signal); process.once('SIGTERM', signal);
   const result = await supervisor.closed;
   process.removeListener('SIGINT', signal); process.removeListener('SIGTERM', signal);

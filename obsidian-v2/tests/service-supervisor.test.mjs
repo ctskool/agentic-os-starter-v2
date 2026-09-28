@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import {spawn} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {startSupervisor, supervisorConfig} from '../runner/service-supervisor.mjs';
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -180,4 +182,67 @@ test('missing executable respects crash budget and records only a bounded error 
 test('invalid config cannot start a service', () => {
   assert.throws(() => supervisorConfig({runtimeDir:'relative', services:[]}));
   assert.throws(() => supervisorConfig({runtimeDir:os.tmpdir(), lockPort:0, services:[]}));
+});
+
+// The cases below run the supervisor as launchd does: a real child process with a config file.
+const supervisorScript = fileURLToPath(new URL('../runner/service-supervisor.mjs', import.meta.url));
+function runSupervisor(configFile) {
+  const child = spawn(process.execPath, [supervisorScript, '--config', configFile], {stdio:['ignore','pipe','pipe']});
+  let stdout = '', stderr = '';
+  child.stdout.on('data', chunk => { stdout += chunk; }); child.stderr.on('data', chunk => { stderr += chunk; });
+  const done = new Promise(resolve => child.once('exit', code => resolve({code, stdout, stderr})));
+  return {child, done};
+}
+const writeConfig = (f, name, config) => { const file = path.join(f.dir, name); fs.writeFileSync(file, JSON.stringify(config)); return file; };
+const events = f => fs.existsSync(path.join(f.config.runtimeDir,'service-supervisor.jsonl'))
+  ? fs.readFileSync(path.join(f.config.runtimeDir,'service-supervisor.jsonl'),'utf8').trim().split('\n').map(JSON.parse) : [];
+
+test('a stop signal ends the monitor with exit 0 and no paused marker, leaving its child running', async t => {
+  const f = await fixture(t);
+  const run = runSupervisor(writeConfig(f, 'config.json', f.config));
+  t.after(() => { try { run.child.kill('SIGKILL'); } catch { /* already gone */ } });
+  await until(async () => (await fetch(`http://127.0.0.1:${f.config.lockPort}/status`).catch(() => null))?.ok, 'monitor listening');
+  await until(async () => (await (await fetch(`http://127.0.0.1:${f.config.lockPort}/status`)).json()).services[0].phase === 'online', 'managed listener');
+  const pid = (await (await fetch(`http://127.0.0.1:${f.config.lockPort}/status`)).json()).services[0].pid;
+  run.child.kill('SIGTERM');
+  const result = await run.done;
+  assert.equal(result.code, 0);
+  assert.equal(fs.existsSync(path.join(f.config.runtimeDir,'services-paused.json')), false);
+  assert.equal(events(f).at(-1).reason, 'signal');
+  assert.doesNotThrow(() => process.kill(pid, 0));
+  // Without a marker, a later start resumes recovery instead of stopping at once.
+  const again = await f.start();
+  await until(() => again.snapshot().services[0].phase === 'online', 'adopted after signal');
+  assert.equal(f.count(), 1);
+});
+
+test('a second copy exits 0 with one log line when our own monitor holds the lock', async t => {
+  const f = await fixture(t); await f.foreign(); await f.start();
+  const before = events(f).length;
+  const result = await runSupervisor(writeConfig(f, 'config.json', f.config)).done;
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /already running/);
+  assert.equal(result.stderr, '');
+  const added = events(f).slice(before);
+  assert.equal(added.length, 1); assert.equal(added[0].event, 'already_running');
+  assert.equal(f.count(), 0);
+});
+
+test('a monitor for another runtime directory on the lock port still makes a new copy exit with an error', async t => {
+  const f = await fixture(t); await f.foreign(); await f.start();
+  const otherRuntime = path.join(f.dir, 'must-not-exist');
+  const result = await runSupervisor(writeConfig(f, 'other.json', {...f.config, runtimeDir:otherRuntime})).done;
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /EADDRINUSE/);
+  assert.equal(fs.existsSync(otherRuntime), false);
+});
+
+test('a stranger on the lock port makes a new copy exit with an error', async t => {
+  const f = await fixture(t);
+  const stranger = http.createServer((req,res) => {res.writeHead(200, {'Content-Type':'application/json'});res.end('{"kind":"something-else"}');});
+  await listen(stranger, f.config.lockPort); f.servers.push(stranger);
+  const result = await runSupervisor(writeConfig(f, 'config.json', f.config)).done;
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /EADDRINUSE/);
+  assert.equal(fs.existsSync(f.config.runtimeDir), false);
 });
