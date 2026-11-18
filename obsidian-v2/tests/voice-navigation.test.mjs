@@ -27,6 +27,8 @@ const stubs={
  './work':`export const workCalls=[];export const workFeed={refresh:async()=>({tasks:[]})};export function syncWorkReply(){}export function openWork(ids=[],spoken=false){workCalls.push({ids,spoken})}export function getWorkSelection(){throw new Error('No request dispatched')}`,
  './bridge-auth':`export function authorizeBridge(){throw new Error('No authorization required')}`,
  '../../obsidian-v2/shared/timezone.mjs':`export const TIME_ZONE=new Intl.DateTimeFormat().resolvedOptions().timeZone;`,
+ // The vault's voice settings (spoken replies, voice, speed); a HUD from before them does not import this.
+ '../../obsidian-v2/shared/voice-prefs':`export const VOICE_RATES=[1],VOICE_SAMPLE='',rateLabel=()=>'',voiceGroups=()=>[];export const createVoicePrefsStore=()=>({getSnapshot:()=>({prefs:{spokenReplies:true,voice:null,rate:1},voices:[],fallback:null,ready:false}),subscribe:()=>()=>{},refresh:async()=>({}),save:async()=>({})})`,
 };
 const jarvis=await load(await build({stdin:{contents:`export {voice} from '../jarvis-v2/lib/voiceClient';export {sessions} from '../../obsidian-v2/shared/voice-session';export {workCalls} from './work';`,loader:'ts',resolveDir:process.cwd()},bundle:true,platform:'node',format:'esm',write:false,plugins:[{name:'voice-navigation-fixture',setup(builder){
  builder.onResolve({filter:/.*/},args=>{if(args.path==='../jarvis-v2/lib/voiceClient')return {path:path.resolve('../jarvis-v2/lib/voiceClient.ts')};if(args.path in stubs)return {path:args.path,namespace:'fixture'};throw new Error('Unexpected voice dependency '+args.path)});

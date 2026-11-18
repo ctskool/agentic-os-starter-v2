@@ -91,6 +91,51 @@ test('this installation\'s own speech service reads as PASS and says it is its o
   for (const name of VOICE) assert.equal(found.line(name).status, 'PASS');
 });
 
+// Member report: every voice check passed while a Portuguese speaker's words were being written down as
+// English, and a correctly working Portuguese voice failed the check because it was only ever spoken to in English.
+const profile = (install, value) => { fs.mkdirSync(path.join(install.vault, 'system', 'v2'), {recursive: true}); fs.writeFileSync(path.join(install.vault, 'system', 'v2', 'profile.json'), JSON.stringify(value)); return install; };
+test('a voice running in the vault\'s language is spoken to, and judged, in that language', async () => {
+  const services = await fakeServices({speech: 'own', echo: true, language: {code: 'pt', wanted: 'pt', error: null}});
+  const found = await examine(services, profile(installation({installed: true}), {speechLanguage: 'pt'}));
+  for (const name of VOICE) assert.equal(found.line(name).status, 'PASS', `${name}: ${found.text}`);
+  assert.match(found.line(VOICE[0]).detail, /hearing and speaking Portuguese \(Brazil\)/);
+  assert.match(found.line(VOICE[2]).detail, /Teste de voz/);
+  assert.equal(found.failed, 0, found.text);
+  // What speech-to-text really returns: digits for the numerals, no accents guaranteed.
+  const digits = await fakeServices({speech: 'own', hears: 'Teste de voz 1, 2, 3.', language: {code: 'pt', wanted: 'pt', error: null}});
+  assert.equal((await examine(digits, profile(installation({installed: true}), {speechLanguage: 'pt'}))).line(VOICE[2]).status, 'PASS');
+  // The same service answering in English words is not "heard back".
+  const wrong = await fakeServices({speech: 'own', hears: 'Voice check 123', language: {code: 'pt', wanted: 'pt', error: null}});
+  assert.equal((await examine(wrong, profile(installation({installed: true}), {speechLanguage: 'pt'}))).line(VOICE[2]).status, 'FAIL');
+});
+
+test('a vault that asks for another language while voice runs in English is a FAIL that says what to run', async () => {
+  // An older service (no language in its health) and one that fell back because the model is missing.
+  for (const [language, because] of [[undefined, /voice is running in English$/], [{code: 'en', wanted: 'pt', error: 'not installed'}, /because the speech model for that language is not installed/]]) {
+    const services = await fakeServices({speech: 'own', ...(language ? {language} : {})});
+    const found = await examine(services, profile(installation({installed: true}), {speechLanguage: 'pt'}));
+    assert.equal(found.line(VOICE[0]).status, 'FAIL', found.text);
+    assert.match(found.line(VOICE[0]).detail, /this vault asks for Portuguese \(Brazil\)/);
+    assert.match(found.line(VOICE[0]).detail, because);
+    assert.match(found.text, /node aos\.mjs stop`, then `node aos\.mjs setup --voice yes/);
+    // The round trip still runs, in the language that is really running, so the member sees what works.
+    assert.equal(found.line(VOICE[1]).status, 'PASS'); assert.equal(found.line(VOICE[2]).status, 'PASS');
+  }
+  const shared = await examine(await fakeServices({speech: 'shared'}), profile(installation({installed: false}), {speechLanguage: 'pt'}));
+  assert.equal(shared.line(VOICE[0]).status, 'FAIL');
+  assert.match(shared.text, /decides its own language/);
+  const unknown = await examine(await fakeServices({speech: 'own'}), profile(installation({installed: true}), {speechLanguage: 'klingon'}));
+  assert.equal(unknown.line(VOICE[0]).status, 'FAIL');
+  assert.match(unknown.line(VOICE[0]).detail, /"klingon", which voice does not support/);
+  assert.match(unknown.text, /one of en, es, fr, it, pt/);
+  // No setting, or English: nothing about language is said and nothing fails.
+  for (const value of [{}, {speechLanguage: 'en'}, {dailyDrivers: ['Inbox triage']}]) {
+    const plain = await examine(await fakeServices({speech: 'own'}), profile(installation({installed: true}), value));
+    for (const name of VOICE) assert.equal(plain.line(name).status, 'PASS', plain.text);
+    assert.doesNotMatch(plain.line(VOICE[0]).detail, /hearing and speaking/);
+  }
+});
+
 test('Mac and Windows shortcut registration uses fresh voice health, without claiming microphone verification', async () => {
   for (const platform of ['darwin', 'win32']) {
     const services = await fakeServices({speech: 'own', hotkey: {enabled: true, combo: 'ctrl+alt+j', ok: false, error: 'Earlier conflict'}});

@@ -75,7 +75,7 @@ test('nothing is launched for a sign-in that is gone, a valid pass, a denial, a 
  for(const [next,name,expected] of [[403,'fake-denied',/denied access/],[429,'fake-limited',/could not be refreshed/],['network','fake-offline',/could not be refreshed/]]){
   code=next;b.write(fresh(name));assert.match((await b.usage()).message,expected,String(next));
  }
- fs.rmSync(b.file);assert.match((await b.usage()).message,/Sign in to Claude Code/);
+ fs.rmSync(b.file);assert.match((await b.usage()).message,/Sign in to Claude Code|No Claude sign-in file was found/);
  assert.equal(b.launches.length,0);
 });
 
@@ -106,7 +106,7 @@ test('success is a renewed credentials file, never an exit status',async t=>{
  assert.equal((await c.usage()).status,'ok','a renewed file counts even when the CLI exits non-zero');assert.equal(c.signin.claudeSignInState().failures,0);
  // A file that is unreadable after the renewal is answered like a missing sign-in, without throwing.
  const d=await bench(t);d.write(stale());d.cli.onLaunch=child=>{d.write('{ not json');child.finish(0)};
- assert.match((await d.usage()).message,/Sign in to Claude Code/);assert.equal(d.signin.claudeSignInState().failures,1);
+ assert.match((await d.usage()).message,/Sign in to Claude Code|No Claude sign-in file was found/);assert.equal(d.signin.claudeSignInState().failures,1);
 });
 
 test('failures back off 10 min, 30 min, 2 h, then 8 h; a changed sign-in starts over; a CLI that cannot start counts',async t=>{

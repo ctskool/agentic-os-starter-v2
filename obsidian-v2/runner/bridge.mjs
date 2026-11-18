@@ -4,7 +4,7 @@ import {readArtifact} from './artifacts.mjs';
 import {artifactOutcomeSpeech} from './artifact-speech.mjs';
 import {WorkAttentionEpisodes} from './work-attention.mjs';
 import {attachVoiceEvents} from './voice-events.mjs';
-import {fastVoiceStatus} from './fast-voice.mjs';
+import {fastVoiceStatus,executeFastVoice,prepareFastVoice} from './fast-voice.mjs';
 import {createJiti} from 'jiti';
 import {readVoiceReport} from './voice-documents.mjs';
 import {getCodexUsage} from './codexUsage.mjs';
@@ -33,6 +33,10 @@ import {createBridgeAuth} from './bridge-auth.mjs';
 import {startLifecycle} from './lifecycle.mjs';
 import {waitForResponseDrain} from './stream-backpressure.mjs';
 import {selectSpokenAnswer} from './spoken-answer.mjs';
+import {speakStreamQuery} from './voice-speed.mjs';
+import {readVoicePrefs,saveVoicePrefs,speakPrefsQuery,voiceChoices} from './voice-prefs.mjs';
+import {writeVoiceWords,saveVoiceWords} from './voice-words.mjs';
+import {scheduleTick,scheduleView,editSchedule} from './schedule.mjs';
 import {completionLabel} from './voice-conversation-cues.mjs';
 const base=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const root=assertVault(configuredVault());
@@ -86,6 +90,19 @@ const origins=new Set(['http://127.0.0.1:3217','http://localhost:3217','http://1
 const uuid=id=>typeof id==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id);
 async function body(req,max=20000){let size=0;const chunks=[];for await(const b of req){size+=b.length;if(size>max)throw new Error('Request too large');chunks.push(b)}return Buffer.concat(chunks)}
 const list=dir=>{const p=vaultPath(root,`${ROOT}/${dir}`);return fs.existsSync(p)?fs.readdirSync(p).filter(n=>n.endsWith('.json')).map(n=>readJson(root,`${ROOT}/${dir}/${n}`,null)).filter(Boolean):[]};
+// Kept up to date for the local voice service: at start, every ten minutes, and whenever the member teaches
+// or forgets a word. A failure here never touches a voice request.
+let voiceWordsNow=null;
+const refreshVoiceWords=()=>{const list=writeVoiceWords(root);return voiceWordsNow={words:list.words,yours:list.yours,learned:list.learned,ignored:list.ignored,learn:list.learn}};
+setTimeout(()=>{try{refreshVoiceWords()}catch{}},3000).unref();
+setInterval(()=>{try{refreshVoiceWords()}catch{}},600000).unref();
+// Scheduled workflows (schedule.mjs): the same background run a dashboard button starts, started by the clock.
+// Nothing is scheduled unless the member added it. A look every half minute; a fault here never reaches a request.
+const scheduleLook=()=>{scheduleTick(root,(job,id)=>terminals.startWorkflow({id,skill:job.skill,args:{},selection:selection(root),execution:'headless',appScope:'web'}))};
+const scheduleTimer=setInterval(scheduleLook,30000);scheduleTimer.unref();
+// And once as soon as the bridge has finished starting, so one that comes up in the last seconds before
+// midnight still catches that day's last job.
+setImmediate(scheduleLook);
 async function speechHealth(){try{const r=await fetch(`${speech}/health`,{signal:AbortSignal.timeout(1500)});return r.ok?await r.json():null}catch{return null}}
 function providerHealth(){return Object.fromEntries(['codex','claude'].map(provider=>[provider,cliStatus(provider)]))}
 function bridgeStatus(){const providers=providerHealth();return {selection:selection(root),health:{ts:new Date().toISOString(),pid:process.pid,busy:[...terminals.live.keys()].some(id=>['working','starting'].includes(terminals.get(id).state)),active:terminals.live.size,pending:0,providers},providers,vault:root}}
@@ -213,13 +230,26 @@ server.on('request',async(req,res)=>{
    if([...terminals.live.keys()].some(id=>terminals.get(id).execution!=='native')||active.size||classifierProcesses().total)return json({error:'Stop active terminal tasks and voice requests first. Saved conversations and message-box drafts are retained.'},409);
    // Persist intent before releasing the port so recovery cannot undo an explicit Stop.
    fs.writeFileSync(path.join(base,'.runtime/services-paused.json'),JSON.stringify({ts:new Date().toISOString(),reason:'idle shutdown request'}));
-   json({ok:true});lifecycle?.stop('idle shutdown request');dropPreparedJev();closeClaudeSignIn();terminals.close();clearInterval(artifactTimer);speechLink.stop();for(const response of listeners.values())response.end();server.close();setTimeout(()=>server.closeAllConnections(),500).unref();return;
+   json({ok:true});lifecycle?.stop('idle shutdown request');dropPreparedJev();closeClaudeSignIn();terminals.close();clearInterval(artifactTimer);clearInterval(scheduleTimer);speechLink.stop();for(const response of listeners.values())response.end();server.close();setTimeout(()=>server.closeAllConnections(),500).unref();return;
   }
   if(url.pathname==='/status'&&req.method==='GET')return json(bridgeStatus());
   if(url.pathname==='/state'&&req.method==='GET')return json({...bridgeStatus(),runs:list('runs').sort((a,b)=>(b.ts_started||'').localeCompare(a.ts_started||'')).slice(0,20),queue:[]});
   if(url.pathname==='/selection'&&req.method==='POST'){const chosen=validateSelection(JSON.parse((await body(req)).toString()));writeJson(root,`${ROOT}/provider.json`,chosen);return json(chosen)}
   if(url.pathname==='/queue'&&req.method==='POST'){const b=JSON.parse((await body(req)).toString());return json(terminals.startWorkflow({id:b.id,skill:b.skill,args:b.args||{},selection:b.selection||selection(root),execution:'headless',appScope}))}
   if(url.pathname==='/report'&&req.method==='GET')return json(readVoiceReport(root,url.searchParams.get('path')||'',list('runs'),list('voice-results')));
+  // How voice sounds in this vault: spoken replies on or off, which voice, how fast. Both screens read and
+  // write it here, so a change on one shows on the other.
+  if(url.pathname==='/voice/prefs'&&req.method==='GET')return json(readVoicePrefs(root));
+  if(url.pathname==='/voice/prefs'&&req.method==='POST')return json(saveVoicePrefs(root,JSON.parse((await body(req)).toString())));
+  // The words voice listens for: learned from the names of this vault's notes, plus the member's own.
+  if(url.pathname==='/schedule'&&req.method==='GET')return json(scheduleView(root));
+  // A save must name the revision it was made from, so a screen holding an old copy cannot undo a pause.
+  // The schedule is sent in its stored shape: {paused, jobs: [{id, skill, at, days, enabled}]}.
+  if(url.pathname==='/schedule'&&req.method==='POST'){const b=JSON.parse((await body(req)).toString());if(typeof b?.revision!=='string'||!b.schedule)throw new Error('Send {revision, schedule}; the revision comes from the last read.');editSchedule(root,()=>b.schedule,{revision:b.revision});return json(scheduleView(root))}
+  // Reading shows the list as last built (at start, every ten minutes, and after a change): it never scans the vault.
+  if(url.pathname==='/voice/words'&&req.method==='GET')return json(voiceWordsNow||refreshVoiceWords());
+  if(url.pathname==='/voice/words'&&req.method==='POST'){saveVoiceWords(root,JSON.parse((await body(req)).toString()));return json(refreshVoiceWords())}
+  if(url.pathname==='/voice/voices'&&req.method==='GET'){let service=null;try{const answer=await fetch(`${speech}/voices`,{signal:AbortSignal.timeout(3000)});if(answer.ok)service=await answer.json()}catch{}return json(voiceChoices(service))}
   if(url.pathname==='/voice/config'){
    if(req.method==='GET')return json(VOICE_MODELS);
    if(req.method==='POST')return json({error:'Voice routing is fixed: Luna for Codex, Haiku for Claude.'},405);
@@ -234,8 +264,17 @@ server.on('request',async(req,res)=>{
   }
   if(url.pathname==='/voice/speak'&&['POST','GET'].includes(req.method)){
    const b=req.method==='GET'?{text:url.searchParams.get('text')}:JSON.parse((await body(req)).toString());if(typeof b.text!=='string'||!b.text.trim()||b.text.length>2000)throw new Error('Invalid speech text');
-   const stop=new AbortController();res.on('close',()=>stop.abort());const out=await fetch(`${speech}/speak?text=${encodeURIComponent(speechText(spokenFlow(selectSpokenAnswer(b.text,{mode:'reply'}))))}`,{signal:AbortSignal.any([stop.signal,AbortSignal.timeout(60000)])});if(!out.ok)throw new Error('Local speech playback is unavailable');
-   res.writeHead(200,{'Content-Type':'audio/wav'});for await(const chunk of out.body){if(res.destroyed)break;if(!res.write(chunk)&&!await waitForResponseDrain(res))break}if(!res.destroyed)res.end();return;
+   // Spoken replies switched off for this vault: no audio is ever sent, whatever a screen believed. The
+   // screens treat this answer as "said, silently".
+   if(!readVoicePrefs(root).spokenReplies)return json({muted:true});
+   const stop=new AbortController();res.on('close',()=>stop.abort());// A GET is the player that plays audio as it arrives: it is sent sentence by sentence (voice-speed.mjs).
+   // A POST is the buffered fallback, which decodes one complete file and keeps getting exactly that.
+   const out=await fetch(`${speech}/speak?text=${encodeURIComponent(speechText(spokenFlow(selectSpokenAnswer(b.text,{mode:'reply'}))))}${speakStreamQuery(req.method)}${speakPrefsQuery(readVoicePrefs(root))}`,{signal:AbortSignal.any([stop.signal,AbortSignal.timeout(60000)])});if(!out.ok)throw new Error('Local speech playback is unavailable');
+   res.writeHead(200,{'Content-Type':'audio/wav'});
+   // A reply that broke off while being spoken is cut, not ended: the player then reports an interruption
+   // instead of treating half a reply as the whole one.
+   try{for await(const chunk of out.body){if(res.destroyed)break;if(!res.write(chunk)&&!await waitForResponseDrain(res))break}}catch{res.destroy();return}
+   if(!res.destroyed)res.end();return;
   }
   if(['/voice/audio','/voice/text'].includes(url.pathname)&&req.method==='POST'){
    const id=req.headers['x-v2-request'];if(!uuid(id))throw new Error('Invalid request ID');
@@ -252,6 +291,7 @@ server.on('request',async(req,res)=>{
    res.on('close',disconnected);if(res.destroyed)disconnected();
    // Persist intent before calling a provider; interrupted requests cannot silently replay after restart.
    const claim=`${ROOT}/voice-requests/${id}.json`;
+   let prepared=null;
    let claimed=false,stage='receiving',diagnostic={id,...chosen,ts:new Date().toISOString(),appScope,source:url.pathname==='/voice/audio'?'audio':'text'};
    // Keep failure evidence with the existing duplicate guard, never in successful
    // voice memory. Diagnostics must not prevent a response or mask its error.
@@ -264,6 +304,9 @@ server.on('request',async(req,res)=>{
     else{
      const audio=await body(req,8*1024*1024);if(audio.length<1000)throw new Error('Recording was too short.');
      stage='transcribing';preconnectJev();try{prepareJev({provider:chosen.provider})}catch{}
+     // The small model's program starts now, so it is already running when the words are ready (voice-speed.mjs).
+     // Like the line above, it can never fail the request: whatever goes wrong here, nothing is started early.
+     try{prepared=prepareFastVoice(root,chosen)}catch{}
      const stt=await fetch(`${speech}/stt`,{method:'POST',headers:{'Content-Type':req.headers['content-type']||'audio/webm'},body:audio,signal:AbortSignal.any([controller.signal,AbortSignal.timeout(30000)])});
      if(!stt.ok)throw new Error('Local transcription failed. Check the V2 speech service.');transcript=(await stt.json()).text;
     }
@@ -277,7 +320,7 @@ server.on('request',async(req,res)=>{
     const client=supplied||hub.live().find(item=>item.id===hub.owner&&item.kind===appScope)?.id;
     const target=artifactTarget(client,chosen.provider,conversationEpoch,appScope);
     stage='routing';recordDiagnostic({});
-    const result=await routeVoice(root,{id,transcript,selection:chosen,terminalMode:!!work,workTarget:work?.targetId||null,conversationEpoch,appScope,origin:req.headers['x-v2-origin']==='test'?'test':'live'},controller.signal,undefined,terminals,{updateCurrent:change=>setCurrent(root,terminals,{...change,scope:appScope}),onDispatch:(taskId,epoch)=>artifacts.bind(taskId,target?{...target,epoch}:null),
+    const result=await routeVoice(root,{id,transcript,selection:chosen,terminalMode:!!work,workTarget:work?.targetId||null,conversationEpoch,appScope,origin:req.headers['x-v2-origin']==='test'?'test':'live'},controller.signal,prepared?(vault,job,prompt,options)=>executeFastVoice(vault,job,prompt,options,{prepared}):undefined,terminals,{updateCurrent:change=>setCurrent(root,terminals,{...change,scope:appScope}),onDispatch:(taskId,epoch)=>artifacts.bind(taskId,target?{...target,epoch}:null),
      // Reopen a registered file on the surface that asked. Bind the task to
      // this surface first: the claim path only serves the current conversation.
      reopenArtifact:({id:requestId,taskId,artifact})=>{
@@ -289,7 +332,7 @@ server.on('request',async(req,res)=>{
      }});
     stage='responding';const response=voiceJson(result);stage='completed';recordDiagnostic({completedAt:new Date().toISOString()});return response;
    }catch(error){recordDiagnostic({error:String(error.message||error).slice(0,1000),failedAt:new Date().toISOString(),cancelled:controller.signal.aborted});throw error}
-   finally{res.off('close',disconnected);active.delete(id)}
+   finally{res.off('close',disconnected);active.delete(id);prepared?.discard()}
   }
   json({error:'Not found'},404);
  }catch(e){if(!res.headersSent)json({error:String(e.message||e),...(typeof e?.code==='string'&&/^TERMINAL_[A-Z_]+$/.test(e.code)?{code:e.code}:{})},400);else res.end()}
@@ -307,4 +350,4 @@ server.on('request',async(req,res)=>{
 }
 process.on('uncaughtExceptionMonitor',error=>lifecycle?.mark('uncaught-exception',{code:error.code||error.name}));
 process.on('exit',code=>{if(code===0)lifecycle?.stop('process exit');else lifecycle?.mark('exit',{exitCode:code})});
-for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{{const open=classifierProcesses();if(open.total)lifecycle?.mark('classifiers-open-at-shutdown',{reason:`running=${open.running} detached=${open.detached}`})}lifecycle?.stop(signal);closeClaudeSignIn();for(const c of active.values())c.abort();drainDetachedClassifiers({timeoutMs:12000}).then(drained=>{if(drained.remaining)console.error(`[shutdown] ${drained.remaining} classifier process(es) did not confirm closure.`)});terminals.close();clearInterval(artifactTimer);speechLink.stop();for(const response of listeners.values())response.end();server.close()});
+for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{{const open=classifierProcesses();if(open.total)lifecycle?.mark('classifiers-open-at-shutdown',{reason:`running=${open.running} detached=${open.detached}`})}lifecycle?.stop(signal);closeClaudeSignIn();for(const c of active.values())c.abort();drainDetachedClassifiers({timeoutMs:12000}).then(drained=>{if(drained.remaining)console.error(`[shutdown] ${drained.remaining} classifier process(es) did not confirm closure.`)});terminals.close();clearInterval(artifactTimer);clearInterval(scheduleTimer);speechLink.stop();for(const response of listeners.values())response.end();server.close()});

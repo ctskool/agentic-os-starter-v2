@@ -14,6 +14,7 @@ import {hasJevKey} from './jev-key.mjs';
 import {terminalSupport, VERIFIED_TERMINAL_VERSIONS, JARVIS_URL} from '../../shared/terminal-support.mjs';
 import {recordedTerminalPython} from '../../runner/terminal-python-record.mjs';
 import {terminalPythonWorks} from './terminal-python.mjs';
+import {SPEECH_LANGUAGES, SPEECH_LANGUAGE_CODES, speechLanguage, speechCheck} from '../../shared/speech-language.mjs';
 
 const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; } };
 const SUPERVISOR_LOG = 'obsidian-v2/.runtime/service-supervisor.jsonl';
@@ -217,7 +218,18 @@ export async function doctor({root = projectRoot, ci = false, full = false, phas
       add('FAIL', VOICE_CHECKS[0], problem.detail, problem.fix, {optional: true}); return;
     }
     const whose = own ? `this installation's own service on ${ports.speech}` : `shared service at ${speechUrl}, run by another program on this computer`;
-    add('PASS', VOICE_CHECKS[0], `${probe.data.engine ? probe.data.engine + ', ' : ''}${whose}`);
+    // The language the service is REALLY running (an older or shared service reports none: English),
+    // against the one this vault asks for. A wrong language is not a hiccup: the English-only model
+    // writes down English-looking words for any other language, and every check below would still pass.
+    const running = probe.data.speech?.language, runningCode = Object.hasOwn(SPEECH_LANGUAGES, running?.code) ? running.code : 'en';
+    const want = speechLanguage(vault), runningName = SPEECH_LANGUAGES[runningCode].name;
+    if (!want.known) add('FAIL', VOICE_CHECKS[0], `"speechLanguage" in system/v2/profile.json is "${want.asked}", which voice does not support; it is running in ${runningName}`,
+      `Set it to one of ${SPEECH_LANGUAGE_CODES.join(', ')} (or remove the line for English), then run \`node aos.mjs stop\` and \`node aos.mjs setup --voice yes\`.`, {optional: true});
+    else if (want.code !== runningCode) add('FAIL', VOICE_CHECKS[0], `this vault asks for ${SPEECH_LANGUAGES[want.code].name}, but voice is running in ${runningName}${running?.error ? ' because the speech model for that language is not installed' : ''}`,
+      own ? 'Run `node aos.mjs stop`, then `node aos.mjs setup --voice yes`: it fetches what is missing and starts voice in that language.' : `The shared speech service at ${speechUrl} decides its own language; "speechLanguage" only applies to this installation's own voice.`, {optional: true});
+    else add('PASS', VOICE_CHECKS[0], `${probe.data.engine ? probe.data.engine + ', ' : ''}${whose}${runningCode === 'en' ? '' : ', hearing and speaking ' + runningName}`);
+    // Say and expect the language that is running, so a working non-English voice is not reported broken.
+    const check = speechCheck(runningCode);
     // Use the fresh health response: provider sign-in and model loading can outlive
     // the initial /services snapshot. Registration is not proof of microphone access.
     const hotkey = probe.data.speech?.hotkey;
@@ -233,12 +245,12 @@ export async function doctor({root = projectRoot, ci = false, full = false, phas
     }
     // The same two calls the bridge makes, against the same service, own or shared.
     const repair = own ? 'Run `node aos.mjs setup --voice yes` again to repair the voice files.' : `The shared speech service at ${speechUrl} answers its health check but cannot do this; restart the program that runs it.`;
-    const spoken = await request(`${speechUrl}/speak?text=${encodeURIComponent('Voice check, one two three.')}`, {timeoutMs: 60000});
+    const spoken = await request(`${speechUrl}/speak?text=${encodeURIComponent(check.phrase)}`, {timeoutMs: 60000});
     if (!spoken.ok || spoken.body.length < 5000) { add('FAIL', VOICE_CHECKS[1], `status ${spoken.status}, ${spoken.body.length} bytes`, repair, {optional: true}); return; }
     add('PASS', VOICE_CHECKS[1], `${Math.round(spoken.body.length / 1024)} KB of audio`);
     const heard = await request(`${speechUrl}/stt`, {method: 'POST', headers: {'Content-Type': 'audio/wav'}, body: spoken.body, timeoutMs: 120000});
     let text = ''; try { text = heard.ok ? String(JSON.parse(heard.body.toString('utf8')).text || '') : ''; } catch { /* not JSON */ }
-    add(/voice|check|one|two|three/i.test(text) ? 'PASS' : 'FAIL', VOICE_CHECKS[2], heard.ok ? text.slice(0, 60) || 'heard nothing' : `status ${heard.status}`, repair, {optional: true});
+    add(check.heard(text) ? 'PASS' : 'FAIL', VOICE_CHECKS[2], heard.ok ? text.slice(0, 60) || 'heard nothing' : `status ${heard.status}`, repair, {optional: true});
   }, {optional: true});
 
   if (!hasJevKey(at.runtime)) add('SKIP', 'Jev fast voice routing', 'no OpenRouter key saved (optional: `node aos.mjs jev-key`)');

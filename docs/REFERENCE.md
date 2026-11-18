@@ -17,6 +17,8 @@ Run commands from the starter's top-level folder. For guided installation, use t
 | `node aos.mjs jev-key` | Add or replace an OpenRouter key through a local browser page. |
 | `node aos.mjs autostart on\|off` | Enable or disable starting this installation at login. |
 | `node aos.mjs dashboard` | Manage dashboard choices; see [personalization commands](DASHBOARD.md). |
+| `node aos.mjs schedule` | Run a bundled workflow by itself at a set time, for example `schedule add plan-today 07:00 --days weekdays`. Nothing is scheduled until you add it; `node aos.mjs schedule help` explains the rules. |
+| `node aos.mjs voice` | Show and change how voice sounds (mute, voice, speed), how fast it answers, and the words it listens for. `node aos.mjs voice help` lists the choices; the same settings are in the voice menu on both screens. |
 
 Doctor prints **PASS**, **FAIL**, **WAIT** or **SKIP**, with reasons. Any FAIL produces exit code 1; the summary distinguishes core failures from optional features that need attention. Its speech round trip tests generated audio, not your microphone. See [Mac voice checks](MAC-VOICE.md) for app permissions and shortcut testing.
 

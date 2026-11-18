@@ -7,7 +7,8 @@ import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {projectRoot} from '../../runner/runtime.mjs';
 import {listener, processInfo, samePath, tryJson, fetchJson, sleep} from './platform.mjs';
-import {autostartOwner, kickAutostart, refreshAutostartPolicy} from './autostart.mjs';
+import {autostartOwner, kickAutostart, refreshAutostartPolicy, loginItemNeedsSpeedFix, enableAutostart} from './autostart.mjs';
+import {speechLanguage, speechArguments} from '../../shared/speech-language.mjs';
 
 export const PORTS = {jarvis: 3217, preview: 3218, bridge: 3219, speech: 3220, supervisor: 3221};
 const local = port => `http://127.0.0.1:${port}`;
@@ -29,11 +30,11 @@ export const configuredVaultPath = at => fs.existsSync(at.vaultFile) ? readJson(
 export const speechInstalled = at => fs.existsSync(at.speechPython) && ['kokoro-v1.0.onnx', 'voices-v1.0.bin'].every(name => fs.existsSync(path.join(at.speechAssets, name)));
 
 // Pure: the list of services the monitor should keep alive.
-export function desiredServices(at, {node = process.execPath, speechUrl = null, vault = null, jarvisBuilt = false, ownSpeech = false} = {}) {
+export function desiredServices(at, {node = process.execPath, speechUrl = null, vault = null, jarvisBuilt = false, ownSpeech = false, language = 'en'} = {}) {
   const env = {...(speechUrl ? {AOS_V2_SPEECH_URL: speechUrl} : {}), ...(vault ? {AOS_V2_VAULT: vault} : {})};
   const services = [{id: 'bridge', port: PORTS.bridge, command: node, args: [at.bridge], cwd: at.root, env}];
   if (jarvisBuilt) services.push({id: 'jarvis', port: PORTS.jarvis, command: node, args: [at.next, 'start', '--hostname', '127.0.0.1', '--port', String(PORTS.jarvis)], cwd: at.jarvis});
-  if (ownSpeech) services.push({id: 'speech', port: PORTS.speech, command: at.speechPython, args: ['-u', at.speechScript, '--assets', at.speechAssets], cwd: at.root});
+  if (ownSpeech) services.push({id: 'speech', port: PORTS.speech, command: at.speechPython, args: ['-u', at.speechScript, '--assets', at.speechAssets, ...speechArguments(language)], cwd: at.root});
   return services;
 }
 
@@ -101,11 +102,20 @@ export async function start({root = projectRoot, resetRecovery = false, log = co
   }
   if (resetRecovery) fs.rmSync(at.recoveryState, {force: true});
   const voice = await speechPlan(at);
-  let services = desiredServices(at, {speechUrl: voice.url, vault: configuredVaultPath(at), jarvisBuilt: fs.existsSync(at.buildId), ownSpeech: voice.own});
+  let services = desiredServices(at, {speechUrl: voice.url, vault: configuredVaultPath(at), jarvisBuilt: fs.existsSync(at.buildId), ownSpeech: voice.own, language: speechLanguage(configuredVaultPath(at)).code});
   if (supervisor && services.some(service => !supervisor.services.some(known => known.id === service.id))) {
     // Reconfigure the monitor alone when an existing installation adds a service.
     atomicWrite(at.pause, '{"reason":"recovery services changed"}');
     if (!await waitForSupervisorExit()) throw new Error('The recovery monitor is still reconfiguring; try again shortly.');
+    supervisor = null;
+  }
+  // An old Mac login item (background priority) is replaced below. Its monitor leaves first, through the
+  // pause marker, exactly as `autostart on` hands over.
+  // Ours on disk AND as launchd has it loaded: a job that is foreign, or cannot be read, is never paused or replaced.
+  const slowLoginItem = loginItemNeedsSpeedFix(at) && autostartOwner(at) === 'ours';
+  if (slowLoginItem && supervisor) {
+    atomicWrite(at.pause, '{"reason":"login item change"}');
+    if (!await waitForSupervisorExit()) throw new Error('The recovery monitor is still pausing; try again shortly.');
     supervisor = null;
   }
   if (!supervisor) {
@@ -113,6 +123,9 @@ export async function start({root = projectRoot, resetRecovery = false, log = co
     atomicWrite(at.config, JSON.stringify({runtimeDir: at.runtime, lockPort: PORTS.supervisor, services}, null, 1));
   }
   fs.rmSync(at.pause, {force: true});
+  // Only now, with the new configuration written and no marker: the job launchd loads during the swap
+  // starts at once, reads that configuration and stays launchd's own.
+  if (slowLoginItem) replaceSlowLoginItem(at, {log, clearMarker: () => fs.rmSync(at.pause, {force: true})});
   // Before the "already running" return, so installations that are up right now are repaired too.
   refreshLoginItem(at, {log});
   if (supervisor) { log('Recovery is already running. Existing services and conversations were retained.'); return {started: false}; }
@@ -126,9 +139,28 @@ export function refreshLoginItem(at, {log = console.log, refresh = refreshAutost
   catch (error) { log(`-> Start at login: could not update the Windows login task (${String(error.message || error).slice(0, 200)}). Services still start now; run \`node aos.mjs autostart on\` later.`); }
 }
 
+// macOS login items written before the speed fix run the monitor, and every service it starts, at
+// background priority (speech about eight times slower). Ours only; the caller has already let the old
+// monitor leave. Services and conversations keep running throughout. A failure never blocks the start
+// that follows: its direct-start fallback still brings the monitor up.
+// clearMarker runs after the swap: a monitor from before the restart fix writes the pause marker when
+// launchd unloads it, and that marker would otherwise stop the new one at once.
+export function replaceSlowLoginItem(at, {log = console.log, enable = enableAutostart, clearMarker = () => {}} = {}) {
+  try {
+    enable(at);
+    log('-> Start at login: updated the Mac login item so the system runs at normal speed (voice was about eight times slower). Services that were already running pick this up after `node aos.mjs stop` and `node aos.mjs start`, or the next time the Mac restarts.');
+    return true;
+  } catch (error) {
+    log(`-> Start at login: could not update the Mac login item (${String(error.message || error).slice(0, 200)}). Services still start now; run \`node aos.mjs autostart on\` later.`);
+    return false;
+  } finally { clearMarker(); }
+}
+
 // A login item owns the monitor when one is installed, so it survives this shell. When the kicked
 // login item does not bring the monitor up (a task Windows refused to run, a stale LaunchAgent), the
-// monitor is started directly; its exclusive lock makes a late login-item start exit harmlessly.
+// monitor is started directly. A late login-item start then finds our monitor holding 3221 and exits
+// normally (code 0), so launchd does not keep retrying it; a stranger on the port still makes it exit
+// with an error.
 export async function launchMonitor(at, {log = console.log, owner = autostartOwner(at), kick = kickAutostart, spawnMonitor, status = supervisorStatus, wait = sleep, kickGraceAttempts = 12, attempts = 24} = {}) {
   if (loginItemBlocks(owner)) throw new Error('A different installation owns the start-at-login item, so two copies would fight at the next login. Turn it off from that installation first (`node aos.mjs autostart off` in its folder). Nothing was started.');
   spawnMonitor ||= () => spawn(process.execPath, [at.supervisor, '--config', at.config], {cwd: at.root, detached: true, windowsHide: true, stdio: 'ignore'}).unref();

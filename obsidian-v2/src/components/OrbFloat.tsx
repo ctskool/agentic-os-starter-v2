@@ -10,6 +10,7 @@ import GalaxyCore from './GalaxyCore';
 import {GraphCore} from './GraphCore';
 import {workFeed,workTarget,chooseWork,openWork,workConversations,setWorkProvider,type WorkTask} from '../lib/work';
 import {shortConversationTitle} from '../../shared/work-presentation';
+import {createVoicePrefsStore,voiceGroups,VOICE_RATES,rateLabel,VOICE_SAMPLE,type VoicePrefs,type VoicePrefsSnapshot} from '../../shared/voice-prefs';
 export function OrbFloat({plugin,surfaceKind='native'}:{plugin:ChaseCommandCenter;surfaceKind?:'web'|'native'}){
  const state=useProvider(plugin.app);
  const clampPosition=(right:number,bottom:number)=>({right:Math.max(4,Math.min(right,document.documentElement.clientWidth-128)),bottom:Math.max(4,Math.min(bottom,document.documentElement.clientHeight-152))});
@@ -56,6 +57,13 @@ export function OrbFloat({plugin,surfaceKind='native'}:{plugin:ChaseCommandCente
  const selectionRef=useRef(state.selection);selectionRef.current=state.selection;
  const previousProvider=useRef(state.selection.provider);
  const voice=useMemo(()=>new VoiceSession(v2VoiceTransport,async()=>{const chosen={...selectionRef.current};await assertVoiceVault(plugin.app);return workConversations.getSelection(chosen)},surfaceKind,{version:plugin.manifest?.version,heartbeat:surfaceKind==='native'?plugin.voiceHeartbeat:undefined}),[plugin,surfaceKind]);
+ // How voice sounds in this vault (spoken replies on or off, voice, speed), shared with the web app.
+ const voicePrefs=useMemo(()=>createVoicePrefsStore(v2VoiceTransport),[]);
+ const [sound,setSound]=useState<VoicePrefsSnapshot>(()=>voicePrefs.getSnapshot());
+ // The session is told at once, so the very next reply follows the setting.
+ // Switching them off stops a reply that is loading or being spoken (voice-session.ts).
+ useEffect(()=>voicePrefs.subscribe(next=>{const off=next.ready&&!next.prefs.spokenReplies;if(off!==voice.muted)voice.setMuted(off);setSound(next)}),[voice,voicePrefs]);
+ const saveSound=(changes:Partial<VoicePrefs>,sample=false)=>{void voicePrefs.save(changes).then(()=>{if(sample&&voice.mode==='idle'&&!voice.muted)voice.enqueue(VOICE_SAMPLE)}).catch(e=>{setMessage(String(e?.message||e));setError(true)})};
  // The recording command can mount the orb and dispatch its toggle immediately.
  useLayoutEffect(()=>{
   let alive=true,checkingCompletions=false;
@@ -104,6 +112,11 @@ export function OrbFloat({plugin,surfaceKind='native'}:{plugin:ChaseCommandCente
     <div className="v2-voice-conversation-heading"><label htmlFor="v2-voice-conversation">Conversation</label><button type="button" disabled={active} onClick={()=>chooseConversation(null)}>+ New conversation</button></div>
     <select id="v2-voice-conversation" ref={conversationRef} aria-label="Voice conversation" title={selectedTask?.title||undefined} value={target||''} disabled={active} onChange={e=>chooseConversation(e.currentTarget.value||null)}><option value="">New conversation</option>{target&&!selectedTask&&<option value={target}>Conversation unavailable</option>}{tasks.filter(t=>t.provider===voiceProvider&&!['script','headless'].includes(t.execution||'')).map(t=><option key={t.id} value={t.id} title={t.title}>{shortConversationTitle(t)}</option>)}</select>
    </div>
+   {sound.ready&&<div className="v2-voice-sound">
+    <button type="button" className="v2-voice-mute" aria-pressed={!sound.prefs.spokenReplies} title="Replies are still written here, and hearing you keeps working." onClick={()=>saveSound({spokenReplies:!sound.prefs.spokenReplies})}><span>Spoken replies</span><strong>{sound.prefs.spokenReplies?'On':'Off'}</strong></button>
+    {sound.voices.length>0&&<label>Voice<select aria-label="Voice" disabled={active} value={sound.prefs.voice||sound.fallback||''} onChange={e=>saveSound({voice:e.currentTarget.value===sound.fallback?null:e.currentTarget.value},true)}>{voiceGroups(sound.voices).map(set=><optgroup key={set.group} label={set.group}>{set.voices.map(choice=><option key={choice.id} value={choice.id}>{choice.name}</option>)}</optgroup>)}</select></label>}
+    <label>Speed<select aria-label="Speaking speed" disabled={active} value={String(sound.prefs.rate)} onChange={e=>saveSound({rate:Number(e.currentTarget.value)},true)}>{(VOICE_RATES.includes(sound.prefs.rate)?VOICE_RATES:[...VOICE_RATES,sound.prefs.rate].sort((a,b)=>a-b)).map(rate=><option key={rate} value={String(rate)}>{rateLabel(rate)}</option>)}</select></label>
+   </div>}
    <form onSubmit={e=>{e.preventDefault();if(text.trim()&&voiceMode!=='working'&&voiceMode!=='listening'){setError(false);void voice.sendText(text);setText('')}}}>
     <input aria-label="Type a voice request" placeholder="Ask or continue…" value={text} maxLength={4000} onInput={e=>setText(e.currentTarget.value)}/><button type="submit" disabled={!text.trim()||voiceMode==='working'||voiceMode==='listening'}>Send</button>
    </form>

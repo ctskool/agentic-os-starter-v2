@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, access } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -13,6 +13,10 @@ let cached = null, cachedRejected = false, identity = '', nextRead = 0;
 let inflight = null;
 // Absolute, so this reader and the renewing CLI (which runs elsewhere) open the same credentials file.
 const configDir = () => process.env.CLAUDE_CONFIG_DIR ? path.resolve(process.env.CLAUDE_CONFIG_DIR) : null;
+// On a Mac, Claude Code keeps its sign-in in the Keychain, so this file never exists there. This reader does
+// not open the Keychain (that would prompt the member for access to a secret), so it says so plainly.
+const credentialsOnDisk = async () => { try { await access(path.join(configDir() || path.join(homedir(), '.claude'), '.credentials.json')); return true; } catch { return false; } };
+export const KEYCHAIN_MESSAGE = 'No Claude sign-in file was found. On a Mac, Claude Code keeps its sign-in in the Keychain, which this meter does not read, so the meter stays blank even when you are signed in. Type /usage in Claude Code to see your usage.';
 async function readAuth() {
     try {
         const auth = JSON.parse(await readFile(path.join(configDir() || path.join(homedir(), '.claude'), '.credentials.json'), 'utf8')).claudeAiOauth;
@@ -75,7 +79,7 @@ function sharedRead(auth, renewalMessage) {
 }
 // wait:true (the meter) may wait for a renewal and then shows the reading in the same call; wait:false (voice) starts
 // or joins the renewal and answers at once. One overall budget per call: every step gets what is left of it.
-export async function getClaudeUsage({ wait = true, signal, renew = renewClaudeSignIn, budgetMs = 22000, renewWaitMs = 10000, read = readAuth } = {}) {
+export async function getClaudeUsage({ wait = true, signal, renew = renewClaudeSignIn, budgetMs = 22000, renewWaitMs = 10000, read = readAuth, platform = process.platform, onDisk = credentialsOnDisk } = {}) {
     const started = performance.now(), left = () => budgetMs - (performance.now() - started);
     // The caller ran out of patience or went away: answered from what is known, nothing further is started.
     const timedOut = () => ({ status: cached?.windows.length ? 'stale' : 'unavailable', checkedAt: cached?.checkedAt || null, windows: cached?.windows || [], message: 'Claude account usage is taking longer than usual. Try again in a moment.' });
@@ -90,7 +94,7 @@ export async function getClaudeUsage({ wait = true, signal, renew = renewClaudeS
             cached = null;
             cachedRejected = false;
             nextRead = 0;
-            return { status: 'unavailable', checkedAt: null, windows: [], message: 'Claude CLI account sign-in is unavailable. Sign in to Claude Code to read plan usage.' };
+            return { status: 'unavailable', checkedAt: null, windows: [], message: platform === 'darwin' && !await onDisk() ? KEYCHAIN_MESSAGE : 'Claude CLI account sign-in is unavailable. Sign in to Claude Code to read plan usage.' };
         }
         if (auth.key !== identity) {
             identity = auth.key;

@@ -25,6 +25,8 @@ const stubs={
  GalaxyCore:`export default function GalaxyCore(){}`,
  GraphCore:`export function GraphCore(){}`,
  'shared/work-presentation':`export const shortConversationTitle=value=>value`,
+ // The vault's voice settings (spoken replies, voice, speed); the orb only subscribes here.
+ 'shared/voice-prefs':`export const VOICE_RATES=[1],VOICE_SAMPLE='',rateLabel=()=>'',voiceGroups=()=>[];export const createVoicePrefsStore=()=>({getSnapshot:()=>({prefs:{spokenReplies:true,voice:null,rate:1},voices:[],fallback:null,ready:false}),subscribe:()=>()=>{},refresh:async()=>({}),save:async()=>({})})`,
  'shared/voice-session':`export const sessions=[];export class VoiceSession{constructor(){this.mode='idle';this.toggles=0;this.connected=false;this.destroyed=false;this.getLevel=()=>null;sessions.push(this)}connect(){this.connected=true}async toggle(){this.toggles++;this.mode='listening';this.onState?.(this.mode)}async destroy(){this.destroyed=true}cancelArtifact(){}cancel(){this.mode='idle'}}`,
 };
 const result=await build({stdin:{contents:`export {default as TestedPlugin} from './src/main';export {sessions} from './shared/voice-session';export {flushPassive} from 'preact/hooks';`,resolveDir:process.cwd(),loader:'ts'},bundle:true,platform:'node',format:'esm',jsxFactory:'h',write:false,plugins:[{name:'orb-start-fixture',setup(builder){

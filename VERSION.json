@@ -1,6 +1,6 @@
 {
- "plugin": "0.3.64",
- "hud": "2.0.0-preview.28",
- "bridgeCommit": "70c3972",
- "hudCommit": "f1d08b9"
+ "plugin": "0.3.66",
+ "hud": "2.0.0-preview.30",
+ "bridgeCommit": "8ac5199",
+ "hudCommit": "d7c2266"
 }

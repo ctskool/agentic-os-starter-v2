@@ -16,6 +16,8 @@ const xml = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').
 
 // Pure. launchd starts jobs with a bare PATH, so the one captured at install
 // time (node, homebrew, the CLIs) travels with the job.
+// ProcessType is Interactive on purpose. "Background" puts the monitor, and every service it starts,
+// on the efficiency cores at low priority: a member measured speech at 3.34 s instead of 0.39 s.
 export function launchAgentPlist({node, supervisor, config, cwd, pathEnv, log}) {
   const strings = [node, supervisor, '--config', config].map(value => `    <string>${xml(value)}</string>`).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -31,7 +33,7 @@ ${strings}
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>AbandonProcessGroup</key><true/>
-  <key>ProcessType</key><string>Background</string>
+  <key>ProcessType</key><string>Interactive</string>
   <key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(pathEnv)}</string></dict>
   <key>StandardErrorPath</key><string>${xml(log)}</string>
 </dict>
@@ -132,6 +134,14 @@ export function refreshAutostartPolicy(at, {platform = process.platform, run = s
   return true;
 }
 
+// macOS only. Pure: true for OUR login item written before the speed fix (ProcessType Background).
+export const plistNeedsSpeedFix = (text, at) => monitorArguments(plistArguments(text), at) && /<key>ProcessType<\/key>\s*<string>Background<\/string>/.test(String(text || ''));
+// Reads the file on disk only; a missing, unreadable or foreign login item is never "ours to fix".
+export function loginItemNeedsSpeedFix(at, {platform = process.platform, home = os.homedir(), read = fs.readFileSync, exists = fs.existsSync} = {}) {
+  if (platform !== 'darwin') return false;
+  try { return exists(agentFile(home)) && plistNeedsSpeedFix(read(agentFile(home), 'utf8'), at); } catch { return false; }
+}
+
 // Ask the login item to run the monitor now. False = caller starts it directly.
 // Callers check autostartOwner(...) === 'ours' first.
 export function kickAutostart(at, {platform = process.platform, run = spawnSync} = {}) {
@@ -173,5 +183,6 @@ export function disableAutostart(at, {platform = process.platform, run = spawnSy
   // Removing the file first means a later login cannot start it even if bootout fails.
   fs.rmSync(agentFile(home), {force: true});
   if (typeof loadedAgent(run) === 'string') run('launchctl', ['bootout', `${domain()}/${AGENT_LABEL}`], {timeout: 10000});
-  return 'macOS login item removed. Its monitor was stopped, which pauses recovery; run `node aos.mjs start` to resume.';
+  // The monitor leaves on that signal without pausing (a logout sends the same one), so say what is true now.
+  return 'macOS login item removed. Running services were left alone, but its monitor was stopped, so nothing restarts a service that stops; run `node aos.mjs start` to bring the monitor back.';
 }

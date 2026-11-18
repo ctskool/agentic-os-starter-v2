@@ -6,6 +6,7 @@ import {spawnSync} from 'node:child_process';
 import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import {which} from './platform.mjs';
+import {SPEECH_LANGUAGES} from '../../shared/speech-language.mjs';
 
 const RELEASE = 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0';
 export const SPEECH_ASSETS = [{name: 'kokoro-v1.0.onnx', minBytes: 200e6}, {name: 'voices-v1.0.bin', minBytes: 10e6}];
@@ -105,7 +106,7 @@ async function download(url, target, minBytes, log) {
   fs.renameSync(part, target);
 }
 
-export async function setupSpeech(at, {log = console.log, run = spawnSync, find = options => findPython({run, ...options})} = {}) {
+export async function setupSpeech(at, {log = console.log, run = spawnSync, find = options => findPython({run, ...options}), language = 'en'} = {}) {
   const step = (label, command, args, timeout) => {
     log(`  ${label}`);
     const result = run(command, args, {encoding: 'utf8', timeout, windowsHide: true, cwd: at.root, maxBuffer: 32 * 1024 * 1024});
@@ -125,7 +126,15 @@ export async function setupSpeech(at, {log = console.log, run = spawnSync, find 
   fs.mkdirSync(at.speechAssets, {recursive: true});
   for (const asset of SPEECH_ASSETS) await download(`${RELEASE}/${asset.name}`, path.join(at.speechAssets, asset.name), asset.minBytes, log);
   // The service loads Whisper with local_files_only, so the model is fetched once here.
-  step('fetching the speech-recognition model (about 460 MB the first time)', at.speechPython,
-    ['-c', "from faster_whisper import WhisperModel; WhisperModel('small.en', device='cpu', compute_type='int8'); print('ready')"], 40 * 60 * 1000);
+  // English is always fetched: it is what the service falls back to. Another language adds its own model.
+  const models = [...new Set(['small.en', SPEECH_LANGUAGES[language]?.whisper || 'small.en'])];
+  for (const model of models) {
+    const fetch = () => step(model === 'small.en' ? 'fetching the speech-recognition model (about 460 MB the first time)' : `fetching the speech-recognition model for ${SPEECH_LANGUAGES[language].name} (about 460 MB the first time)`, at.speechPython,
+      ['-c', `from faster_whisper import WhisperModel; WhisperModel('${model}', device='cpu', compute_type='int8'); print('ready')`], 40 * 60 * 1000);
+    if (model === 'small.en') { fetch(); continue; }
+    // The other language is an extra. Without its model voice still works, in English, and the doctor says so.
+    try { fetch(); }
+    catch (error) { log(`  could not fetch the speech model for ${SPEECH_LANGUAGES[language].name} (${String(error.message || error).slice(0, 200)}). Voice will hear and speak English until \`node aos.mjs setup --voice yes\` succeeds.`); }
+  }
   return true;
 }

@@ -4191,6 +4191,11 @@
 .v2-voice-float .v2-voice-panel .v2-voice-close { min-width:28px; min-height:28px; padding:2px; border-color:transparent; color:var(--voice-muted); font-size:18px; }
 .v2-voice-panel label { display:grid; grid-template-columns:minmax(0,1fr); gap:6px; margin:14px 0 8px; color:var(--voice-muted); font-size:12px; }
 .v2-voice-conversation { margin:14px 0 8px; }
+.v2-voice-sound { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:0 8px; margin:12px 0 14px; padding-top:12px; border-top:1px solid var(--voice-edge); }
+.v2-voice-float .v2-voice-sound .v2-voice-mute { grid-column:1 / -1; justify-content:space-between; width:100%; }
+.v2-voice-float .v2-voice-sound .v2-voice-mute strong { font-weight:600; color:var(--voice-accent); }
+.v2-voice-float .v2-voice-sound .v2-voice-mute[aria-pressed="true"] strong { color:var(--voice-muted); }
+.v2-voice-sound label { margin:10px 0 0; }
 .v2-voice-conversation-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:4px 8px; margin-bottom:6px; }
 .v2-voice-conversation-heading label { margin:0; }
 .v2-voice-float .v2-voice-conversation-heading button { padding:3px 0; min-height:28px; border-color:transparent; color:var(--voice-accent); font-size:12px; }

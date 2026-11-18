@@ -113,9 +113,21 @@ test('Haiku and Luna preserve the full prompt, original job, options and CLI res
   const options={system,user,signal:controller.signal,timeoutMs:4321,onStdout:()=>{}},answer={text:'{"tier":2,"reply":"Answer"}',stderr:'fixture diagnostics'};
   let calls=0;
   const output=await executeFastVoice(root,job,prompt,options,{async cli(receivedRoot,receivedJob,text,receivedOptions){
-   calls++;assert.equal(receivedRoot,root);assert.equal(receivedJob,job);assert.equal(text,prompt);assert.equal(receivedOptions,options);assert.equal(receivedOptions.signal,controller.signal);return answer;
+   calls++;assert.equal(receivedRoot,root);assert.equal(receivedJob,job);assert.equal(text,prompt);for(const name of Object.keys(options))assert.equal(receivedOptions[name],options[name],name);assert.equal(receivedOptions.early,true);assert.equal(typeof receivedOptions.onDetached,'function');return answer;
   }});
   assert.equal(calls,1);assert.equal(output,answer);
+  // An older CLI refuses the streaming arguments: asked once more the old way, and not streamed again.
+  const refused=new Set(),attempts=[];
+  const older=async(_root,_job,_text,receivedOptions)=>{attempts.push(receivedOptions.early===true);if(receivedOptions.early)throw Object.assign(new Error('claude exited 1'),{streamUnsupported:true});return answer};
+  assert.equal(await executeFastVoice(root,job,prompt,options,{cli:older,unsupported:refused}),answer);
+  assert.equal(await executeFastVoice(root,job,prompt,options,{cli:older,unsupported:refused}),answer);
+  assert.deepEqual(attempts,[true,false,false],'one streamed attempt, one retry, then the old way directly');
+  // Any other failure is reported once and never retried.
+  let failures=0;await assert.rejects(executeFastVoice(root,job,prompt,options,{unsupported:new Set(),cli:async()=>{failures++;throw new Error('rate limited')}}),/rate limited/);assert.equal(failures,1);
+  // While several stopped programs are still closing, the next request waits for its program the old way.
+  await executeFastVoice(root,job,prompt,options,{unsupported:new Set(),processes:()=>({total:4}),async cli(_root,_job,_text,receivedOptions){assert.equal(receivedOptions,options);return answer}});
+  // Switched off, the launcher receives the caller's options untouched.
+  await executeFastVoice(root,job,prompt,options,{speed:()=>({earlyAnswer:false}),async cli(_root,_job,_text,receivedOptions){assert.equal(receivedOptions,options);return answer}});
  });
 });
 

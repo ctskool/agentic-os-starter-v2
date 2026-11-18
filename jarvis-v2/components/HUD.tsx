@@ -5,7 +5,10 @@ import {SKILLS} from '../../obsidian-v2/shared/contract.mjs';
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { VaultState, Metric } from "@/lib/vault";
-import { voice } from "@/lib/voiceClient";
+import { voice, voicePrefs } from "@/lib/voiceClient";
+import {scheduleNote} from '@/lib/schedule-note';
+import type {ScheduleNote} from '../../obsidian-v2/shared/schedule-note';
+import {voiceGroups,VOICE_RATES,rateLabel,type VoicePrefs,type VoicePrefsSnapshot} from '../../obsidian-v2/shared/voice-prefs';
 import {useAgentWork} from '@/lib/useAgentWork';
 import {getWorkSelection,openWork,setWorkProvider,type WorkTask} from '@/lib/work';
 import {dashboardEntries,dashboardSkillsStore,launchInstalledSkill,skillUnavailable,type DashboardProvider,type DashboardState} from '@/lib/dashboard-skills';
@@ -286,6 +289,9 @@ function CommandDeck({
   const [queueError,setQueueError] = useState("");
   const [browsing,setBrowsing]=useState(false);
   const [customizing,setCustomizing]=useState(false);
+  // What is scheduled to run by itself (read-only here; changed with `node aos.mjs schedule`).
+  const [schedule,setSchedule]=useState<ScheduleNote>(()=>scheduleNote.getSnapshot());
+  useEffect(()=>scheduleNote.subscribe(setSchedule),[]);
   const [preferences,setPreferences]=useState<DashboardState>(dashboardSkillsStore.getSnapshot());
   useEffect(()=>dashboardSkillsStore.subscribe(setPreferences),[]);
   const catalog=preferences.data.catalog;
@@ -359,6 +365,8 @@ function CommandDeck({
       {queueError && <p className="voice-message" role="alert">{queueError}</p>}
       {(preferences.error||preferences.data.error)&&<p className="voice-message" role="alert">Dashboard preferences: {preferences.error||preferences.data.error}{preferences.error&&!preferences.loaded?' · Showing default shortcuts.':preferences.error?' · Showing last loaded shortcuts.':''}</p>}
       <div className="deck-hint">{state?'Bundled skills → reports here · installed skills → terminals':'Workflow runner offline'}</div>
+      {schedule.lines.length>0&&<div className="deck-hint" role="status" title="Change it with: node aos.mjs schedule">Scheduled · {schedule.lines.join(' · ')}</div>}
+      {schedule.error&&<p className="voice-message" role="alert">Schedule: {schedule.error}</p>}
     </section>
   );
 }
@@ -372,12 +380,17 @@ const AudioIO = memo(function AudioIO({ mode, voiceMode, message, provider, task
   const voiceBusy=voiceMode==='listening'||voiceMode==='working'||voiceMode==='speaking';
   const voiceState=voiceMode==='idle'?'Tap to talk':voiceMode==='working'?'Thinking':voiceMode==='error'?'Try again':voiceMode;
   const choose=async(id:string|null)=>{if(choosing)return;setChoosing(true);try{await onTarget(id)}finally{setChoosing(false)}};
+  // How voice sounds in this vault, shared with the Obsidian plugin.
+  const [sound,setSound]=useState<VoicePrefsSnapshot>(()=>voicePrefs.getSnapshot());
+  const [soundError,setSoundError]=useState('');
+  useEffect(()=>voicePrefs.subscribe(setSound),[]);
+  const saveSound=(changes:Partial<VoicePrefs>,sample=false)=>{setSoundError('');void voicePrefs.save(changes).then(()=>{if(sample)voice.sample()}).catch(e=>setSoundError(String(e?.message||e)))};
   return (
     <section className="block boot-stagger" style={{ animationDelay: "0.42s" }}>
       <div className="voice-card-heading">
         <SectionTitle title="Voice" tick={voiceState.toUpperCase()} />
         <details className="voice-conversation-controls" onKeyDown={event=>{if(event.key==='Escape'){event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();event.stopPropagation()}}}>
-          <summary aria-label="Voice conversation controls" title="Conversation controls">···</summary>
+          <summary aria-label="Voice conversation controls" title="Conversation and sound">···</summary>
           <div className="voice-conversation-menu">
             <div className="voice-conversation-heading"><label htmlFor="jarvis-voice-conversation">Conversation</label><button type="button" disabled={choosing||voiceBusy} onClick={()=>void choose(null)}>+ New conversation</button></div>
             <select id="jarvis-voice-conversation" aria-label="Voice conversation" title={selectedTask?.title} disabled={choosing||voiceBusy} value={target||''} onChange={e=>void choose(e.target.value||null)}>
@@ -387,6 +400,12 @@ const AudioIO = memo(function AudioIO({ mode, voiceMode, message, provider, task
             </select>
             {target&&!selectedTask&&<p role="status">Choose a conversation or start a new one.</p>}
             {selectionError&&<p role="alert">{selectionError}</p>}
+            {sound.ready&&<div className="voice-sound">
+              <button type="button" className="voice-mute" aria-pressed={!sound.prefs.spokenReplies} title="Replies are still written here, and hearing you keeps working." onClick={()=>saveSound({spokenReplies:!sound.prefs.spokenReplies})}><span>Spoken replies</span><strong>{sound.prefs.spokenReplies?'On':'Off'}</strong></button>
+              {sound.voices.length>0&&<label>Voice<select aria-label="Voice" disabled={voiceBusy} value={sound.prefs.voice||sound.fallback||''} onChange={e=>saveSound({voice:e.target.value===sound.fallback?null:e.target.value},true)}>{voiceGroups(sound.voices).map(set=><optgroup key={set.group} label={set.group}>{set.voices.map(choice=><option key={choice.id} value={choice.id}>{choice.name}</option>)}</optgroup>)}</select></label>}
+              <label>Speed<select aria-label="Speaking speed" disabled={voiceBusy} value={String(sound.prefs.rate)} onChange={e=>saveSound({rate:Number(e.target.value)},true)}>{(VOICE_RATES.includes(sound.prefs.rate)?VOICE_RATES:[...VOICE_RATES,sound.prefs.rate].sort((a,b)=>a-b)).map(rate=><option key={rate} value={String(rate)}>{rateLabel(rate)}</option>)}</select></label>
+              {soundError&&<p role="alert">{soundError}</p>}
+            </div>}
           </div>
         </details>
       </div>

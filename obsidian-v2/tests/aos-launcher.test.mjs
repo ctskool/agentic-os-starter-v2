@@ -375,3 +375,39 @@ test('command-line parsing and the local-page guard', () => {
   assert.throws(() => openUrl('https://example.com/x', {run: () => ({status: 0})}), /Only local pages/);
   assert.equal(openUrl('http://127.0.0.1:5123/token', {run: (command, args) => ({status: command === 'open' && args[0].endsWith('/token') ? 0 : 1}), platform: 'darwin'}), true);
 });
+
+// Member report: a Mac login item marked "Background" ran every service about eight times slower.
+test('the Mac login item runs at normal priority, and only our own old one is rewritten', async () => {
+  const {plistNeedsSpeedFix, loginItemNeedsSpeedFix} = await import('../scripts/aos/autostart.mjs');
+  const {replaceSlowLoginItem} = await import('../scripts/aos/services.mjs');
+  const at = layout(path.resolve('/x/aos/obsidian-v2'));
+  const write = (supervisor = at.supervisor, config = at.config) => launchAgentPlist({node: '/opt/homebrew/bin/node', supervisor, config, cwd: at.root, pathEnv: '/usr/bin', log: '/tmp/x.log'});
+  const current = write(), old = current.replace('<string>Interactive</string>', '<string>Background</string>');
+  assert.match(current, /<key>ProcessType<\/key><string>Interactive<\/string>/);
+  assert.doesNotMatch(current, /Background/);
+  assert.notEqual(old, current);
+  assert.equal(plistNeedsSpeedFix(old, at), true);
+  assert.equal(plistNeedsSpeedFix(current, at), false);
+  assert.equal(plistNeedsSpeedFix(write('/other/aos/runner/service-supervisor.mjs').replace('Interactive', 'Background'), at), false, 'another installation\'s login item is never ours to fix');
+  assert.equal(plistNeedsSpeedFix('', at), false);
+  const disk = text => ({platform: 'darwin', home: '/Users/m', exists: () => text !== null, read: () => text});
+  assert.equal(loginItemNeedsSpeedFix(at, disk(old)), true);
+  assert.equal(loginItemNeedsSpeedFix(at, disk(current)), false);
+  assert.equal(loginItemNeedsSpeedFix(at, disk(null)), false);
+  assert.equal(loginItemNeedsSpeedFix(at, {...disk(old), read: () => { throw new Error('unreadable'); }}), false);
+  assert.equal(loginItemNeedsSpeedFix(at, {...disk(old), platform: 'win32'}), false);
+
+  // The swap, then the marker an old monitor may have written while being unloaded is cleared.
+  const calls = [];
+  assert.equal(replaceSlowLoginItem(at, {enable: () => calls.push('enable'), clearMarker: () => calls.push('clear'), log: line => calls.push(line)}), true);
+  assert.equal(calls[0], 'enable'); assert.match(calls[1], /normal speed/); assert.equal(calls[2], 'clear');
+  // launchctl refusing never blocks the start that follows, and the marker is still cleared.
+  const said = [];
+  assert.equal(replaceSlowLoginItem(at, {enable: () => { throw new Error('launchctl refused'); }, clearMarker: () => said.push('clear'), log: line => said.push(line)}), false);
+  assert.match(said[0], /could not update the Mac login item \(launchctl refused\)/); assert.equal(said[1], 'clear');
+  // The order inside start(): the old monitor leaves, the configuration is written, the marker is cleared, then the swap.
+  const source = fs.readFileSync(new URL('../scripts/aos/services.mjs', import.meta.url), 'utf8');
+  const order = ["const slowLoginItem = loginItemNeedsSpeedFix(at) && autostartOwner(at) === 'ours';", 'atomicWrite(at.config,', 'fs.rmSync(at.pause, {force: true});', 'if (slowLoginItem) replaceSlowLoginItem(', 'return launchMonitor(at, {log});'].map(piece => source.indexOf(piece));
+  assert.ok(order.every(at => at > 0), 'every step is present');
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'and they run in this order');
+});

@@ -24,14 +24,17 @@ export function createFakeSpeech(state = {}, {keepAliveTimeout = 5000, quit = fa
     const url = new URL(req.url, 'http://127.0.0.1');
     seen.push(`${req.method} ${url.pathname}`);
     const json = (status, value) => { res.writeHead(status, {'Content-Type': 'application/json'}); res.end(JSON.stringify(value)); };
-    if (req.method === 'GET' && url.pathname === '/health') return state.healthy === false ? json(503, {ok: false}) : json(200, {ok: true, engine: 'stand-in', stt: {ok: true}});
+    // state.language: what a service that knows its language reports ({code, wanted, error}); absent on older and foreign ones.
+    if (req.method === 'GET' && url.pathname === '/health') return state.healthy === false ? json(503, {ok: false}) : json(200, {ok: true, engine: 'stand-in', stt: {ok: true}, ...(state.language ? {language: state.language} : {})});
     if (req.method === 'GET' && url.pathname === '/speak') {
       if (state.canSpeak === false || !url.searchParams.get('text')) return json(500, {error: 'cannot speak'});
+      server.spoken = url.searchParams.get('text');
       res.writeHead(200, {'Content-Type': 'audio/wav'}); return res.end(toneWav());
     }
     if (req.method === 'POST' && url.pathname === '/stt') {
       let size = 0; req.on('data', chunk => { size += chunk.length; });
-      return req.on('end', () => size < 1000 ? json(400, {error: 'too short'}) : json(200, {text: state.hears ?? 'Voice check, one two three.'}));
+      // state.echo: hear back whatever was last spoken, as a working service in any language would.
+      return req.on('end', () => size < 1000 ? json(400, {error: 'too short'}) : json(200, {text: state.hears ?? (state.echo ? server.spoken : null) ?? 'Voice check, one two three.'}));
     }
     if (quit && req.method === 'POST' && url.pathname === '/quit') { json(200, {ok: true}); return setTimeout(() => process.exit(0), 50); }
     json(404, {error: 'not found'});

@@ -3,6 +3,10 @@ import {VoiceSession,browserVoiceTransport,type VoiceMode,type VoiceReveal} from
 import {getWorkSelection,openWork,workFeed,syncWorkReply} from './work';
 import {authorizeBridge} from './bridge-auth';
 import type {ArtifactOpener} from '../../obsidian-v2/shared/artifact-delivery';
+import {createVoicePrefsStore,VOICE_SAMPLE} from '../../obsidian-v2/shared/voice-prefs';
+// How voice sounds in this vault (spoken replies on or off, voice, speed), shared with the Obsidian plugin.
+export const voicePrefs=createVoicePrefsStore(browserVoiceTransport(undefined,authorizeBridge));
+let stopPrefs:()=>void=()=>{};
 let session:VoiceSession|null=null;
 let log:(kind:string,text:string)=>void=()=>{},listening:(v:boolean)=>void=()=>{},speaking:(v:boolean)=>void=()=>{},mode:(v:VoiceMode)=>void=()=>{};
 let panels:(items:string[])=>void=()=>{},deliverable:(path:string,label:string)=>void=()=>{},reveal:(item:VoiceReveal)=>void=()=>{},openDoc:(path:string)=>void=()=>{};
@@ -27,7 +31,10 @@ function get(){
   else if(a.op==='command'&&a.id==='terminal:open-terminal.default.root')openWork();
   else if(a.op==='web'||a.op==='repo')reveal({kind:'link',target:a.op==='repo'?`https://github.com/${a.slug}`:a.url,label:a.op==='repo'?a.slug:a.label,at:0});
   else log('sys','That workspace action is available in Obsidian.');
- };session.connect();}
+ };session.connect();
+ // The session is told at once, so the very next reply follows the setting.
+ // Switching them off stops a reply that is loading or being spoken (voice-session.ts).
+ const created=session;stopPrefs=voicePrefs.subscribe(next=>{const off=next.ready&&!next.prefs.spokenReplies;if(off!==created.muted)created.setMuted(off)});}
  return session;
 }
 export const voice={
@@ -46,5 +53,7 @@ export const voice={
  speak(text:string){get().enqueue(text)},announce(id:string,text:string){return get().announce(id,text)},getLevel(){return session?.getLevel()??null},
  getMode(){return session?.mode??'idle'},
  cancelArtifact(){session?.cancelArtifact()},
- destroy(){void session?.destroy();session=null},
+ // A short phrase after the voice or speed changes, so the choice is heard. Never while voice is busy or muted.
+ sample(){const current=get();if(current.mode==='idle'&&!current.muted)current.enqueue(VOICE_SAMPLE)},
+ destroy(){stopPrefs();stopPrefs=()=>{};void session?.destroy();session=null},
 };
