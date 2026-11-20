@@ -1,7 +1,7 @@
 {
   "id": "agentic-os-v2",
   "name": "Agentic OS V2",
-  "version": "0.3.66",
+  "version": "0.3.67",
   "minAppVersion": "1.5.0",
   "description": "Claude/Codex dashboard with persistent CLI terminals, concurrent tasks and targeted voice follow-ups.",
   "author": "Chase AI",

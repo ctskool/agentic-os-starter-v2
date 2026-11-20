@@ -1,6 +1,6 @@
 {
   "name": "agentic-os-v2",
-  "version": "0.3.66",
+  "version": "0.3.67",
   "description": "Obsidian plugin and local bridge for Agentic OS V2.",
   "main": "main.js",
   "type": "module",

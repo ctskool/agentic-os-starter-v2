@@ -53,7 +53,10 @@ export function commandFor(root,job,cli=findCli(job.provider)){
   '-c','web_search="disabled"','-c',`model_instructions_file=${JSON.stringify(path.join(projectRoot,'runner/voice-classifier-instructions.md'))}`,
   '-c',`model_reasoning_effort="${job.model==='gpt-5.6-luna'?'medium':'low'}"`);
  if(!restricted&&job.provider==='codex')args.splice(1,0,'-c','sandbox_workspace_write.network_access=true','-c','approval_policy="never"','-c','web_search="live"');
- if(restricted&&job.provider==='claude')args.push('--safe-mode','--disable-slash-commands','--system-prompt',classifierInstructions);
+ // --effort low: MAX_THINKING_TOKENS=0 alone does not stop Haiku 5.5 from thinking (it thought on 28 of 36
+ // replayed real voice requests, 2026-11-19). With low effort the median answer came 3.0 s -> 1.6 s, routing was
+ // identical on all 12 questions and a blind judge scored the answers even. Full workers keep their own effort.
+ if(restricted&&job.provider==='claude')args.push('--safe-mode','--disable-slash-commands','--effort','low','--system-prompt',classifierInstructions);
  const mcp={command:process.execPath,args:[path.join(projectRoot,'runner/vault-mcp.mjs')],env:{AOS_V2_VAULT:root}};
  if(!restricted&&job.provider==='codex')args.splice(1,0,'--output-schema',path.join(projectRoot,'runner/result-schema.json'),'-c',`mcp_servers.agentic_vault.command=${JSON.stringify(mcp.command)}`,'-c',`mcp_servers.agentic_vault.args=${JSON.stringify(mcp.args)}`,'-c',`mcp_servers.agentic_vault.env.AOS_V2_VAULT=${JSON.stringify(root)}`);
  if(!restricted&&job.provider==='codex')args.splice(1,0,'-c','mcp_servers.agentic_vault.default_tools_approval_mode="writes"');
