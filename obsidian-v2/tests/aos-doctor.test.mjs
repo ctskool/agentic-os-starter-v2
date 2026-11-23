@@ -395,7 +395,7 @@ test('every run prints every line, even with the bridge down or no vault configu
   const install = installation(); fs.rmSync(install.at.vaultFile);
   const found = await examine(services, install, {full: true});
   const expected = ['Node.js 22 or newer', 'Vault configured', 'Vault has the daily-note schema', 'Obsidian plugin files installed', 'Plugin switched on in Obsidian',
-    TERMINAL, 'Python helper for conversations inside Obsidian', 'Recovery monitor running', `Bridge answering on ${services.ports.bridge}`, `Jarvis HUD answering on ${services.ports.jarvis}`, 'claude CLI', 'codex CLI', VOICE[0], HOTKEY, ...VOICE.slice(1), 'Jev fast voice routing', 'A real workflow end to end'];
+    TERMINAL, 'Python helper for conversations inside Obsidian', 'Recovery monitor running', `Bridge answering on ${services.ports.bridge}`, `Jarvis HUD answering on ${services.ports.jarvis}`, 'claude CLI', 'codex CLI', VOICE[0], HOTKEY, ...VOICE.slice(1), 'Jev fast voice routing', 'Live voice (OpenAI key)', 'A real workflow end to end'];
   assert.deepEqual(found.results.map(item => item.name), expected);
   for (const name of ['Vault has the daily-note schema', 'claude CLI', ...VOICE, HOTKEY, 'A real workflow end to end']) { assert.equal(found.line(name).status, 'SKIP', name); assert.match(found.line(name).detail, /not (run|checked)/); }
   assert.equal(found.line(TERMINAL).status, 'SKIP'); assert.match(found.line(TERMINAL).detail, /no vault configured/);
@@ -548,4 +548,28 @@ test('local requests: one connection each, local addresses only, binary both way
   const stubborn = await run(process.execPath, ['-e', `process.on('SIGTERM', () => {}); require('child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 8000)'], {stdio: 'inherit'}); setTimeout(() => {}, 8000)`], {timeoutMs: 300, graceMs: 400});
   assert.equal(stubborn.timedOut, true); assert.ok(Date.now() - began < 4000, `answered in ${Date.now() - began} ms`);
   assert.ok((await run(path.join(scratch, 'no-such-program'), [])).error, 'a program that cannot be started is reported, not thrown');
+});
+
+test('the Live voice line: skipped until a key is saved, then says what OpenAI thinks of it', async () => {
+  const {CONSENT_VERSION, liveKeyFile} = await import('../runner/live/key.mjs');
+  const LIVE = 'Live voice (OpenAI key)', key = ['sk', 'test', 'doctor_fixture_key_123456789'].join('-');
+  const services = await fakeServices({speech: 'shared'}), install = installation(), file = liveKeyFile(install.at.runtime);
+  const none = await examine(services, install, {checkLive: async () => { throw new Error('must not be asked'); }});
+  assert.equal(none.line(LIVE).status, 'SKIP'); assert.match(none.line(LIVE).detail, /not set up \(optional: `node aos\.mjs openai-key`\)/);
+  const save = (fields = {}) => fs.writeFileSync(file, JSON.stringify({key, consentAt: new Date().toISOString(), consentVersion: CONSENT_VERSION, ...fields}));
+  save(); const asked = [];
+  const good = await examine(services, install, {checkLive: async value => { asked.push(value === key); return {kind: 'accepted'}; }});
+  assert.equal(good.line(LIVE).status, 'PASS'); assert.match(good.line(LIVE).detail, /OpenAI accepts the saved key; a call also needs API credit/); assert.deepEqual(asked, [true]);
+  assert.equal(good.text.includes(key), false);
+  const refused = await examine(services, install, {checkLive: async () => ({kind: 'refused'})});
+  assert.equal(refused.line(LIVE).status, 'FAIL'); assert.equal(refused.line(LIVE).optional, true); assert.match(refused.text, /fix: Run `node aos\.mjs openai-key` and enter a current key from platform\.openai\.com\/api-keys\./);
+  const hidden = await examine(services, install, {checkLive: async () => ({kind: 'no-model'})});
+  assert.equal(hidden.line(LIVE).status, 'FAIL'); assert.match(hidden.line(LIVE).detail, /Live model \(gpt-live-1\.1\)/);
+  const offline = await examine(services, install, {checkLive: async () => ({kind: 'unconfirmed', detail: 'OpenAI could not be reached'})});
+  assert.equal(offline.line(LIVE).status, 'SKIP'); assert.match(offline.line(LIVE).detail, /could not confirm it just now \(OpenAI could not be reached\)/);
+  const ci = await examine(services, install, {ci: true, checkLive: async () => { throw new Error('must not be asked'); }});
+  assert.equal(ci.line(LIVE).status, 'PASS'); assert.match(ci.line(LIVE).detail, /not checked with OpenAI under --ci/);
+  save({consentVersion: CONSENT_VERSION + 1});
+  const stale = await examine(services, install, {checkLive: async () => { throw new Error('must not be asked'); }});
+  assert.equal(stale.line(LIVE).status, 'FAIL'); assert.equal(stale.line(LIVE).detail, 'Live voice needs current consent.'); assert.match(stale.text, /save the key and consent again/);
 });

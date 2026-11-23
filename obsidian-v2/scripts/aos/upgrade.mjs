@@ -12,6 +12,8 @@ export const UPGRADE_FEATURES = Object.freeze([
   {id: 'hud', name: 'Jarvis HUD', description: 'A browser dashboard for conversations, workflows and voice.', dependencies: ['Matching bridge and HUD versions; shared dashboard data.']},
   {id: 'voice', name: 'Local voice', description: 'Speak requests and hear replies on your computer.', dependencies: ['Compatible bridge and speech service; microphone permission; Python for an owned speech service.']},
   {id: 'jev', name: 'Optional Jev router', description: 'Route voice requests using an optional OpenRouter model.', dependencies: ['Working voice and compatible bridge; the member enters their own OpenRouter key locally.']},
+  {id: 'live', name: 'Optional Live voice', description: 'A two-way call that answers from your day and hands real work to your agents.', dependencies: ['Matching bridge, plugin and HUD from 0.4 on; microphone permission; the member enters their own OpenAI API key locally, and OpenAI bills the calls.']},
+  {id: 'about', name: 'About me', description: 'A short profile in your vault that your agents read, so answers fit you.', dependencies: ['Compatible bridge; the member approves the text. With Live voice on, it is sent to OpenAI at the start of each call.']},
   {id: 'dashboard', name: 'Your own skill buttons', description: 'Choose and order up to ten buttons shared by both dashboards.', dependencies: ['Compatible bridge and dashboard interfaces; each personal skill needs its own tools and accounts.']},
   {id: 'workflows', name: 'Bundled workflows', description: 'Planning, research and writing workflows that save reports in your vault.', dependencies: ['Compatible bridge and vault conventions; a signed-in coding tool; accounts required by the chosen workflow.']},
 ]);

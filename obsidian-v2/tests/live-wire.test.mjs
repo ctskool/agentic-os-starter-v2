@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {liveSessionBody} from '../runner/live/snapshot.mjs';
 import {LiveAnswers} from '../runner/live/answers.mjs';
-import {createLiveTransport,LiveCreateRejected} from '../runner/live/transport.mjs';
+import {checkLiveKey,createLiveTransport,LiveCreateRejected,liveRejection} from '../runner/live/transport.mjs';
 
 test('session create lists allowed server events as objects, not strings', () => {
  const body = liveSessionBody({sdp: 'v=0', prefs: {liveVoice: 'marin'}, snapshot: 'snap', history: ''});
@@ -71,4 +71,27 @@ test('a rejected session create keeps OpenAI\'s reason and never the key', async
   assert.doesNotMatch(error.message, /sk-/);
   return true;
  });
+});
+
+test('a known rejection is said in plain words with what to do, and still never carries the key', async () => {
+ const key = 'sk-proj-test' + 'y'.repeat(40);
+ const reject = (status, code, message = 'detail ' + key) => createLiveTransport({fetchImpl: async () => new Response(JSON.stringify({error: {code, message}}), {status})}).create(key, {}, new AbortController().signal);
+ const said = async (status, code) => { let text = ''; await assert.rejects(reject(status, code), error => { assert.ok(error instanceof LiveCreateRejected); text = error.message; return true; }); assert.doesNotMatch(text, /sk-/); assert.match(text, /^OpenAI rejected the Live session request/); return text; };
+ assert.match(await said(401, 'invalid_api_key'), /did not accept the API key\. Run aos openai-key.*\(HTTP 401 invalid_api_key\)$/);
+ assert.match(await said(429, 'insufficient_quota'), /has no credit\. Add credit under Billing.*ChatGPT subscription does not include API credit\. \(HTTP 429 insufficient_quota\)$/);
+ assert.match(await said(429, 'rate_limit_exceeded'), /limiting requests.*Wait a minute/);
+ assert.match(await said(404, 'model_not_found'), /not allowed to use the Live model \(gpt-live-1\.1\)/);
+ assert.match(await said(503, ''), /problem on its side.*\(HTTP 503\)$/);
+ assert.equal(liveRejection(400, 'invalid_type'), null);
+});
+
+test('the key check tells accepted, refused, no model and unconfirmed apart without reading a body', async () => {
+ const key = 'sk-proj-test' + 'z'.repeat(40), seen = [];
+ const check = status => checkLiveKey(key, {fetchImpl: async (url, init) => { seen.push([url, init.headers.Authorization === 'Bearer ' + key, init.method || 'GET']); return new Response('{}', {status}); }});
+ assert.equal((await check(200)).kind, 'accepted');
+ assert.equal((await check(401)).kind, 'refused');
+ assert.equal((await check(404)).kind, 'no-model');
+ assert.deepEqual(await check(403), {kind: 'unconfirmed', detail: 'HTTP 403'});
+ assert.deepEqual(await checkLiveKey(key, {fetchImpl: async () => { throw new Error('offline ' + key); }}), {kind: 'unconfirmed', detail: 'OpenAI could not be reached'});
+ assert.deepEqual(seen[0], ['https://api.openai.com/v1/models/gpt-live-1.1', true, 'GET']);
 });

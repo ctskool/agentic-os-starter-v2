@@ -20,7 +20,7 @@ const HELP = `Agentic OS V2
   status              what is running
   doctor [--full]     PASS / FAIL checks; --full also runs one real workflow
   jev-key             open a local page to save your OpenRouter key (never shown to an agent)
-  openai-key          open a local page to save your OpenAI key and consent for Live voice
+  openai-key          open a local page to save your OpenAI key and consent for Live voice (--check: is it set up?)
   autostart on|off    start at login
   update              get the latest version and rebuild
   upgrade             find your existing system and assess an upgrade (read only)
@@ -60,9 +60,11 @@ export async function main(argv = process.argv.slice(2), log = console.log) {
       return result.saved ? 0 : 1;
     }
     case 'openai-key': {
-      const {collectOpenAIKey}=await import('./aos/openai-key.mjs');
+      // --check says whether a key and consent are saved, without opening anything. Never the key.
+      if (flags.check === true) { const {liveAuthorization}=await import('../runner/live/key.mjs'); log(JSON.stringify(liveAuthorization(layout().runtime))); return 0; }
+      const {collectOpenAIKey,openAIKeyOutcome}=await import('./aos/openai-key.mjs');
       const result=await collectOpenAIKey({runtimeDir:layout().runtime,announce:url=>log(`Open this local page to set up Live voice:\n${url}\nWaiting up to five minutes ...`)});
-      log(JSON.stringify(result));return result.saved?0:1;
+      log(JSON.stringify(result));log(openAIKeyOutcome(result));return result.saved?0:1;
     }
     case 'autostart': {
       if (!['on', 'off'].includes(words[0])) throw new Error('Use: autostart on  or  autostart off');

@@ -9,13 +9,14 @@ Run commands from the starter's top-level folder. For guided installation, use t
 | `node aos.mjs status` | Show which services are running. |
 | `node aos.mjs start` | Start this installation's services. |
 | `node aos.mjs stop` | Stop them when no terminal conversation remains open. |
-| `node aos.mjs doctor` | Check services, plugin, providers and the voice round trip. |
+| `node aos.mjs doctor` | Check services, plugin, providers, the voice round trip and, when Live voice is set up, the saved OpenAI key. |
 | `node aos.mjs doctor --full` | Also run one real workflow using your provider account. |
 | `node aos.mjs setup` | Build and install using the vault and options chosen in the playbook. |
 | `node aos.mjs upgrade` | Find existing installations and report upgrade options without applying changes. |
 | `node aos.mjs update` | Update and rebuild a recognized, unmodified starter as a complete release. |
 | `node aos.mjs jev-key` | Add or replace an OpenRouter key through a local browser page. |
-| `node aos.mjs openai-key` | Add or replace the OpenAI API key and record consent for [Live voice](LIVE-VOICE.md). |
+| `node aos.mjs openai-key` | Add or replace the OpenAI API key and record consent for [Live voice](LIVE-VOICE.md). The page checks the key with OpenAI before saving it. |
+| `node aos.mjs openai-key --check` | Say whether a key and consent are saved, without showing the key. |
 | `node aos.mjs autostart on\|off` | Enable or disable starting this installation at login. |
 | `node aos.mjs dashboard` | Manage dashboard choices; see [personalization commands](DASHBOARD.md). |
 | `node aos.mjs schedule` | Run a bundled workflow by itself at a set time, for example `schedule add plan-today 07:00 --days weekdays`. Nothing is scheduled until you add it; `node aos.mjs schedule help` explains the rules. |

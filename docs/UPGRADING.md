@@ -18,7 +18,7 @@ Review a concrete plan    Files, dependencies, tests and rollback
 Apply and verify          Agree before interrupting your working system
 ```
 
-You can ask for the cockpit, Jarvis HUD, local voice, optional Jev, personal dashboard buttons, or bundled workflows. Your agent explains what each needs and suggests a compatible approach. A skill or plugin being present does not prove it works with the rest of your system. Some features require matching bridge, plugin and HUD changes.
+You can ask for the cockpit, Jarvis HUD, local voice, optional Live voice calls, optional Jev, an About me profile, personal dashboard buttons, or bundled workflows. Your agent explains what each needs and suggests a compatible approach. A skill or plugin being present does not prove it works with the rest of your system. Some features require matching bridge, plugin and HUD changes.
 
 Tell the agent which parts of your existing setup matter to you, and which skills you use often. It can inspect selected non-secret files to compare versions, but it cannot infer your usage history from a list of installed skills.
 
@@ -42,6 +42,8 @@ node aos.mjs update     # Changes a recognized stock starter and rebuilds it
 `update` refuses customized or unknown source before stopping services. If it refuses, have your agent inspect the changes and plan an integration. Do not discard your modifications just to force it through.
 
 Only one installation can own the system's fixed ports. Your agent must get your agreement before stopping the working installation, use its own scripts, and keep a way to restore it. Tests that need those occupied ports wait for that handoff. Unrelated speech services and recovery tasks should remain alone.
+
+**After the update, your agent offers what is new.** An update installs new features but does not switch them on. Once the checks pass, your agent asks once about each thing you have not set up: an About me profile, your own dashboard buttons, and [Live voice](LIVE-VOICE.md). Say no to any of them and nothing changes. You can come back later with “set up Live voice” or “update my About me”.
 
 At the end, your agent should say what changed, which tests passed, what failed or was skipped, which installation is running, and how you should update next time. **macOS remains beta:** automated checks do not replace testing the microphone, cockpit and HUD on your own Mac.
 

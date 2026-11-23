@@ -183,10 +183,18 @@ Ask: *"Would you like to be able to talk to your assistant on a live call? It an
 
 Only with a clear yes:
 
-1. Run `node aos.mjs openai-key` and give them the local page it prints. They read the disclosure, type the key and save their consent on that page. Never ask for the key in chat, and never read `openai.json`.
-2. Have them open **···** on the HUD Voice card or beside the Obsidian orb, choose **Live**, start a call and allow the microphone.
-3. Have them try three things: a general question, *"What's on my plan today?"* (Live answers from what it has), and *"Run Inbox Brief"* (Live hands it to V2; they can say "stop" within about 2.5 seconds). Then **End call**.
-4. Mention **Share morning brief** in the Live settings and leave the choice to them. It is off by default. Turned on, their whole morning brief, including its email section, goes to OpenAI at the start of each call so Live can answer from it. It is only useful if they run Morning Intel, so offer it together with the scheduled Intel Brief below.
+1. Ask whether they already have an OpenAI **API** key. If not, walk them through it: sign in at platform.openai.com (a separate account from ChatGPT; a ChatGPT subscription does not include it), add credit under Billing, then create a key on the API keys page. They keep the key to themselves.
+2. Run `node aos.mjs openai-key` and give them the local page it prints. They read the disclosure, paste the key and save their consent on that page. Never ask for the key in chat, and never read `openai.json`. The page checks the key with OpenAI before saving, and the command then prints the outcome in one line. Read that line and act on it:
+   - *Saved. OpenAI accepted the key.* Continue.
+   - *Saved, but OpenAI did not show this key the Live model.* Tell them the key's project may not have access to it yet, and that the first call will show whether it works.
+   - *Saved. OpenAI could not be reached.* Continue; the first call is the test.
+   - *No key was saved.* The page timed out, or OpenAI refused the key and they closed the page. Run the command again when they are ready.
+3. Have them open **···** on the HUD Voice card or beside the Obsidian orb, choose **Live**, start a call and allow the microphone.
+   If the call does not start, the message on screen says why in plain words: a key OpenAI does not accept, no credit on the API account, or no access to the Live model. Fix that one thing with them; `docs/TROUBLESHOOTING.md` has a row for each.
+4. Have them try three things: a general question, *"What's on my plan today?"* (Live answers from what it has), and *"Run Inbox Brief"* (Live hands it to V2; they can say "stop" within about 2.5 seconds). Then **End call**.
+5. Mention **Share morning brief** in the Live settings and leave the choice to them. It is off by default. Turned on, their whole morning brief, including its email section, goes to OpenAI at the start of each call so Live can answer from it. It is only useful if they run Morning Intel, so offer it together with the scheduled Intel Brief below.
+
+Later, `node aos.mjs openai-key --check` says whether a key and consent are saved, and `node aos.mjs doctor` checks the saved key with OpenAI. Neither shows the key.
 
 Details, settings and costs: `docs/LIVE-VOICE.md`. Do not turn on Live, Share morning brief or any other sharing setting for them.
 

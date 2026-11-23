@@ -2,12 +2,24 @@
 
 **Local** is the default. It uses Whisper and Kokoro on your computer for speech. **Live** uses GPT-Live for a two-way call and hands requests that need a saved report or an action back to Agentic OS.
 
+## Before you start: an OpenAI API key
+
+Live needs a key from OpenAI's API platform. That is a separate account from ChatGPT, and a ChatGPT subscription does not include it.
+
+1. Sign in at [platform.openai.com](https://platform.openai.com).
+2. Add credit under **Billing**. Calls are paid from that credit and stop working when it runs out.
+3. Create a key on the [API keys page](https://platform.openai.com/api-keys) and copy it whole. It starts with `sk-`. Keep it out of chat: you paste it into a page on your own computer in the next step.
+
 ## Set up Live
 
-1. From the starter folder, run `node aos.mjs openai-key` (or `aos openai-key` if you use the shortcut). Open the local page it gives you, review the disclosure, enter your OpenAI API key, and save your consent there.
+The easiest way is to tell your coding agent **“set up Live voice”**. It runs the steps below with you.
+
+1. From the starter folder, run `node aos.mjs openai-key` (or `aos openai-key` if you use the shortcut). Open the local page it gives you, review the disclosure, enter your OpenAI API key, and save your consent there. The page checks the key with OpenAI before it saves anything. A key OpenAI refuses is not saved, and the page tells you so, which lets you paste it again.
 2. Open **···** beside the Obsidian orb or on the HUD Voice card. Choose **Live** and start a call from that screen. Grant microphone access when asked. Only one of the two screens can own a call at a time.
 3. Use the call bar to **Mute** or **End call**. A call ends when you select **End call**, after your **End call after idle** time without speech, or when you close or reload its window. It also ends if you switch to **Local** in the voice menu or the bridge restarts. Clicking the orb, pressing Escape or Ctrl+Alt+J, opening a terminal, using another window and leaving the tab in the background all leave it running.
 4. Try three things on your first call. Ask a general question. Ask “What’s on my plan today?”, which Live answers from what it already has. Then say “Run Inbox Brief”, which it hands to V2. Say “stop” within about 2.5 seconds if you don’t want that to run.
+
+If a call will not start, the message on screen says why and what to do: a key OpenAI no longer accepts, no credit on the API account, or a key that is not allowed to use the Live model. `node aos.mjs doctor` has a **Live voice (OpenAI key)** line that checks the saved key at any time. It cannot see your credit; only a call shows that.
 
 ## Make it work the way you want
 

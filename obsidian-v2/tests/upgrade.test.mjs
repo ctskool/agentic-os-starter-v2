@@ -124,6 +124,8 @@ test('no discovery result asks for a recognizable vault rather than installing o
   assert.match(report.nextStep, /Obsidian vault/);
   assert.equal(report.changesApplied, false);
   assert.ok(report.availableFeatures.some(feature => feature.id === 'voice' && feature.dependencies.length));
+  for (const id of ['live', 'about']) assert.ok(report.availableFeatures.some(feature => feature.id === id && feature.dependencies.length), id);
+  assert.match(report.availableFeatures.find(feature => feature.id === 'live').dependencies[0], /own OpenAI API key locally/);
 });
 
 test('an explicitly isolated home cannot fall back to the actual installation or live monitor', async t => {

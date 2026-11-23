@@ -11,6 +11,8 @@ import {tryJson, probeJson, fetchJson, request, run, sleep} from './platform.mjs
 import {layout, PORTS, configuredVaultPath, speechInstalled} from './services.mjs';
 import {pluginInstalled, pluginEnabled} from './vault.mjs';
 import {hasJevKey} from './jev-key.mjs';
+import {liveAuthorization, readLiveKey} from '../../runner/live/key.mjs';
+import {checkLiveKey, LIVE_MODEL} from '../../runner/live/transport.mjs';
 import {terminalSupport, VERIFIED_TERMINAL_VERSIONS, JARVIS_URL} from '../../shared/terminal-support.mjs';
 import {recordedTerminalPython} from '../../runner/terminal-python-record.mjs';
 import {terminalPythonWorks} from './terminal-python.mjs';
@@ -22,7 +24,8 @@ const SHOW_SOMEONE = `Show your coding agent this line together with the last 30
 const VOICE_CHECKS = ['Voice service healthy', 'Text to speech', 'Speech to text hears it back'];
 const HOTKEY_CHECK = 'Global voice shortcut';
 const STILL_STARTING = new Set(['checking', 'starting', 'waiting_for_listener', 'backoff']);
-const TERMINAL_CHECK = 'Terminal plugin (conversations inside Obsidian)';
+const LIVE_CHECK = 'Live voice (OpenAI key)';
+const TERMINAL_CHECK ='Terminal plugin (conversations inside Obsidian)';
 const TERMINAL_PYTHON_CHECK = 'Python helper for conversations inside Obsidian';
 
 // Only matters once the Terminal plugin is in use; the record exists only after setup verified it.
@@ -99,9 +102,9 @@ export function hotkeyProblem({hotkey, capture, platform}) {
 }
 
 // phase 'install' = before the user has opened Obsidian: the plugin switch is WAIT, not FAIL.
-// ports, runCommand, pause, now, voiceWaitMs and platform exist for the tests; members never pass them.
+// ports, runCommand, pause, now, voiceWaitMs, platform and checkLive exist for the tests; members never pass them.
 export async function doctor({root = projectRoot, ci = false, full = false, phase = 'ready', log = console.log,
-  ports = PORTS, runCommand = run, pause = sleep, now = Date.now, voiceWaitMs = 90000, platform = process.platform} = {}) {
+  ports = PORTS, runCommand = run, pause = sleep, now = Date.now, voiceWaitMs = 90000, platform = process.platform, checkLive = checkLiveKey} = {}) {
   const at = layout(root), setup = readJson(path.join(at.runtime, 'aos-setup.json')), results = [];
   const local = port => `http://127.0.0.1:${port}`;
   const memoryFile = path.join(at.runtime, 'aos-doctor-last.json'), before = readJson(memoryFile).failures || {}, failing = {};
@@ -265,6 +268,19 @@ export async function doctor({root = projectRoot, ci = false, full = false, phas
       // Timings differ per run; keep the detail stable so a repeat is recognised.
       add('FAIL', 'Jev fast voice routing', String(error.message).replace(/\d+(\.\d+)? ?ms/g, 'N ms'), /HTTP 40[13]/.test(error.message) ? 'The key was refused. Run `node aos.mjs jev-key` and paste a fresh key from openrouter.ai/keys.' : /HTTP 402/.test(error.message) ? 'The OpenRouter account has no credit. Add a few dollars at openrouter.ai/credits.' : 'Check the internet connection. Voice still works without Jev, only slower.', {optional: true});
     }
+  }, {optional: true});
+
+  // Live voice is optional. With a key saved, ask OpenAI whether it still accepts it; credit only shows on a call.
+  const live = liveAuthorization(at.runtime);
+  if (!live.ready && /^Run aos openai-key to set up/.test(live.reason || '')) add('SKIP', LIVE_CHECK, 'not set up (optional: `node aos.mjs openai-key`)');
+  else if (!live.ready) add('FAIL', LIVE_CHECK, String(live.reason || 'the saved key cannot be used').replace(/\s*Run aos openai-key\.?$/, ''), 'Run `node aos.mjs openai-key` and save the key and consent again.', {optional: true});
+  else if (ci) add('PASS', LIVE_CHECK, 'key and consent saved; not checked with OpenAI under --ci');
+  else await group([LIVE_CHECK], async () => {
+    const result = await checkLive(readLiveKey(at.runtime));
+    if (result?.kind === 'accepted') add('PASS', LIVE_CHECK, 'OpenAI accepts the saved key; a call also needs API credit and the microphone');
+    else if (result?.kind === 'refused') add('FAIL', LIVE_CHECK, 'OpenAI no longer accepts the saved key', 'Run `node aos.mjs openai-key` and enter a current key from platform.openai.com/api-keys.', {optional: true});
+    else if (result?.kind === 'no-model') add('FAIL', LIVE_CHECK, `OpenAI does not show the saved key the Live model (${LIVE_MODEL})`, 'Check that key\'s project and permissions at platform.openai.com/api-keys, or save a key from a project that can use it with `node aos.mjs openai-key`.', {optional: true});
+    else add('SKIP', LIVE_CHECK, `key and consent saved; OpenAI could not confirm it just now${result?.detail ? ' (' + result.detail + ')' : ''}`);
   }, {optional: true});
 
   const WORKFLOW = 'A real workflow end to end';

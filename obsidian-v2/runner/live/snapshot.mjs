@@ -10,6 +10,7 @@ import {withVoiceContext} from '../voice-context.mjs';
 import {voiceReceiptTransport} from '../voice-receipts.mjs';
 import {dailyDrivers} from '../profile.mjs';
 import {readVoicePrefs} from '../voice-prefs.mjs';
+import {LIVE_MODEL} from './transport.mjs';
 import {readAboutMe} from './about.mjs';
 import {clip} from './clip.mjs';
 import {PATHWAYS} from '../lookup-fallback.mjs';
@@ -187,6 +188,6 @@ ${label}
 ${history}`:''}`;
  // History rides in the instructions, never as a user input item: GPT-Live answers an opening user item at once, so
  // a call that started with earlier exchanges replayed them out loud (2026-11-22, the Riemann calls).
- return {session:{model:'gpt-live-1.1',store:false,client:{data_channel:{allowed_client_events:[],allowed_server_events:[{type:'session.paused'},{type:'session.resumed'}]}},
+ return {session:{model:LIVE_MODEL,store:false,client:{data_channel:{allowed_client_events:[],allowed_server_events:[{type:'session.paused'},{type:'session.resumed'}]}},
   delegation:{type:'client',acknowledgement_delay_ms:700},wake_policy:{type:'speech'},idle_timeout_s:20,audio:{output:{voice:prefs.liveVoice}},instructions},transport:{type:'webrtc',sdp}};
 }

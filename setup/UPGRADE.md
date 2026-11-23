@@ -69,6 +69,8 @@ Use this capability list as a guide to discussion, not as an automatic compatibi
 | Jarvis HUD | Browser dashboard and agent terminals | Compatible HUD, bridge and launcher/monitor configuration; selected Claude Code or Codex CLI. |
 | Local voice | Speech recognition and spoken replies on the computer | Compatible bridge and voice client, Python/model requirements, microphone permission, and either owned speech or an already compatible shared service. |
 | Optional Jev | Routing for spoken requests through OpenRouter | Compatible voice routing; member's OpenRouter account and credit; key entered locally. Voice can work without Jev. |
+| Optional Live voice | A two-way call that answers from their day and hands real work to their agents | Matching bridge, plugin and HUD from 0.4 on; microphone permission; the member's own OpenAI API account with credit (a ChatGPT subscription does not include it); key entered locally. OpenAI bills the calls. Local voice keeps working without it. |
+| About me | A short profile in the vault's `AGENTS.md` that their agents read | Compatible bridge; the member approves the text. With Live voice on, it is sent to OpenAI at the start of each call. |
 | Personal dashboard buttons | Choose and order up to ten bundled or installed skills | Matching dashboard APIs, configuration schema and UI versions; each personal skill's actual provider and dependencies. Obsidian personal skills require Terminal; Jarvis can run them without that plugin. |
 | Bundled workflows | Reports and drafts such as planning, research and content | Compatible runner/bridge and vault conventions, a signed-in coding provider, plus any connectors required by the specific workflow. |
 
@@ -121,7 +123,7 @@ Leave notes, custom skills, profile choices and dashboard order as they are unle
 
 A compatible shared speech service belongs to its owner. Do not stop, restart or reconfigure it to test the upgrade. Leave unrelated recovery tasks and login items alone. A selected plan can change this installation's own startup ownership only with specific permission and a rollback procedure.
 
-The member supplies a missing Jev key through `node aos.mjs jev-key` when needed. Do not transfer it by reading the old installation's secret files. Inspecting an existing setup does not establish account access; explain and verify required connectors with the member without reading credentials.
+The member supplies a missing Jev key through `node aos.mjs jev-key` when needed, and an OpenAI key for Live voice through `node aos.mjs openai-key`. Do not transfer either by reading the old installation's secret files. Inspecting an existing setup does not establish account access; explain and verify required connectors with the member without reading credentials.
 
 ## 6. Handoff, verification and rollback
 
@@ -135,4 +137,22 @@ Report PASS / FAIL / WAIT / SKIP exactly as observed, including error text and t
 
 On macOS, describe automated checks and actual hands-on checks separately. Mac remains beta; successful builds or CI do not prove this member's microphone permissions, Obsidian plugin or HUD interactions work. Never claim those manual checks were performed if they were not.
 
-Finish with what changed, what stayed customized, what was verified, anything still unavailable, which installation is active, where rollback lives, and the appropriate future update route. A discovery-only run ends with a recommendation; do not report it as an applied upgrade.
+## 7. Offer what is new, once
+
+An update brings the code. It does not set anything up, and a member who upgraded has never been asked about the features added since their version. After the checks in section 6 pass, find out what they have not used yet and offer each item once. A no is a complete answer; do not ask again in this session, and never turn a sharing setting on for them.
+
+Check first, without reading any secret file:
+
+- `node aos.mjs about show` shows whether they have an **About me**.
+- `node aos.mjs openai-key --check` prints `{"ready":true}` when a key and consent for Live voice are saved. Never open `openai.json`.
+- `node aos.mjs dashboard list` shows their saved buttons.
+
+Then, in this order:
+
+1. **About me**, if it is empty: run the short intake in [the fresh-install playbook](PLAYBOOK.md#tell-your-assistant-about-you).
+2. **Dashboard buttons:** their saved selection survives an update. Point out **Customize dashboard** in either app. If they are still on the starter buttons, offer the intake in [Choose their dashboard buttons](PLAYBOOK.md#choose-their-dashboard-buttons).
+3. **Live voice**, if it is not set up: follow [Live voice (optional)](PLAYBOOK.md#live-voice-optional) exactly as written, with its cost sentence, the local key page and the three things to try on a first call.
+
+## 8. Final report
+
+Finish with what changed, what stayed customized, what was verified, anything still unavailable, which installation is active, where rollback lives, and the appropriate future update route. Name the new features they chose to set up and the ones they passed on, so they know what to ask for later. A discovery-only run ends with a recommendation; do not report it as an applied upgrade.
