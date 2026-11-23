@@ -106,3 +106,21 @@
 .dashboard-editor-footer .dashboard-save {background:#7ed5ed20;border-color:#7ed5ed80;color:#cef1fa;}
 @media(max-width:550px){.dashboard-customizer h2{font-size:30px;}.dashboard-discovery form,.dashboard-editor-footer{align-items:stretch;flex-direction:column;}.dashboard-editor-footer>div{justify-content:flex-end;}.dashboard-found>div{flex-direction:column;}.dashboard-selected li>div{gap:3px;}.dashboard-selected button{padding:5px 7px;}}
 @media(max-width:760px){.dashboard-editor-footer{bottom:-18px;margin-right:-18px;margin-bottom:-18px;margin-left:-18px;padding-right:18px;padding-bottom:18px;padding-left:18px;}}
+
+.v2-stage[data-live-state] .core-transition { filter:drop-shadow(0 0 13px #9f85e76b); }
+.v2-stage[data-live-state=standby] .core-transition { opacity:.52; }
+.live-voice-settings p { grid-column:1 / -1; margin:4px 0 0; }
+.voice-conversation-menu .live-voice-settings input[type=checkbox] { width:16px; height:16px; }
+.live-voice-mode { grid-column:1 / -1; display:flex; align-items:center; gap:5px; }
+.live-voice-mode span { margin-right:auto; }
+.voice-conversation-menu .live-voice-mode button[aria-pressed=true] { color:#dfd2ff; border-color:#947bd0; background:#392e52; }
+.voice-conversation-menu .live-voice-mode button:disabled { opacity:.45; cursor:default; }
+.live-call { display:grid; gap:8px; margin:8px 0; }
+.live-call-bar,.live-staged,.live-call-other { background:#251e35; border:1px solid #5a4b79; border-radius:8px; padding:8px 10px; color:#e8dfff; font-size:12px; }
+.live-call-bar,.live-staged div { display:flex; align-items:center; flex-wrap:wrap; gap:7px; }
+.live-call-bar span { margin-right:auto; font-variant-numeric:tabular-nums; }
+.live-call-bar i { display:inline-block; width:7px; height:7px; border-radius:100%; background:#b9a3ff; }
+.live-call button { padding:4px 8px; min-height:28px; background:transparent; color:inherit; border:1px solid #655486; border-radius:5px; font:inherit; cursor:pointer; }
+.live-call button:hover { background:#433550; }
+.live-call button:disabled { opacity:.5; cursor:default; }
+.live-staged p { margin:0 0 7px; }

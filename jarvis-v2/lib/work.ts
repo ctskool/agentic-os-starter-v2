@@ -7,6 +7,7 @@ import {createWorkConversations,type ConversationProvider,type ConversationSnaps
 export interface WorkTask {
   id:string; title:string; provider:'codex'|'claude'; model:string;
   state:string; sessionId:string|null; error:string|null; pid?:number|null;
+  created?:number; completedAt?:number; workflowStatus?:string;
   keep:boolean; lastActivityAt:number; expiresAt:number|null;
   /** Set when the bridge closed this finished terminal after it sat idle at its prompt. */
   idleStoppedAt?:number|null;
@@ -16,7 +17,7 @@ export interface WorkTask {
 export const workRequest=(path='',body?:unknown)=>bridge('/work'+path,body);
 const conversationSessionId=crypto.randomUUID();
 const feed=createWorkFeed(async(path:string)=>{await workConversations.startSession();return workRequest(path)});
-const models={codex:'gpt-6-astra',claude:'opus'};
+const models={codex:'astra',claude:'opus'};
 const changed=()=>{if(typeof window!=='undefined')window.dispatchEvent(new Event('jarvis-work-target'))};
 export const workConversations=createWorkConversations({
   getSnapshot:()=>feed.getSnapshot(),readFresh:()=>workRequest('?summary=1'),
@@ -35,10 +36,8 @@ export function syncWorkReply(reply:Pick<VoiceReply,'current'|'currentRevision'>
   // stay optimistic in the controller until their ordered writes are confirmed.
   if(workConversations.sync(snapshot))feed.publish(snapshot);
 }
-export function openWork(ids:string[]=[],spoken=false){
-  // Successful dispatch already selected its own provider on the bridge. A late
-  // reply may open its view, but must not overwrite the current top provider.
-  if(typeof window!=='undefined')window.dispatchEvent(new CustomEvent('jarvis-open-work',{detail:{ids,spoken}}));
+export function openWork(ids:string[]=[],reveal=false){
+  if(reveal&&typeof window!=='undefined')window.dispatchEvent(new CustomEvent('jarvis-open-work',{detail:{ids}}));
   void workFeed.refresh().catch(()=>{});
 }
 export async function setWorkKeep(id:string,keep:boolean){

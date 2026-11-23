@@ -23,7 +23,7 @@ if(!fs.existsSync(path.join(target,'data.json')))fs.writeFileSync(path.join(targ
 // when this marker exists; the installer never touches Hot Reload itself.
 fs.writeFileSync(path.join(target,'.hotreload'),'');
 for(const dir of ['queue','processing','runs','logs','artifacts','backups'])fs.mkdirSync(vaultPath(root,'system/v2/'+dir),{recursive:true});
-if(!fs.existsSync(vaultPath(root,'system/v2/provider.json')))writeJson(root,'system/v2/provider.json',{provider:'codex',model:'gpt-6-astra'});
+if(!fs.existsSync(vaultPath(root,'system/v2/provider.json')))writeJson(root,'system/v2/provider.json',{provider:'codex',model:'astra'});
 writeJson(root,'.agentic-os-v2.json',{version:2,enabled:true,vault:root,installedAt:new Date().toISOString()});
 // Keep startup settings unchanged. Enable the distinct plugin from Obsidian when ready to test it.
 fs.mkdirSync(path.join(projectRoot,'.runtime'),{recursive:true});fs.writeFileSync(path.join(projectRoot,'.runtime/vault.json'),JSON.stringify({vault:root}));

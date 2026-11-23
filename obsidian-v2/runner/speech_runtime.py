@@ -1,5 +1,7 @@
 """V2-owned push-to-talk. Importing this module opens no device or OS hook."""
 import math
+import hmac
+import ipaddress
 import json
 import pathlib
 import queue
@@ -11,6 +13,13 @@ import time
 
 SAMPLE_RATE = 16000
 FRAME_SAMPLES = 1280
+
+
+def accepts_mode(client, supplied, secret):
+    try:
+        return ipaddress.ip_address(client).is_loopback and isinstance(supplied, str) and supplied.isascii() and hmac.compare_digest(supplied, secret)
+    except ValueError:
+        return False
 
 
 def rms(pcm):
@@ -27,6 +36,7 @@ class CaptureController:
         self.available, self.error = True, None
         self._lock, self._stop = threading.Lock(), threading.Event()
         self._thread = None
+        self._busy, self._lease, self._until = False, None, 0.0
         self.stream_factory = stream_factory
         if stream_factory is None:
             try:
@@ -38,20 +48,52 @@ class CaptureController:
 
     @property
     def busy(self):
-        return self._lock.locked()
+        with self._lock:
+            return self._busy
+
+    def _expire(self):
+        if self._lease is not None and self.clock() >= self._until:
+            self._lease = None
+
+    def set_mode(self, capture, lease, ttl, renew=False):
+        with self._lock:
+            self._expire()
+            if capture == 'on':
+                if self._lease == lease:
+                    self._lease = None
+                return 'idle'
+            if (renew or self._lease is not None) and self._lease != lease:
+                return 'unknown'
+            if self._busy:
+                return 'busy'
+            self._lease, self._until = lease, self.clock() + ttl
+            return 'idle'
 
     def trigger(self, source='hotkey'):
-        if not self.available or self._stop.is_set() or not self._lock.acquire(blocking=False):
-            return False
-        self._thread = threading.Thread(target=self._run, args=(source,), daemon=True, name='v2-voice-capture')
-        self._thread.start()
-        return True
+        with self._lock:
+            self._expire()
+            if self._stop.is_set() or self._busy:
+                return False
+            if self._lease is None:
+                if not self.available:
+                    return False
+                self._busy = True
+                self._thread = threading.Thread(target=self._run, args=(source,), daemon=True, name='v2-voice-capture')
+                try:
+                    self._thread.start()
+                except RuntimeError:
+                    self._busy = False
+                    raise
+                return True
+        if source == 'hotkey':
+            self.emit({'type': 'hotkey'})
+        return False
 
     def _run(self, source):
         # Announce before opening the microphone so the owning surface can
         # interrupt playback, and errors have a corresponding capture owner.
-        self.emit({'type': 'wake', 'source': source, 'score': 1.0})
         try:
+            self.emit({'type': 'wake', 'source': source, 'score': 1.0})
             with self.stream_factory() as stream:
                 noise = 80.0
                 for _ in range(3):
@@ -83,7 +125,8 @@ class CaptureController:
             if not self._stop.is_set():
                 self.emit({'type': 'wake_error', 'error': self.error})
         finally:
-            self._lock.release()
+            with self._lock:
+                self._busy = False
 
     def stop(self):
         self._stop.set()

@@ -19,6 +19,6 @@ Hard rules:
 - Get the member's approval for the concrete upgrade plan before applying it, and obtain explicit permission for its service handoff before stopping or restarting a running installation. Use that installation's own scripts; leave unrelated speech services and recovery tasks alone.
 - Services are local only (`127.0.0.1`, ports 3217–3221). Do not expose them. Only one installation can own those ports.
 
-Commands: `node aos.mjs setup | upgrade | start | stop | status | doctor [--full] | jev-key | autostart on|off | update | dashboard`.
+Commands: `node aos.mjs setup | upgrade | start | stop | status | doctor [--full] | jev-key | autostart on|off | update | dashboard | about`.
 
 `upgrade` reports what is present; it does not apply changes. `update` changes a stock starter. Follow the appropriate guide instead of treating those commands as synonyms.

@@ -89,9 +89,13 @@ if($InstallAtLogon){
  if($taskExisting -and !(Test-OurRecoveryTask $taskExisting)){throw 'A different installation owns the recovery task; nothing replaced.'}
  $taskIdentity=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name
  $taskAction=New-ScheduledTaskAction -Execute $taskPowerShell -Argument $taskArguments -WorkingDirectory $taskRoot
- $taskTrigger=New-ScheduledTaskTrigger -AtLogOn -User $taskIdentity
+ # Logon start, plus a 5-minute check: IgnoreNew makes it a no-op while the monitor runs, the wrapper exits
+ # at once on an intentional pause, and it revives a monitor whose whole process tree was killed from outside.
+ $taskTrigger=@((New-ScheduledTaskTrigger -AtLogOn -User $taskIdentity),(New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)))
  $taskPrincipal=New-ScheduledTaskPrincipal -UserId $taskIdentity -LogonType Interactive -RunLevel Limited
- $taskSettings=New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -Hidden
+ # Priority 5 = normal. Task Scheduler's default (7) is below normal, and every service inherits it: on a busy
+ # machine the bridge stalled 4-15 s per request (2026-11-22); at normal it answers in ~1 ms.
+ $taskSettings=New-ScheduledTaskSettingsSet -Priority 5 -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -Hidden
  Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Settings $taskSettings -Description 'Keeps local Agentic OS V2 web and voice bridge services available. Never replays voice requests or resumes saved tasks. Intentional Stop pauses recovery.' -Force | Out-Null
 }
 if(Test-Path -LiteralPath $taskPauseFile){Remove-Item -LiteralPath $taskPauseFile}

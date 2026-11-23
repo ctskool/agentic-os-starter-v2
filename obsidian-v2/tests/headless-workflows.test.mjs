@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import {NativeTerminalManager} from '../runner/native-terminals.mjs';
 import {destinationFor} from '../runner/workflows.mjs';
 
-const selections=[{provider:'codex',model:'gpt-6-astra'},{provider:'claude',model:'sonnet'}];
+const selections=[{provider:'codex',model:'astra'},{provider:'claude',model:'sonnet'}];
 function fixture(t){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'aos-background-')),calls=[];
  const options={directory:path.join(root,'sessions'),spawn:()=>assert.fail('Background jobs must not allocate a PTY'),resolveNativeCli:()=>assert.fail('Background jobs must not create native terminal tickets'),execute:(root,job,prompt,{signal})=>new Promise((resolve,reject)=>calls.push({root,job,prompt,signal,resolve,reject}))};

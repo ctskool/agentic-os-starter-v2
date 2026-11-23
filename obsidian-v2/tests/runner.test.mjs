@@ -4,7 +4,7 @@ import {MARKER,ROOT,validateIntent,validateSelection} from '../shared/contract.m
 import {assertVault,vaultPath,writeJson,processJob} from '../runner/core.mjs';
 import {commandFor} from '../runner/adapters.mjs';
 import {resolveCli} from '../runner/cli-runtime.mjs';
-const job=()=>({version:2,id:crypto.randomUUID(),provider:'codex',model:'gpt-6-astra',skill:'vault-summary',ts:new Date().toISOString(),from:'plugin',args:{}});
+const job=()=>({version:2,id:crypto.randomUUID(),provider:'codex',model:'astra',skill:'vault-summary',ts:new Date().toISOString(),from:'plugin',args:{}});
 test('missing CLI never falls back to the other provider',()=>{
  for(const provider of ['codex','claude'])assert.equal(resolveCli(provider,{env:{},exists:()=>false}),null);
  assert.throws(()=>commandFor(process.cwd(),job(),null),/not installed/);

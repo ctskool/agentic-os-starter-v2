@@ -18,9 +18,9 @@ function fixture(t,provider='codex'){
  fs.writeFileSync(path.join(root,'.agentic-os-v2-test-vault'),'agentic-os-v2-only');
  let now=Date.now();t.mock.method(Date,'now',()=>now);
  const calls=[],sessions=[];
- const selection={provider,model:provider==='codex'?'gpt-6-astra':'sonnet'};
+ const selection={provider,model:provider==='codex'?'astra':'sonnet'};
  const terminals={live:new Map(),list:()=>sessions,get:id=>{const s=sessions.find(s=>s.id===id);if(!s)throw Error('Task not found');return s},start(task){calls.push({kind:'start',...task});return{id:task.id}},startWorkflow(task){calls.push({kind:'workflow',...task});return{id:task.id}},send(id,text){calls.push({kind:'send',id,text})}};
- const seed=(extra={})=>{const id=crypto.randomUUID();writeJson(root,`system/v2/voice-results/${id}.json`,{id,ts:now-20,provider,conversationEpoch:readConversationEpoch(root,provider),model:provider==='codex'?'gpt-5.6-luna':'haiku',engine:provider==='codex'?'luna':'haiku',tier:2,transcript:QUESTION,reply:OFFER,workIds:[],...extra});return id};
+ const seed=(extra={})=>{const id=crypto.randomUUID();writeJson(root,`system/v2/voice-results/${id}.json`,{id,ts:now-20,provider,conversationEpoch:readConversationEpoch(root,provider),model:provider==='codex'?'luna':'haiku',engine:provider==='codex'?'luna':'haiku',tier:2,transcript:QUESTION,reply:OFFER,workIds:[],...extra});return id};
  const choose=id=>setCurrent(root,terminals,{provider,id,now});
  const speak=(transcript,extra={},execute=()=>assert.fail('Offer follow-through must not call a model'))=>routeVoice(root,{id:crypto.randomUUID(),selection,transcript,terminalMode:true,workTarget:null,...extra},undefined,execute,terminals,{resolveCli:()=>({command:'unused-test-cli',prefix:[]})});
  return {root,calls,sessions,selection,seed,speak,choose,advance(ms){now+=ms},now:()=>now};
@@ -37,7 +37,7 @@ for(const provider of ['codex','claude']){
   assert.match(f.calls[0].prompt,/^dig deeper into local model options for you\n/);
   assert.ok(f.calls[0].prompt.includes(QUESTION));assert.ok(f.calls[0].prompt.includes(OFFER));
   assert.doesNotMatch(f.calls[0].prompt,/Original voice request: yes|UNRELATED_OLD_TASK|Unrelated old publishing request/);
-  assert.equal(reply.workerModel,provider==='codex'?'gpt-6-astra':'sonnet');
+  assert.equal(reply.workerModel,provider==='codex'?'astra':'sonnet');
   const receipt=JSON.parse(fs.readFileSync(path.join(f.root,'system/v2/voice-results',id+'.json'),'utf8'));assert.equal(receipt.transcript,'yes');
   assert.deepEqual(await f.speak('yes',{id}),reply);assert.equal(f.calls.length,1);
   f.advance(1);const repeated=await f.speak('yes');assert.equal(repeated.workIds.length,0);assert.equal(f.calls.length,1);
@@ -81,8 +81,8 @@ for(const provider of ['codex','claude']){
   const pending=await f.speak('yes');assert.equal(pending.pendingSkill,'content-cascade');assert.equal(pending.workIds.length,0);assert.match(pending.reply,/source URL/);assert.equal(f.calls.length,4);
  });
  test(`${provider}: selected-task offers retain their conversation and send actual accepted wording`,async t=>{
-  const f=fixture(t,provider),id=crypto.randomUUID();f.sessions.push({id,provider,model:provider==='codex'?'gpt-5.6-luna':'opus',title:'Current research',state:'ready',created:f.now(),conversationActivityAt:f.now(),turns:[]});f.choose(id);
-  const offered=await f.speak(QUESTION,{workTarget:id},async(_root,job)=>{assert.equal(job.model,provider==='codex'?'gpt-5.6-luna':'haiku');return {text:JSON.stringify({tier:2,reply:OFFER})}});
+  const f=fixture(t,provider),id=crypto.randomUUID();f.sessions.push({id,provider,model:provider==='codex'?'luna':'opus',title:'Current research',state:'ready',created:f.now(),conversationActivityAt:f.now(),turns:[]});f.choose(id);
+  const offered=await f.speak(QUESTION,{workTarget:id},async(_root,job)=>{assert.equal(job.model,provider==='codex'?'luna':'haiku');return {text:JSON.stringify({tier:2,reply:OFFER})}});
   assert.equal(offered.workTarget,id);assert.equal(f.calls.length,0);f.advance(20);
   const accepted=await f.speak('yes',{workTarget:id});assert.equal(accepted.tier,3);assert.equal(accepted.workerModel,f.sessions[0].model);assert.equal(f.calls.length,1);assert.equal(f.calls[0].kind,'send');assert.equal(f.calls[0].id,id);
   assert.match(f.calls[0].text,/^dig deeper into local model options for you\n/);assert.ok(f.calls[0].text.includes(QUESTION));assert.ok(f.calls[0].text.includes(OFFER));assert.notEqual(f.calls[0].text,'yes');
@@ -95,7 +95,7 @@ for(const provider of ['codex','claude']){
  });
  test(`${provider}: an accepted information-only offer stays out of terminals even if a model tries to escalate`,async t=>{
   const f=fixture(t,provider);f.seed({reply:'Want me to explain the local model findings?'});
-  const reply=await f.speak('yes',{},async(_root,job,_prompt,options)=>{assert.equal(job.model,provider==='codex'?'gpt-5.6-luna':'haiku');assert.equal(options.user,'explain the local model findings');return {text:'{"tier":3,"reply":"Starting a large research project."}'}});
+  const reply=await f.speak('yes',{},async(_root,job,_prompt,options)=>{assert.equal(job.model,provider==='codex'?'luna':'haiku');assert.equal(options.user,'explain the local model findings');return {text:'{"tier":3,"reply":"Starting a large research project."}'}});
   assert.equal(reply.workIds.length,0);assert.equal(f.calls.length,0);assert.match(reply.reply,/offer was only to explain or show/);
  });
  test(`${provider}: explaining a named skill does not invoke its short-alias workflow`,async t=>{

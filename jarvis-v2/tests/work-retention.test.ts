@@ -25,7 +25,7 @@ test('explicit expired-task draft copy preserves the original text and provider 
 
 test('copying an expired draft cannot replace an occupied new composer or its provider metadata',()=>{
   const storage=memory(),text='An existing draft';
-  stageRecoveredDraft(storage,destination,{prompt:text,title:'Existing',selection:{provider:'codex',model:'gpt-6-astra'}});
+  stageRecoveredDraft(storage,destination,{prompt:text,title:'Existing',selection:{provider:'codex',model:'astra'}});
   const before=storage.getItem(destination+':recovery');
   for(const draft of ['Different unsent text',text]){
     assert.throws(()=>stageExpiredTaskDraft(storage,source,destination,draft,oldTask),/new-task draft is already saved/);

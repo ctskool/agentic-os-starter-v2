@@ -1,6 +1,7 @@
 import {requestUrl} from 'obsidian';
 import type {VoiceTransport} from '../../shared/voice-session';
 import type {App} from 'obsidian';
+import {liveBridgeFetch} from '../../shared/live-surface';
 let tokenReader:(()=>Promise<string>)|undefined;
 let cachedToken:string|undefined;
 export function configureVoiceTransport(app:App,pluginDirectory:string){
@@ -20,6 +21,9 @@ async function authorization(refresh=false){
  if(!tokenReader)return undefined;
  return cachedToken??(cachedToken=await tokenReader());
 }
+export const v2LiveFetch=liveBridgeFetch('native',async refresh=>{
+ const token=await authorization(refresh);if(!token)throw new Error('Live voice needs the Obsidian desktop app.');return token;
+});
 export async function assertVoiceVault(app:App){
  const adapter=app.vault.adapter as typeof app.vault.adapter & {getBasePath?:()=>string};
  if(!adapter.getBasePath)return; // Browser preview is served from the bridge's configured vault.

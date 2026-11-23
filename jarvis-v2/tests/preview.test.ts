@@ -1,18 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 test("preview isolation, input validation, provider capture, and completion", async () => {
   const original = process.cwd();
-  const scratch = path.resolve(original, "../../work");
-  fs.mkdirSync(scratch, { recursive: true });
-  const fixture = fs.mkdtempSync(path.join(scratch, "preview-test-"));
+  const fixture = fs.mkdtempSync(path.resolve(os.tmpdir(), "jarvis-preview-test-"));
   fs.mkdirSync(path.join(fixture, "test-vault/system"), { recursive: true });
   process.chdir(fixture);
   // A production-style environment override must not affect the preview.
   const oldVault = process.env.VAULT_ROOT;
-  process.env.VAULT_ROOT = path.join(scratch, "a-production-vault");
+  process.env.VAULT_ROOT = path.join(fixture, "a-production-vault");
   try {
     const preview = await import("../lib/preview");
     assert.equal(preview.TEST_ROOT, path.join(fixture, "test-vault"));
@@ -49,5 +48,6 @@ test("preview isolation, input validation, provider capture, and completion", as
   } finally {
     process.chdir(original);
     if (oldVault === undefined) delete process.env.VAULT_ROOT; else process.env.VAULT_ROOT = oldVault;
+    fs.rmSync(fixture, { recursive: true, force: true });
   }
 });

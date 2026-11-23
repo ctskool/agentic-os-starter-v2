@@ -8,7 +8,7 @@ interface PendingReport {id:string;skill:string;label:string;expectsReport:boole
 interface ReportOptions {
  read:(id:string)=>Promise<SkillReportRecord|null>;
  ready:(path:string)=>Promise<boolean>;
- open:(path:string)=>Promise<void>;
+ open:(path:string,label:string)=>Promise<void>;
  notice:(message:string)=>void;
  changed?:(pending:boolean)=>void;
  now?:()=>number;
@@ -70,7 +70,7 @@ export class SkillReportTracker {
      // Claim before awaiting the open: vault events and multiple mounted
      // dashboards cannot race into creating another tab for the same job.
      this.finish(job);
-     try{await this.options.open(path)}catch{if(!this.closed)this.options.notice(`${job.label}: the report was saved, but could not be opened. Open it from the Activity Feed.`)}
+     try{await this.options.open(path,job.label)}catch{if(!this.closed)this.options.notice(`${job.label}: the report was saved, but could not be opened. Open it from the Activity Feed.`)}
     }
    }while(this.again&&!this.closed);
   }finally{this.busy=false}

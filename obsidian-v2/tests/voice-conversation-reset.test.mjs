@@ -12,7 +12,7 @@ import {writeJson} from '../runner/core.mjs';
 function fixture(t,provider){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'voice-conversation-reset-'));
  t.after(()=>{invalidateVoiceSnapshot(root);fs.rmSync(root,{recursive:true,force:true})});
- const selection={provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},other=provider==='codex'?'claude':'codex';
+ const selection={provider,model:provider==='codex'?'astra':'sonnet'},other=provider==='codex'?'claude':'codex';
  const records=new Map(),calls=[];
  const add=(chosen=selection)=>{const task={id:crypto.randomUUID(),...chosen,state:'ready',title:'Existing saved conversation',turns:[]};records.set(task.id,task);return task};
  const terminals={live:new Map(),list:()=>[...records.values()],get:id=>{const task=records.get(id);if(!task)throw Error('Missing task');return task},
@@ -28,7 +28,7 @@ function fixture(t,provider){
 
 for(const provider of ['codex','claude']){
  test(`${provider}: new conversation clears quick-only context while retaining other provider and saved work`,t=>{
-  const f=fixture(t,provider),saved=f.add(),other=f.add({provider:f.other,model:f.other==='codex'?'gpt-6-astra':'sonnet'});
+  const f=fixture(t,provider),saved=f.add(),other=f.add({provider:f.other,model:f.other==='codex'?'astra':'sonnet'});
   setCurrent(f.root,f.terminals,{provider:f.other,id:other.id});
   const file=f.receipt('old'),bytes=fs.readFileSync(file);f.receipt('other',{provider:f.other,transcript:'OTHER_PROVIDER_CONTEXT'});
   assert.equal(readCurrentState(f.root)[provider],null);assert.equal(voiceMemory(f.root,provider).length,1);

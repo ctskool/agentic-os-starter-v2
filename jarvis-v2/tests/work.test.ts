@@ -36,7 +36,7 @@ test('voice captures its task and provider across an asynchronous target change'
   const priorFetch=globalThis.fetch,priorWindow=globalThis.window;
   globalThis.window=new EventTarget() as unknown as Window & typeof globalThis;
   let current={codex:null as string|null,claude:null as string|null,revision:20},hold=false;
-  const tasks=[{id:'claude-conversation',provider:'claude',model:'sonnet'},{id:'codex-conversation',provider:'codex',model:'gpt-6-astra'}];
+  const tasks=[{id:'claude-conversation',provider:'claude',model:'sonnet'},{id:'codex-conversation',provider:'codex',model:'astra'}];
   let release:(r:Response)=>void=()=>{};
   globalThis.fetch=async(url,options)=>{
     if(String(url)==='/api/bridge-auth')return Response.json({token:'a'.repeat(64)});
@@ -53,7 +53,7 @@ test('voice captures its task and provider across an asynchronous target change'
     release(Response.json({tasks,current:{codex:current.codex,claude:current.claude},currentRevision:current.revision}));
     assert.deepEqual(await pending,{provider:'claude',model:'sonnet',terminalMode:true,targetId:'claude-conversation'});
     hold=false;await chooseWork(null);
-    assert.deepEqual(await getWorkSelection(),{provider:'codex',model:'gpt-6-astra',terminalMode:true,targetId:null});
+    assert.deepEqual(await getWorkSelection(),{provider:'codex',model:'astra',terminalMode:true,targetId:null});
     setWorkProvider('claude');assert.equal(workTarget(),'claude-conversation','New request cleared only Codex');
   }finally{globalThis.fetch=priorFetch;globalThis.window=priorWindow}
 });

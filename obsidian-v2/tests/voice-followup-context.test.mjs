@@ -13,7 +13,7 @@ import {setCurrent} from '../runner/current-conversations.mjs';
 function fixture(t,provider){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'voice-followup-context-'));
  t.after(()=>{invalidateVoiceSnapshot(root);fs.rmSync(root,{recursive:true,force:true})});
- const selection={provider,model:provider==='codex'?'gpt-6-astra':'sonnet'};
+ const selection={provider,model:provider==='codex'?'astra':'sonnet'};
  const calls=[],updates=[],tasks=[],classifications=[];
  const get=id=>{const task=tasks.find(task=>task.id===id);if(!task)throw Error('Task not found');return task};
  const terminals={live:new Map(),list:()=>tasks,get,
@@ -29,7 +29,7 @@ function fixture(t,provider){
  const add=(fields={})=>{const task={id:crypto.randomUUID(),...selection,title:'AI news visual',prompt:'Create an illustrated summary of yesterday’s AI news.',state:'ready',created:Date.now(),turns:[],...fields};tasks.push(task);if(task.provider===provider)setCurrent(root,terminals,{provider,id:task.id});return task};
  const model=(tier=3,inspect=()=>{})=>async(requestRoot,job,prompt,options)=>{
   assert.equal(requestRoot,root);assert.equal(job.provider,provider);
-  assert.equal(job.model,provider==='codex'?'gpt-5.6-luna':'haiku');
+  assert.equal(job.model,provider==='codex'?'luna':'haiku');
   classifications.push({job,prompt,options});inspect({job,prompt,options});
   return {text:JSON.stringify({tier,reply:tier===3?'I will continue that conversation.':'Here is the answer.'})};
  };
@@ -91,10 +91,10 @@ for(const provider of ['codex','claude']){
    'Can you go ahead and pull up that graphic you just created on yesterday’s report?'
   ];
   for(const transcript of utterances)await t.test(transcript,async t=>{
-   const f=fixture(t,provider),task=f.add({model:provider==='codex'?'gpt-5.6-luna':'opus'}),id=crypto.randomUUID();
+   const f=fixture(t,provider),task=f.add({model:provider==='codex'?'luna':'opus'}),id=crypto.randomUUID();
    const result=await f.speak(transcript,task.id,f.model(3,({options})=>assert.equal(options.user,transcript)),{id});
    assert.equal(f.classifications.length,1);assert.equal(result.tier,3);assert.equal(result.provider,provider);assert.equal(result.transcript,transcript);
-   assert.equal(result.workerModel,task.model);assert.equal(result.model,provider==='codex'?'gpt-5.6-luna':'haiku');
+   assert.equal(result.workerModel,task.model);assert.equal(result.model,provider==='codex'?'luna':'haiku');
    assert.deepEqual(result.workIds,[task.id]);assert.equal(result.workTarget,task.id);
    assert.equal(f.calls.length,1);assert.equal(f.calls[0].kind,'send');assert.equal(f.calls[0].id,task.id);
    assert.ok(f.calls[0].text===transcript||f.calls[0].text.startsWith(transcript+'\n\n'),'Original request must precede any appended context');

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { findCli } from './adapters.mjs';
 import { codexWindows } from '../shared/usage.mjs';
+import { withoutOpenAIKey } from './child-env.mjs';
 // One short-lived read-only connection per two minutes, shared by all HTTP clients.
 // No thread/start, turn/start, prompts, terminal PTYs, or ledger scans.
 export function readAccountLimits() {
@@ -11,7 +12,7 @@ export function readAccountLimits() {
             reject(new Error('Codex CLI is not installed.'));
             return;
         }
-        const proc = spawn(cli.command, [...cli.prefix, 'app-server', '--stdio'], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
+        const proc = spawn(cli.command, [...cli.prefix, 'app-server', '--stdio'], { stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true, env: withoutOpenAIKey(process.env) });
         const lines = createInterface({ input: proc.stdout });
         let settled = false;
         const finish = (error, value) => { if (settled)
@@ -54,7 +55,9 @@ export function readAccountLimits() {
     });
 }
 let cached = null, nextRead = 0, inflight = null;
-export async function getCodexUsage() {
+export async function getCodexUsage({ cachedOnly = false } = {}) {
+    if (cachedOnly)
+        return cached && Date.now() < nextRead ? cached : { status: 'unavailable', windows: [] };
     if (cached && Date.now() < nextRead)
         return cached;
     if (inflight)

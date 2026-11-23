@@ -7,6 +7,7 @@ import {workRequest,workFeed,fullAnswer,chooseWork,workTarget,publishWorkTask,is
 import type {VoiceSelection} from '../../shared/voice-session';
 import {replayTerminal} from '../../shared/terminal-playback';
 import {draftKey,readDraft,saveDraft,copyDraftToNewTask} from '../../shared/drafts';
+import {activityState} from '../../shared/task-activity';
 import {isOpenWork,isHistoryWork,taskStatus,shortTaskTitle} from '../../shared/work-presentation';
 import type {App} from 'obsidian';
 import {writeIntent} from '../lib/queue';
@@ -88,7 +89,7 @@ export function WorkPane({app,getSelection,taskId,onOpenTask}:{app?:App;getSelec
     if(!app)throw new Error('Open this workflow from the dashboard to retry it.');
     await writeIntent(app,saved.skill,saved.args,saved.selection);
    }else{
-    const r=await workRequest('/start',{id:crypto.randomUUID(),selection:saved?.selection||(chosen.provider==='codex'?{provider:'codex',model:'gpt-6-astra'}:chosen),prompt:capturedPrompt});
+    const r=await workRequest('/start',{id:crypto.randomUUID(),selection:saved?.selection||(chosen.provider==='codex'?{provider:'codex',model:'astra'}:chosen),prompt:capturedPrompt});
     publishWorkTask(r);opened=r.id;
    }
   }
@@ -108,7 +109,7 @@ export function WorkPane({app,getSelection,taskId,onOpenTask}:{app?:App;getSelec
    {tasks.filter(isHistoryWork).length?tasks.filter(isHistoryWork).map(t=><button key={t.id} onClick={()=>select(t.id)} title={t.title}><span>{shortTaskTitle(t,90)}</span><small>{t.provider==='codex'?'Codex':'Claude Code'} · {taskStatus(t)}{t.keep?' · Kept':''}</small></button>):<p>No saved conversations yet.</p>}
   </section>}
   {!onOpenTask&&<nav className="aos-work-tabs" aria-label="Terminal tabs">{tasks.filter(t=>!hidden.includes(t.id)&&(isOpenWork(t)||opened.includes(t.id)||selected===t.id)).map(t=><div key={t.id} className={selected===t.id?'is-active':''}>
-   <button className="aos-work-tab-select" aria-pressed={selected===t.id} title={t.title} onClick={()=>select(t.id)}><span>{shortTaskTitle(t,42)}</span><small>{taskStatus(t)}</small></button>
+   <button className="aos-work-tab-select" aria-pressed={selected===t.id} title={t.title} onClick={()=>select(t.id)}><span>{shortTaskTitle(t,42)}</span><small className="aos-terminal-status" data-state={activityState(t)||t.state}>{activityState(t)==='failed'?'Failed':activityState(t)==='done'?'Done':taskStatus(t)}</small></button>
    <button className="aos-work-tab-close" aria-label={`Hide ${t.title}`} title="Hide tab; keep terminal running" onClick={()=>{setHidden(v=>[...v,t.id]);if(selected===t.id)select(null)}}>×</button>
   </div>)}</nav>}
   <div className="aos-work-body">

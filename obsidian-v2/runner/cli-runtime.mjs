@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {projectRoot} from './runtime.mjs';
+import {withoutOpenAIKey} from './child-env.mjs';
 
 const pinFile=path.join(projectRoot,'.runtime','providers.json');
 export function assertCliRuntime(provider,cli,{exists=fs.existsSync}={}){
@@ -53,7 +54,7 @@ export function createCliRuntime({env=process.env,readPins=()=>fs.existsSync(pin
    if(!cli){status.delete(provider);return {installed:false,detail:`${provider} CLI is not installed`}}
    const key=identity(cli),cached=status.get(provider);
    if(cached?.key===key&&(cached.info.installed||now()-cached.checkedAt<5000))return cached.info;
-   const result=run(cli.command,[...cli.prefix,'--version'],{encoding:'utf8',timeout:5000,windowsHide:true,shell:false});
+   const result=run(cli.command,[...cli.prefix,'--version'],{encoding:'utf8',timeout:5000,windowsHide:true,shell:false,env:withoutOpenAIKey(process.env)});
    const version=result.status===0?(result.stdout||'').trim().slice(0,120):null;
    const info={installed:!!version,command:cli.command,source:cli.source,version,detail:version?'':`${provider} version check failed. Check its configured executable.`};
    status.set(provider,{key,info,checkedAt:now()});return info;

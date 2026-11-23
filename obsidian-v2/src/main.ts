@@ -13,6 +13,7 @@ import {NativeTerminalTabs,NATIVE_TERMINAL_VIEW,terminalConversation} from './li
 import {NativeDirectHost} from './lib/native-direct-host';
 import {v2VoiceTransport} from './lib/v2-voice';
 import {retireEmptyLaunchers} from './lib/retire-legacy-launchers';
+import {subscribeWorkNotices} from './lib/work-notices';
 import {registerSkillReports} from './lib/queue';
 
 export default class ChaseCommandCenter extends Plugin {
@@ -32,13 +33,17 @@ export default class ChaseCommandCenter extends Plugin {
 		await this.loadSettings();
         configureVoiceTransport(this.app,this.manifest.dir||`${this.app.vault.configDir}/plugins/${this.manifest.id}`);
         registerSkillReports(this);
+        this.register(subscribeWorkNotices(id=>{
+            const task=workFeed.getSnapshot().tasks.find((item:WorkTask)=>item.id===id);
+            if(task?.execution==='script')void this.activateView();else void this.activateWork([id],false);
+        }));
         // Terminal renders its own CLI directly. Only small control/status
         // messages use the bridge; its output is never polled by this host.
         if((this.app.vault.adapter as any).getBasePath){
             this.nativeDirect=new NativeDirectHost({app:this.app,request:async(path,body)=>{
                 const response=await v2VoiceTransport(path,body===undefined?{}:{method:'POST',body:JSON.stringify(body)});
                 if(response.status!==200)throw new Error(response.json?.error||'Native terminal service is unavailable.');return response.json;
-            },createLeaf:()=>this.createWorkLeaf(),reveal:async leaf=>{await this.app.workspace.revealLeaf(leaf)},withLayout:operation=>this.withNativeLayout(operation),notice:message=>{new Notice(message)}});
+            },createLeaf:reveal=>this.createWorkLeaf(reveal),reveal:async leaf=>{await this.app.workspace.revealLeaf(leaf)},withLayout:operation=>this.withNativeLayout(operation),notice:message=>{new Notice(message)}});
             const timers=(globalThis as any).require?.('timers')||globalThis;
             let polling=false,closed=false;
             const tick=async()=>{if(polling||closed)return;polling=true;try{await this.nativeDirect?.sync()}catch{/* Voice/work requests report connection errors; an idle poll stays quiet. */}finally{polling=false}};
@@ -239,8 +244,9 @@ export default class ChaseCommandCenter extends Plugin {
         try{return await operation()}finally{this.nativeLayoutDepth--}
     }
 
-    private createWorkLeaf(){
+    private createWorkLeaf(reveal=true){
         const workspace=this.app.workspace;
+        if(!reveal)return workspace.getLeaf('tab');
         const anchor=workspace.getLeavesOfType(NATIVE_TERMINAL_VIEW)[0]||workspace.getLeavesOfType(WORK_VIEW)[0];
         if(anchor){workspace.setActiveLeaf(anchor,{focus:false});return workspace.getLeaf('tab')}
         const dashboard=workspace.getLeavesOfType(COCKPIT_VIEW_TYPE)[0];if(dashboard)workspace.setActiveLeaf(dashboard,{focus:false});

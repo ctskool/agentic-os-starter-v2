@@ -35,7 +35,7 @@ test('native VoiceSession forwards its host heartbeat and refreshes immediately 
  replace(t,'window',window);replace(t,'document',document);let eventStream;
  replace(t,'EventSource',class {constructor(){eventStream=this}close(){this.closed=true}});
  t.mock.method(globalThis,'setInterval',()=>{throw new Error('Unexpected renderer interval')});
- let heartbeat,stops=0;const requests=[],voice=new VoiceSession(async(path,options)=>{requests.push({path,body:JSON.parse(options.body)});return {status:200,json:null}},async()=>({provider:'codex',model:'gpt-6-astra'}),'native',{version:'0.3.22',heartbeat:tick=>{heartbeat=tick;return()=>stops++}});
+ let heartbeat,stops=0;const requests=[],voice=new VoiceSession(async(path,options)=>{requests.push({path,body:JSON.parse(options.body)});return {status:200,json:null}},async()=>({provider:'codex',model:'astra'}),'native',{version:'0.3.22',heartbeat:tick=>{heartbeat=tick;return()=>stops++}});
  voice.connect();await flush();assert.equal(typeof heartbeat,'function');assert.equal(requests[0].body.visible,false);assert.equal(requests[0].body.version,'0.3.22');
  let before=requests.length;heartbeat();await flush();assert.equal(requests.length,before+1);
  before=requests.length;eventStream.onopen();await flush();assert.equal(requests.length,before+1);
@@ -77,7 +77,7 @@ test('a duplicate event stream cannot evict the active surface by knowing its ID
 test('event disconnect cancels remote capture and ignores its late transcript after reconnect',async t=>{
  replace(t,'window',new EventTarget());const doc=new EventTarget();doc.hidden=true;replace(t,'document',doc);replace(t,'AudioContext',undefined);
  let stream;replace(t,'EventSource',class {constructor(url){stream=this;this.id=new URL(url).searchParams.get('client')}close(){}});
- const requests=[],voice=new VoiceSession(async(path,options)=>{requests.push(path);return {status:200,json:null}},async()=>({provider:'codex',model:'gpt-6-astra'}),'native',{heartbeat:()=>()=>{}});let message='';voice.onMessage=text=>message=text;
+ const requests=[],voice=new VoiceSession(async(path,options)=>{requests.push(path);return {status:200,json:null}},async()=>({provider:'codex',model:'astra'}),'native',{heartbeat:()=>()=>{}});let message='';voice.onMessage=text=>message=text;
  voice.connect();await flush();stream.onmessage({data:JSON.stringify({type:'wake',client:stream.id})});assert.equal(voice.mode,'listening');
  stream.onerror();await flush();assert.equal(voice.mode,'idle');assert.match(message,/connection interrupted/);stream.onopen();
  stream.onmessage({data:JSON.stringify({type:'transcript',client:stream.id,text:'A late request must not run'})});await flush();assert.equal(requests.includes('/voice/text'),false);assert.equal(voice.mode,'idle');
@@ -86,6 +86,6 @@ test('event disconnect cancels remote capture and ignores its late transcript af
 
 test('focus rejected during an event reconnect never dispatches a request',async t=>{
  replace(t,'window',new EventTarget());const doc=new EventTarget();doc.hidden=false;replace(t,'document',doc);replace(t,'AudioContext',undefined);replace(t,'EventSource',class{close(){}});
- const requests=[],voice=new VoiceSession(async(path,options)=>{requests.push(path);return JSON.parse(options.body)?.focus?{status:503,json:{error:'Voice connection is reconnecting. Try again.'}}:{status:200,json:null}},async()=>({provider:'codex',model:'gpt-6-astra'}),'native',{heartbeat:()=>()=>{}});let message='';voice.onMessage=text=>message=text;
+ const requests=[],voice=new VoiceSession(async(path,options)=>{requests.push(path);return JSON.parse(options.body)?.focus?{status:503,json:{error:'Voice connection is reconnecting. Try again.'}}:{status:200,json:null}},async()=>({provider:'codex',model:'astra'}),'native',{heartbeat:()=>()=>{}});let message='';voice.onMessage=text=>message=text;
  voice.connect();await flush();await voice.sendText('Do not dispatch without ownership');assert.equal(requests.includes('/voice/text'),false);assert.match(message,/reconnecting/);assert.equal(voice.mode,'error');await voice.destroy();
 });

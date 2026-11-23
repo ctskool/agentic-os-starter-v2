@@ -7,7 +7,7 @@ import {rememberOpenTerminals,tabCloseAction,visibleTerminalTabs} from '../lib/t
 import type {WorkTask} from '../lib/work';
 
 function task(id:string,state='stopped',extra:Partial<WorkTask>={}):WorkTask {
-  return {id,title:id,provider:'codex',model:'gpt-6-astra',state,sessionId:null,error:null,pid:null,keep:false,lastActivityAt:1,expiresAt:2,turns:[],...extra};
+  return {id,title:id,provider:'codex',model:'astra',state,sessionId:null,error:null,pid:null,keep:false,lastActivityAt:1,expiresAt:2,turns:[],...extra};
 }
 const ids=(tasks:WorkTask[])=>tasks.map(item=>item.id);
 
@@ -44,7 +44,7 @@ test('all independently dispatched IDs survive an early empty summary and remain
   const received=[task('voice-codex','working'),task('voice-claude','error',{provider:'claude',model:'sonnet'}),task('unrelated-old')];
   const tabs=visibleTerminalTabs(received,opened,[],'voice-codex');
   assert.deepEqual(ids(tabs),pending);
-  assert.deepEqual(tabs.map(item=>[item.provider,item.model]),[['codex','gpt-6-astra'],['claude','sonnet']]);
+  assert.deepEqual(tabs.map(item=>[item.provider,item.model]),[['codex','astra'],['claude','sonnet']]);
   assert.equal(received[1].state,'error','showing the failed request does not resume it');
 });
 

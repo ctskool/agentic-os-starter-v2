@@ -63,7 +63,7 @@ function saveState(root,settings,scope,state){
  if(!Number.isSafeInteger(state.revision)||providers.some(p=>!Number.isSafeInteger(state.contextEpochs[p])))throw new Error('Voice conversation revision is out of range.');
  writeJson(root,relative,{version:2,scopes:{...settings,[scope]:state}});
 }
-export function reconcileCurrent(root,terminals,{scope='web',now=Date.now(),sessionId,sessionMode='fresh'}={}){
+export function reconcileCurrent(root,terminals,{scope='web',now=Date.now(),sessionId,sessionMode='fresh',persist=true}={}){
  checkedScope(scope);checkedNow(now);
  if(sessionId!==undefined&&!validId(sessionId))throw new Error('Choose a valid app session.');
  if(!['fresh','adopt'].includes(sessionMode)||scope!=='web'&&sessionMode==='adopt')throw new Error('Choose a valid app session mode.');
@@ -87,7 +87,7 @@ export function reconcileCurrent(root,terminals,{scope='web',now=Date.now(),sess
  }
  if(boundaryChanged)state.revision++;
  if(newSession)state.sessionIds=[...(state.sessionIds||[]),sessionId].slice(-16);
- if(boundaryChanged||newSession)saveState(root,settings,scope,state);
+ if(persist&&(boundaryChanged||newSession))saveState(root,settings,scope,state);
  return {...state.current,revision:state.revision};
 }
 // A request may have captured its target before a /work refresh cleared the
@@ -105,7 +105,7 @@ export function resolveVoiceTarget(root,terminals,{scope='web',provider,id,now=D
 }
 // Only the accepted user request path calls this. Unlike choosing a conversation,
 // a late completion cannot switch the destination or cross a context boundary.
-export function renewConversation(root,{provider,id,scope='web',now=Date.now()}={}){
+export function renewConversation(root,{provider,id,scope='web',now=Date.now()}={},beforeWrite){
  checkedScope(scope);checkedNow(now);
  if(!providers.includes(provider))throw new Error('Choose a valid provider and conversation.');
  if(!validId(id))return false;
@@ -114,6 +114,7 @@ export function renewConversation(root,{provider,id,scope='web',now=Date.now()}=
  const previous=state.selectionActivity?.[provider];
  if(validTime(previous)&&previous>=now)return true;
  const selectionActivity={codex:null,claude:null,...state.selectionActivity,[provider]:now};
+ beforeWrite?.();
  saveState(root,settings,scope,{...state,selectionActivity});return true;
 }
 export function setCurrent(root,terminals,{provider,id,resetContext=false,scope='web',now=Date.now()}={}){

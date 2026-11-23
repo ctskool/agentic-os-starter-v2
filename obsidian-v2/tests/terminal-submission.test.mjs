@@ -13,7 +13,7 @@ function fixture(t,provider='codex'){
   defer:(fn,delay)=>{const timer={fn,at:time+delay,canceled:false,unref(){}};timers.push(timer);return timer},cancelDeferred:timer=>timer.canceled=true,
   spawn:()=>{const proc={pid:500+processes.length,writes:[],write(text){this.writes.push(text)},onData(fn){this.data=fn},onExit(fn){this.exit=fn},resize(){},kill(){}};processes.push(proc);return proc},
  });
- const task=manager.start({selection:{provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},prompt:'Initial request'});
+ const task=manager.start({selection:{provider,model:provider==='codex'?'astra':'sonnet'},prompt:'Initial request'});
  manager.accept(task.id,{type:provider==='codex'?'complete':'Stop',sessionId:session,turnId:'initial',text:'Ready.'});
  t.after(()=>{manager.close();fs.rmSync(root,{recursive:true,force:true})});
  return {manager,task,processes,transcript,timers,now:()=>time,

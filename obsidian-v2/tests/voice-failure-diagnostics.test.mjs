@@ -1,4 +1,6 @@
 import test from 'node:test';
+import {handleVoiceHttp} from '../runner/voice-request.mjs';
+import {voiceReceiptTransport} from '../runner/voice-receipts.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,17 +18,17 @@ const source=fs.readFileSync(new URL('../runner/bridge.mjs',import.meta.url),'ut
 const marker="server.on('request',async(req,res)=>{";
 const start=source.indexOf(marker),end=source.indexOf('\n});\n{\n // Mint',start);
 assert.ok(start>=0&&end>start);
-const createHandler=new Function('deps',`const {preconnectJev=()=>false,classifierProcesses=()=>({running:0,detached:0,total:0}),root,fs,ROOT,origins,bridgeAuth,uuid,body,terminals,readCurrentState,reconcileCurrent,readConversationEpoch,readJson,vaultPath,writeJson,validateSelection,routeVoice,active,speech,fetch,hub,artifactTarget,artifacts}=deps;return async(req,res)=>{${source.slice(start+marker.length,end)}\n};`);
+const createHandler=new Function('deps','voiceAdapter','voiceReceiptTransport',`const {liveBridge,localPlaybacks,liveTimer,preconnectJev=()=>false,classifierProcesses=()=>({running:0,detached:0,total:0}),root,fs,ROOT,origins,bridgeAuth,uuid,body,terminals,readCurrentState,reconcileCurrent,readConversationEpoch,readJson,vaultPath,writeJson,validateSelection,routeVoice,active,speech,fetch,hub,artifactTarget,artifacts}=deps;return async(req,res)=>{const handleVoiceHttp=(ctx,...args)=>voiceAdapter({...ctx,route:routeVoice,fetchAudio:fetch,write:writeJson},...args);${source.slice(start+marker.length,end)}\n};`);
 const uuid=id=>typeof id==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id);
 
 function fixture(t,{scope='native',provider='codex',route=async()=>{throw new Error('Voice classification timed out')},stt=async()=>({ok:true,json:async()=>({text:'Pull up the morning intel brief.'})}),write=writeJson}={}){
  const temp=path.resolve(os.tmpdir()),root=fs.mkdtempSync(path.join(temp,'voice-failure-diagnostics-'));
  t.after(()=>{assert.equal(path.dirname(root),temp);assert.ok(path.basename(root).startsWith('voice-failure-diagnostics-'));fs.rmSync(root,{recursive:true,force:true})});
- const active=new Map(),chosen={provider,model:provider==='codex'?'gpt-6-astra':'sonnet'};let routes=0,bodyReads=0;
+ const active=new Map(),chosen={provider,model:provider==='codex'?'astra':'sonnet'};let routes=0,bodyReads=0;
  const handler=createHandler({root,fs,ROOT,origins:new Set(),bridgeAuth:{accepts:()=>true},uuid,terminals:{},readCurrentState,reconcileCurrent,readConversationEpoch,readJson,vaultPath,writeJson:write,validateSelection,active,speech:'http://test-speech',fetch:stt,hub:{live:()=>[]},artifactTarget:()=>null,artifacts:{bind(){}},
   body:async req=>{bodyReads++;return Buffer.isBuffer(req.payload)?req.payload:Buffer.from(JSON.stringify(req.payload))},
   routeVoice:async(...args)=>{routes++;return route(...args)}
- });
+ },handleVoiceHttp,voiceReceiptTransport);
  let lastResponse;
  const request=async(url,payload={},headers={})=>{
   const response=Object.assign(new EventEmitter(),{headersSent:false,writableEnded:false,destroyed:false,status:null,value:null,setHeader(){},writeHead(status){this.status=status;this.headersSent=true},end(text){this.writableEnded=true;this.value=text?JSON.parse(text):null}});lastResponse=response;

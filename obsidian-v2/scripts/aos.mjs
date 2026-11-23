@@ -20,10 +20,14 @@ const HELP = `Agentic OS V2
   status              what is running
   doctor [--full]     PASS / FAIL checks; --full also runs one real workflow
   jev-key             open a local page to save your OpenRouter key (never shown to an agent)
+  openai-key          open a local page to save your OpenAI key and consent for Live voice
   autostart on|off    start at login
   update              get the latest version and rebuild
   upgrade             find your existing system and assess an upgrade (read only)
   dashboard           list buttons; discover, add, select or reset dashboard skills
+  voice               how voice sounds, how fast it answers, the words it listens for (voice help)
+  schedule            run a workflow by itself at a set time, for example Plan Today at 7:00 (schedule help)
+  about               show or update the vault's About me section (about help)
 `;
 
 export function parseArgs(argv) {
@@ -55,6 +59,11 @@ export async function main(argv = process.argv.slice(2), log = console.log) {
       if (result.saved) log('Saved. The voice router picks it up within a few seconds; no restart needed.');
       return result.saved ? 0 : 1;
     }
+    case 'openai-key': {
+      const {collectOpenAIKey}=await import('./aos/openai-key.mjs');
+      const result=await collectOpenAIKey({runtimeDir:layout().runtime,announce:url=>log(`Open this local page to set up Live voice:\n${url}\nWaiting up to five minutes ...`)});
+      log(JSON.stringify(result));return result.saved?0:1;
+    }
     case 'autostart': {
       if (!['on', 'off'].includes(words[0])) throw new Error('Use: autostart on  or  autostart off');
       if (words[0] === 'on') await startAtLogin({log}); else log(disableAutostart(layout()));
@@ -63,6 +72,9 @@ export async function main(argv = process.argv.slice(2), log = console.log) {
     case 'update': return (await update({log})).ok ? 0 : 1;
     case 'upgrade': return (await import('./aos/upgrade.mjs')).upgradeCommand({words, flags, log});
     case 'dashboard': return (await import('./aos/dashboard.mjs')).dashboardCommand({words, flags, log});
+    case 'voice': return (await import('./aos/voice.mjs')).voiceCommand({words, flags, log});
+    case 'schedule': return (await import('./aos/schedule.mjs')).scheduleCommand({words, flags, log});
+    case 'about': return (await import('./aos/about.mjs')).aboutCommand({words, flags, log});
     default: log(HELP); return command === 'help' ? 0 : 1;
   }
 }

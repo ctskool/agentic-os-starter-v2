@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {queueWorkflowCallout,reconcileWorkflowCallouts} from '../lib/workflow-callouts';
+import {liveActivityCallout,queueWorkflowCallout,reconcileWorkflowCallouts} from '../lib/workflow-callouts';
 import type {RunEntry} from '../lib/vault';
 
 const run=(id:string,status:string,extra:Partial<RunEntry>={}):RunEntry=>({id,skill:'morning-report',label:'Morning Intel',status,summary:'',link:null,ts_started:'2026-09-14T12:00:00Z',ts_completed:null,duration_s:null,deliverable_path:null,...extra});
@@ -34,4 +34,27 @@ test('queue receipt deduplication and fresh-page snapshots do not replay old rep
   const queued=queueWorkflowCallout([],'same','Morning Intel',()=>1);
   assert.strictEqual(queueWorkflowCallout(queued,'same','Morning Intel',()=>2),queued);
   assert.deepEqual(reconcileWorkflowCallouts([],[run('historical','ok',{deliverable_path:'old.md'})],{},()=>3),[]);
+});
+
+test('a Live hand-off is one card that updates in place, clears when dropped, and never disturbs a workflow run',()=>{
+  let seq=0;const next=()=>++seq;
+  const running=queueWorkflowCallout([],'intel-run','Morning Intel',next);
+  let cards=liveActivityCallout(running,{key:'del_1',phase:'handoff',label:''},next,1000);
+  assert.equal(cards.length,2);
+  const card=()=>cards.find(item=>item.target==='live:del_1');
+  assert.deepEqual({label:card()?.label,phase:card()?.phase,note:card()?.note,kind:card()?.kind,startedAt:card()?.startedAt},{label:'Handing off',phase:'working',note:'V2 is working it out',kind:'task',startedAt:1000});
+  const slot=card()?.slot,id=card()?.id;
+  cards=liveActivityCallout(cards,{key:'del_1',phase:'starting',label:'Start Inbox Brief'},next);
+  assert.deepEqual({label:card()?.label,phase:card()?.phase,note:card()?.note,slot:card()?.slot,id:card()?.id},{label:'Inbox Brief',phase:'working',note:'starting',slot,id});
+  cards=liveActivityCallout(cards,{key:'del_1',phase:'started',label:'Start Inbox Brief'},next);
+  assert.deepEqual({phase:card()?.phase,note:card()?.note},{phase:'done',note:'started'});
+  cards=liveActivityCallout(cards,{key:'del_2',phase:'answered',label:'the morning brief'},next);
+  assert.equal(cards.find(item=>item.target==='live:del_2')?.label,'Morning brief');
+  cards=liveActivityCallout(cards,{key:'del_2',phase:'dropped',label:''},next);
+  assert.equal(cards.some(item=>item.target==='live:del_2'),false);
+  assert.equal(liveActivityCallout(cards,{key:'del_9',phase:'dropped',label:''},next),cards);
+  assert.equal(liveActivityCallout(cards,{key:'del_9',phase:'unknown',label:''},next),cards);
+  // The run's own card is untouched by all of it, and reconciling runs leaves the Live card alone.
+  assert.equal(cards.find(item=>item.target==='run:intel-run')?.phase,'queued');
+  assert.equal(reconcileWorkflowCallouts(cards,[run('intel-run','running')],{},next).find(item=>item.target==='live:del_1')?.note,'started');
 });

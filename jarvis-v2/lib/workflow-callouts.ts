@@ -10,6 +10,8 @@ export interface WorkflowCallout {
   etaS?:number|null;
   phase?:'queued'|'working'|'done'|'failed';
   detail?:string;
+  note?:string;
+  liveReport?:boolean;
 }
 
 export const isPendingCallout=(card:WorkflowCallout)=>card.kind==='task'&&(card.phase==='queued'||card.phase==='working');
@@ -43,4 +45,23 @@ export function reconcileWorkflowCallouts(cards:WorkflowCallout[],runs:RunEntry[
     }
   }
   return next;
+}
+
+// A Live hand-off shows beside the orb like a skill run: what V2 is doing with what was said.
+// The card is keyed by the hand-off, so each phase updates it in place; an answered or started card clears like a finished run.
+export function liveActivityCallout(cards:WorkflowCallout[],item:{key:string;phase:string;label:string},nextId:()=>number,now=Date.now()):WorkflowCallout[] {
+  const target=`live:${item.key}`,existing=cards.find(card=>card.target===target);
+  if(item.phase==='dropped')return existing?cards.filter(card=>card!==existing):cards;
+  // The card shows about sixteen characters of its label, so the label is the thing itself (Inbox Brief, Morning brief)
+  // and the line under it says what is happening to it. The full text is the hover title.
+  const name=(text:string,fallback:string)=>{const short=text.replace(/^(?:start|the)\s+/i,'').trim()||fallback;return short.charAt(0).toUpperCase()+short.slice(1)};
+  const view=item.phase==='handoff'?{label:'Handing off',phase:'working' as const,note:'V2 is working it out',detail:'Live handed this to V2'}:
+    item.phase==='starting'?{label:name(item.label,'Task'),phase:'working' as const,note:'starting',detail:item.label}:
+    item.phase==='answered'?{label:name(item.label,'Saved notes'),phase:'done' as const,note:'answered from this',detail:`V2 answered from ${item.label||'saved notes'}`}:
+    item.phase==='started'?{label:name(item.label,'Task'),phase:'done' as const,note:'started',detail:item.label}:null;
+  if(!view)return cards;
+  if(existing)return cards.map(card=>card===existing?{...card,...view}:card);
+  const used=new Set(cards.map(card=>card.slot)),free=[0,1,2,3].find(slot=>!used.has(slot));
+  const victim=free===undefined?(cards.find(card=>!isPendingCallout(card))??cards[0]):null;
+  return [...cards.filter(card=>card!==victim),{id:nextId(),kind:'task',target,slot:free??victim!.slot,startedAt:now,...view}];
 }

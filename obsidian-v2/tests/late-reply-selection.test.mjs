@@ -10,13 +10,13 @@ import {reconcileCurrent,setCurrent,readCurrentState,readConversationEpoch} from
 // A conversation the user selects while a spoken request is still being
 // dispatched must remain selected. The late reply may open its task, but it
 // must not move the automatic voice destination back or onto its new task.
-const chosen={provider:'codex',model:'gpt-6-astra'};
+const chosen={provider:'codex',model:'astra'};
 function fixture(t){
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'aos-late-reply-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
  fs.writeFileSync(path.join(dir,'.agentic-os-v2-test-vault'),'agentic-os-v2-only');
  for(const d of ['queue','processing','runs','logs','voice-results','voice-requests','voice-cancelled'])fs.mkdirSync(path.join(dir,'system/v2',d),{recursive:true});
  const root=path.resolve(fs.realpathSync(dir)),records=new Map(),now=Date.now();
- const task=(overrides={})=>{const r={id:crypto.randomUUID(),provider:'codex',model:'gpt-6-astra',state:'ready',created:now-60000,lastActivityAt:now-1000,conversationActivityAt:now-1000,turns:[{id:'t1',ts:now-1000,text:'earlier answer'}],...overrides};records.set(r.id,r);return r};
+ const task=(overrides={})=>{const r={id:crypto.randomUUID(),provider:'codex',model:'astra',state:'ready',created:now-60000,lastActivityAt:now-1000,conversationActivityAt:now-1000,turns:[{id:'t1',ts:now-1000,text:'earlier answer'}],...overrides};records.set(r.id,r);return r};
  const terminals={records,live:new Map(),get(id){const r=records.get(id);if(!r)throw new Error('Task not found');return r},list(){return [...records.values()]},sent:[],
   start(spec){const r={id:spec.id,provider:spec.selection.provider,model:spec.selection.model,state:'starting',created:Date.now(),lastActivityAt:Date.now(),conversationActivityAt:Date.now(),turns:[],prompt:spec.prompt,title:spec.title};records.set(r.id,r);terminals.onStart?.(r);return r},
   send(id,text,options){terminals.sent.push({id,text,options});terminals.onSend?.(id);return records.get(id)},

@@ -11,9 +11,15 @@ import path from "path";
 
 import { voiceContext } from "./voice-context.mjs";
 import { vaultPath } from "./core.mjs";
-import { replaceDaily } from "./note-edits.mjs";
+import { appendDailyDriver, dailyCheckboxEdit, replaceDaily } from "./note-edits.mjs";
 import { parseHackerNews } from "./brief-voice.mjs";
 const vaultRoot = () => voiceContext().root;
+function writeDaily(file: string, before: string, after: string, describe: () => object) {
+  const { root, editDaily } = voiceContext();
+  const change = {path: path.relative(root, file).replace(/\\/g, "/"), before, after};
+  if (editDaily) editDaily(change, describe);
+  else replaceDaily(root, change);
+}
 
 export interface MetricPoint {
   timestamp: string;
@@ -123,7 +129,7 @@ function safeJson<T>(p: string): T | null {
 
 // --- metrics.csv ------------------------------------------------------------
 // schema: timestamp,source,metric,value,status,error  (append-only)
-export function readMetrics(): Metric[] {
+export function readMetrics(onTimestamp?: (timestamp: string) => void): Metric[] {
   const raw = safeRead(path.join(vaultRoot(), "system", "metrics", "metrics.csv"));
   if (!raw) return [];
 
@@ -136,6 +142,7 @@ export function readMetrics(): Metric[] {
     const cols = line.split(",");
     if (cols.length < 5) continue;
     const [timestamp, source, metric, valueStr, status] = cols;
+    onTimestamp?.(timestamp);
     const value = parseFloat(valueStr);
     if (Number.isNaN(value)) continue;
     const key = `${source}:${metric}`;
@@ -436,8 +443,10 @@ export function toggleTop3(index: number, done: boolean): boolean {
     if (!m) continue;
     seen++;
     if (seen === index) {
-      lines[i] = `${m[1]}[${done ? "x" : " "}]${m[3]}`;
-      replaceDaily(vaultRoot(), {path: path.relative(vaultRoot(), file).replace(/\\/g, "/"), before: raw, after: lines.join(eol)});
+      const replacement = `${m[1]}[${done ? "x" : " "}]${m[3]}`;
+      const updated = lines.slice();
+      updated[i] = replacement;
+      writeDaily(file, raw, updated.join(eol), () => dailyCheckboxEdit(lines, i, replacement));
       return true;
     }
   }
@@ -502,8 +511,10 @@ export function toggleTaskFuzzy(
   }
   const m = lines[bestLine].match(/^((?:\d+\.|-)\s+)\[( |x)\](\s+)(.*)/)!;
   const nowDone = m[2] !== "x";
-  lines[bestLine] = `${m[1]}[${nowDone ? "x" : " "}]${m[3]}${m[4]}`;
-  replaceDaily(vaultRoot(), {path: path.relative(vaultRoot(), file).replace(/\\/g, "/"), before: raw, after: lines.join(eol)});
+  const replacement = `${m[1]}[${nowDone ? "x" : " "}]${m[3]}${m[4]}`;
+  const updated = lines.slice();
+  updated[bestLine] = replacement;
+  writeDaily(file, raw, updated.join(eol), () => dailyCheckboxEdit(lines, bestLine, replacement));
   return { ok: true, item: m[4].trim(), done: nowDone, section: bestSection };
 }
 
@@ -515,16 +526,9 @@ export function addDriver(text: string): boolean {
   const raw = safeRead(file);
   if (!raw) return false;
 
-  const eol = raw.includes("\r\n") ? "\r\n" : "\n";
-  const marker = "## Daily Drivers";
-  const idx = raw.indexOf(marker);
-  if (idx < 0) return false;
-  const afterHeading = idx + marker.length;
-  const nextSection = raw.indexOf("\n## ", afterHeading);
-  const insertAt = nextSection < 0 ? raw.length : nextSection;
-  const sectionContent = raw.slice(afterHeading, insertAt).replace(/\s+$/, "");
-  const newSection = `${sectionContent}${eol}- [ ] ${trimmed}${eol}`;
-  replaceDaily(vaultRoot(), {path: path.relative(vaultRoot(), file).replace(/\\/g, "/"), before: raw, after: raw.slice(0, afterHeading) + newSection + raw.slice(insertAt)});
+  const after = appendDailyDriver(raw, trimmed);
+  if (after === null) return false;
+  writeDaily(file, raw, after, () => ({kind:"add",text:trimmed}));
   return true;
 }
 
@@ -573,7 +577,7 @@ export function readOutliers(): OutlierState | null {
 // --- github trending slugs ---------------------------------------------------------
 // owner/name list from the latest trending report — lets the router resolve
 // "bring up that repo" against repos the OS actually knows about.
-export function readTrendingSlugs(max = 20): string[] {
+export function readTrendingRepos(max = 20, includeDescriptions = false): {rel: string; repos: string[]; descriptions: Record<string, string>} | null {
   try {
     const dir = path.join(vaultRoot(), "inbox", "research", "github-trending");
     const file = fs
@@ -581,9 +585,10 @@ export function readTrendingSlugs(max = 20): string[] {
       .filter((f) => f.endsWith(".md") && !f.startsWith("_"))
       .sort()
       .pop();
-    if (!file) return [];
+    if (!file) return null;
     const raw = (safeRead(path.join(dir, file)) ?? "");
     const out: string[] = [];
+    const descriptions: Record<string, string> = {};
     const seen = new Set<string>();
     const re = /^###\s+\d+\.\s+\[([^\]]+)\]/gm;
     let m: RegExpExecArray | null;
@@ -592,13 +597,19 @@ export function readTrendingSlugs(max = 20): string[] {
       if (slug.includes("/") && !seen.has(slug)) {
         seen.add(slug);
         out.push(slug);
+        if (includeDescriptions) {
+          const tail = raw.slice(re.lastIndex, re.lastIndex + 4000).split(/^#{1,3}\s/m, 1)[0];
+          const description = /^-\s+\*\*Description:\*\*\s*([^\r\n]+)/m.exec(tail)?.[1]?.trim();
+          if (description) descriptions[slug] = description;
+        }
       }
     }
-    return out;
+    return {rel: `inbox/research/github-trending/${file}`, repos: out, descriptions};
   } catch {
-    return [];
+    return null;
   }
 }
+export function readTrendingSlugs(max = 20): string[] { return readTrendingRepos(max)?.repos ?? []; }
 
 // --- latest report file (voice "open the …" targets) -------------------------------
 // Newest markdown in a report folder, optionally filtered by filename —

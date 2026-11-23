@@ -80,10 +80,10 @@ export class NativeTerminalManager extends TerminalManager {
  launch(r,options={}){
   if(!native(r))return super.launch(r,options);
   if(this.live.has(r.id))return r;
-  const {resumePrompt,spoken=!!r.spoken}=options;
+  const {resumePrompt,spoken=!!r.spoken,liveCallId}=options;
   if(resumePrompt!==undefined)cleanPrompt(resumePrompt);
   if(r.workflow&&!r.workflowCompleted&&[...this.records.values()].some(other=>other.id!==r.id&&other.workflow?.destination===r.workflow.destination&&!other.workflowCompleted&&this.live.has(other.id)))throw Error('Another task is updating this note. Wait for it to finish.');
-  r.skipWorkflowCompletion=!!r.sessionId&&resumePrompt===undefined;this.beginRequest(r);
+  r.skipWorkflowCompletion=!!r.sessionId&&resumePrompt===undefined;this.beginRequest(r,liveCallId);
   const cli=this.resolveNativeCli?.(r.provider)||findCli(r.provider);
   const spec=terminalSpec(this.root,r,cli,{resumePrompt,spoken,events:this.artifactOutbox(r.id)});
   const instance=crypto.randomUUID(),events=path.join(this.folder(r.id),'events');
@@ -94,15 +94,15 @@ export class NativeTerminalManager extends TerminalManager {
   fs.writeFileSync(ticket,JSON.stringify({version:1,taskId:r.id,instance,cwd:this.root,command:spec.command,args:spec.args,env,events}),{flag:'wx',mode:0o600});
   r.native={instance,startedAt:this.now(),lastSeen:0,ended:false,actions:[],ticket,cli:{command:cli.command,source:cli.source}};
   r.state='starting';r.pid=null;r.error=null;r.recoveryAvailable=false;delete r.inputReason;this.touch(r,{conversation:true});this.live.set(r.id,this.nativeLive(r));
-  this.command(r,'launch',{launch:{executable:process.execPath,args:[path.join(projectRoot,'runner','native-launch.mjs'),'--ticket',ticket],cwd:this.root,environment:[['AOS_V2_TASK_ID',r.id],['AOS_V2_TASK_PROVIDER',r.provider],['AOS_V2_NATIVE_INSTANCE',instance],['AOS_V2_NATIVE_DIRECT','1']],...(()=>{const python=this.terminalPython();return python?{pythonExecutable:python}:{}})()}});
+  this.command(r,'launch',{...(r.reveal===false?{reveal:false}:{}),launch:{executable:process.execPath,args:[path.join(projectRoot,'runner','native-launch.mjs'),'--ticket',ticket],cwd:this.root,environment:[['AOS_V2_TASK_ID',r.id],['AOS_V2_TASK_PROVIDER',r.provider],['AOS_V2_NATIVE_INSTANCE',instance],['AOS_V2_NATIVE_DIRECT','1']],...(()=>{const python=this.terminalPython();return python?{pythonExecutable:python}:{}})()}});
   return r;
  }
- send(id,text,{resumeStopped=false,spoken=false,openWhenDone=false}={}){
-  const r=this.get(id);if(!native(r))return super.send(id,text,{resumeStopped,spoken,openWhenDone});
+ send(id,text,{resumeStopped=false,spoken=false,openWhenDone=false,liveCallId}={}){
+  const r=this.get(id);if(!native(r))return super.send(id,text,{resumeStopped,spoken,openWhenDone,liveCallId});
   text=cleanPrompt(text);this.collect(id);this.assertFollowup(id,{resumeStopped});
   if(openWhenDone&&!r.openWhenDone){r.openWhenDone=true;this.save(r)}
-  if(!this.live.has(id))return this.launch(r,{resumePrompt:text,spoken});
-  const live=this.live.get(id);this.beginRequest(r);r.state='working';r.error=null;this.touch(r,{conversation:true});
+  if(!this.live.has(id))return this.launch(r,{resumePrompt:text,spoken,liveCallId});
+  const live=this.live.get(id);this.beginRequest(r,liveCallId);r.state='working';r.error=null;this.touch(r,{conversation:true});
   const handoff=artifactHandoffInstructions({node:process.execPath,helper:path.join(projectRoot,'runner','artifact-result.mjs'),events:this.artifactOutbox(id),taskId:id,requestKey:r.artifactRequestKey,provider:r.provider});
   const submitted=`${text}${spoken?`\n\n${WORKER_SPOKEN_STYLE}`:''}\n\n${handoff}`;
   this.expected(r,submitted);

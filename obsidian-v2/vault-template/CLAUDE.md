@@ -16,7 +16,7 @@ Top-level folders (each has its own `_index.md` — read it first):
 - **`wiki/`** — Evergreen knowledge. Post-ship harvest target (see Wiki Doctrine).
 - **`daily-notes/`** — Schema-locked daily rhythm. Format frozen at `system/schemas/daily-note.md` v1.
 - **`ops/`** — Business operations (finance, dashboards, ops reports). Audience: CPA, partner.
-- **`system/`** — Machine-readable plumbing. Subfolders: `schemas/`, `templates/`, `metrics/`, `queue/`, `runs/`, `bases/`, `dashboards/`, plus `runner-status.json` heartbeat.
+- **`system/`** — Machine-readable plumbing. Subfolders: `schemas/`, `templates/`, `metrics/`, `queue/`, `runs/`, `bases/`, `v2/`.
 
 All folders except `wiki/` and `system/` have an `archive/` subfolder. Run `/vault-cleanup` weekly — moves 7d+ stale files into archive. Wiki-links keep resolving from archive.
 
@@ -92,7 +92,7 @@ Bases sidebar filters `status != done AND status != archived`. Non-canonical val
 - **Daily-note format:** `system/schemas/daily-note.md`, frozen at `schema_version: 1`. Section headings and their order are the parser contract. Freeform content goes under `## Notes`.
 - **Metric CSV:** `system/metrics/metrics.csv`, schema `timestamp,source,metric,value,status,error`. Append-only.
 - **Agentic OS V2 state:** `system/v2/` (provider selection, task records, voice state, optional `profile.json`). Written by the local bridge. Never hand-edit while services are running.
-- **Your preferences:** `system/v2/profile.json` (optional). `{"dailyDrivers": ["Inbox triage", "Daily review"]}` sets the default Daily Drivers that Plan Today and Plan Tomorrow put into a new daily note.
+- **Your preferences:** `system/v2/profile.json` (optional). `{"dailyDrivers": ["Inbox triage", "Daily review"]}` sets the default Daily Drivers that Plan Today and Plan Tomorrow put into a new daily note. `"speechLanguage": "pt"` (`es`, `fr`, `it`, `pt`; leave it out for English) sets the language voice hears and speaks; after changing it run `node aos.mjs stop`, then `node aos.mjs setup --voice yes` in the starter folder.
 
 ### Who writes what
 

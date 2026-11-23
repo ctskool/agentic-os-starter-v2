@@ -1,5 +1,5 @@
 import { h } from 'preact';
-import { useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import { Notice } from 'obsidian';
 import type ChaseCommandCenter from '../main';
 import { useProvider } from '../lib/provider';
@@ -7,6 +7,11 @@ import { useDashboard, dashboardButtons, dashboardSkillReason, launchDashboardSk
 import { askForArg } from './IntentArgModal';
 import { openWorkflowPicker } from './WorkflowModal';
 import { openDashboardCustomization } from './DashboardModal';
+import { v2VoiceTransport } from '../lib/v2-voice';
+import { createScheduleNoteStore, type ScheduleNote } from '../../shared/schedule-note';
+
+// One store for every cockpit view: what is scheduled to run by itself (read-only here).
+let scheduleNotes: ReturnType<typeof createScheduleNoteStore> | null = null;
 
 interface Props {
  plugin: ChaseCommandCenter;
@@ -19,6 +24,9 @@ export function ActionBar({ plugin, onSubmitted, appearance = 'terminal' }: Prop
  const provider = useProvider(plugin.app);
  const dashboard = useDashboard(plugin.app);
  const [busy, setBusy] = useState(false);
+ const notes = useMemo(() => scheduleNotes ??= createScheduleNoteStore(v2VoiceTransport), []);
+ const [schedule, setSchedule] = useState<ScheduleNote>(() => notes.getSnapshot());
+ useEffect(() => notes.subscribe(setSchedule), [notes]);
  const fire = async (skill: DashboardSkill) => {
   if (busy) return;
   setBusy(true);
@@ -57,5 +65,7 @@ export function ActionBar({ plugin, onSubmitted, appearance = 'terminal' }: Prop
     </button>;
    })}
   </div>
+  {schedule.lines.length > 0 && <p className="aos-v2-empty" role="status" title="Change it with: node aos.mjs schedule" style={{ fontSize: '12px', marginTop: '8px' }}>Scheduled: {schedule.lines.join(' · ')}</p>}
+  {schedule.error && <p role="alert" style={{ fontSize: '12px' }}>Schedule: {schedule.error}</p>}
  </div>;
 }

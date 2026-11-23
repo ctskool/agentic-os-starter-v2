@@ -21,7 +21,7 @@ function fixture(t){
  write('projects/2026-05-10-skoot-crm-playbook.md');write('projects/2026-04-30-content-backfill-plan.md');write('projects/2026-05-02-content-calendar-plan.md');
  const calls=[],sessions=[],reopened=[];
  const terminals={live:new Map(),list:()=>sessions,get:id=>{const s=sessions.find(s=>s.id===id);if(!s)throw new Error('Task not found');return s},start:task=>{calls.push({kind:'start',...task});return {id:task.id}},send:(id,text)=>{calls.push({kind:'send',id,text})},startWorkflow:task=>{calls.push({kind:'workflow',...task});return {id:task.id}}};
- const speak=(transcript,{provider='codex',appScope='native',workTarget=null,execute=()=>assert.fail(`Opening must not call a model: ${transcript}`),conversationEpoch}={})=>routeVoice(root,{id:crypto.randomUUID(),selection:{provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},appScope,transcript,terminalMode:true,workTarget,conversationEpoch},undefined,execute,terminals,{resolveCli:()=>({command:'unused',prefix:[]}),reopenArtifact:item=>reopened.push(item)});
+ const speak=(transcript,{provider='codex',appScope='native',workTarget=null,execute=()=>assert.fail(`Opening must not call a model: ${transcript}`),conversationEpoch}={})=>routeVoice(root,{id:crypto.randomUUID(),selection:{provider,model:provider==='codex'?'astra':'sonnet'},appScope,transcript,terminalMode:true,workTarget,conversationEpoch},undefined,execute,terminals,{resolveCli:()=>({command:'unused',prefix:[]}),reopenArtifact:item=>reopened.push(item)});
  return {root,write,speak,terminals,calls,sessions,reopened,intel,today,yesterday,older};
 }
 const opened=(result,path)=>{assert.equal(result.deliverable,path);assert.equal(result.reveal,'open');assert.equal(result.reply,'');assert.equal(result.model,null);assert.equal(result.engine,'rules');assert.deepEqual(result.workIds,[]);assert.ok([undefined,'open'].includes(result.lookupRoute))};
@@ -65,7 +65,7 @@ test('named notes open by title, speech errors tolerated, and a tie becomes one 
 test('a selected conversation reopens its registered file without a worker turn; an HTML-only result is explained',async t=>{
  const f=fixture(t);
  const png={id:'a'.repeat(40),taskId:'11111111-1111-4111-8111-111111111111',turnId:'t1',path:'system/v2/artifacts/files/'+'0'.repeat(64)+'.png',label:'Jev preview',mime:'image/png',bytes:4,open:true,isFinal:true};
- const task={id:png.taskId,provider:'codex',model:'gpt-6-astra',title:'Jev explainer',state:'ready',execution:'native',created:Date.now(),turns:[{id:'t1',ts:Date.now(),text:'Done.',artifacts:[png]}]};
+ const task={id:png.taskId,provider:'codex',model:'astra',title:'Jev explainer',state:'ready',execution:'native',created:Date.now(),turns:[{id:'t1',ts:Date.now(),text:'Done.',artifacts:[png]}]};
  f.sessions.push(task);
  const shown=await f.speak("Can't you pull up that explainer in one of the obsidian tabs?",{workTarget:task.id});
  assert.deepEqual(f.reopened.map(r=>({taskId:r.taskId,artifactId:r.artifact.id})),[{taskId:task.id,artifactId:png.id}]);
@@ -75,7 +75,7 @@ test('a selected conversation reopens its registered file without a worker turn;
  // Real work follow-ups still continue the conversation.
  await f.speak('change the colors to blue',{workTarget:task.id,execute:async()=>({text:JSON.stringify({tier:3,reply:'On it.'})})});
  assert.equal(f.calls.at(-1)?.kind,'send');assert.match(f.calls.at(-1).text,/^change the colors to blue/);
- const html={id:'22222222-2222-4222-8222-222222222222',provider:'codex',model:'gpt-6-astra',title:'HTML explainer',state:'ready',execution:'native',created:Date.now(),turns:[{id:'t1',ts:Date.now(),text:'Done.\n\n[View the explainer](<'+f.root.replace(/\\/g,'/')+'/outputs/jev-explainer/jev-explainer.html>)',artifactErrors:['This artifact type is not supported for preview.']}]};
+ const html={id:'22222222-2222-4222-8222-222222222222',provider:'codex',model:'astra',title:'HTML explainer',state:'ready',execution:'native',created:Date.now(),turns:[{id:'t1',ts:Date.now(),text:'Done.\n\n[View the explainer](<'+f.root.replace(/\\/g,'/')+'/outputs/jev-explainer/jev-explainer.html>)',artifactErrors:['This artifact type is not supported for preview.']}]};
  f.sessions.push(html);
  const explained=await f.speak('pull it up',{workTarget:html.id});
  assert.match(explained.reply,/^The file from that conversation is a \.html file, which I can't display in Obsidian or the dashboard\. It's saved at outputs\/jev-explainer\/jev-explainer\.html\.$/);
@@ -118,7 +118,7 @@ for(const {provider,appScope} of [{provider:'codex',appScope:'native'},{provider
 
 test('a plain work request does not promise an open, and a continuation carries the promise to the selected conversation',async t=>{
  const f=fixture(t);
- const task={id:'22222222-2222-4222-8222-222222222222',provider:'codex',model:'gpt-6-astra',title:'Jev explainer',state:'ready',execution:'native',created:Date.now(),turns:[{id:'t1',ts:Date.now(),text:'Done.'}]};
+ const task={id:'22222222-2222-4222-8222-222222222222',provider:'codex',model:'astra',title:'Jev explainer',state:'ready',execution:'native',created:Date.now(),turns:[{id:'t1',ts:Date.now(),text:'Done.'}]};
  f.sessions.push(task);
  const model=()=>({text:JSON.stringify({tier:3,reply:'Working on it.'})});
  const plain=await f.speak('create a visual explainer of how jev works using your image generation tool',{execute:model});

@@ -9,7 +9,7 @@ interface NativeEvent {taskId:string;instance:string;actionId?:string;type:strin
 interface Session {taskId:string;instance:string;leaf:WorkspaceLeaf;view:DirectTerminalView;binding:DirectTerminalBinding;lifetime:TerminalLifetime;revision:number;closed:boolean}
 interface Registry {sessions:Map<string,Session>;claimed:Set<string>;events:NativeEvent[];queue:Promise<void>;notified?:Set<string>}
 interface HostOptions {
- app:App;request:(path:string,body?:unknown)=>Promise<any>;createLeaf:()=>WorkspaceLeaf;
+ app:App;request:(path:string,body?:unknown)=>Promise<any>;createLeaf:(reveal:boolean)=>WorkspaceLeaf;
  reveal?:(leaf:WorkspaceLeaf)=>Promise<void>;notice:(message:string)=>void;
  withLayout?:<T>(operation:()=>Promise<T>)=>Promise<T>;
  /** Test seams avoid real PTYs and clocks. */
@@ -86,14 +86,21 @@ export class NativeDirectHost {
   let leaf:WorkspaceLeaf|undefined;
   try{
    const state=directTerminalViewState(withLifetime,base?.type==='integrated'?base:{});
-   leaf=await this.layout(async()=>{const created=this.options.createLeaf();leaf=created;await created.setViewState(state);return created});
+   leaf=await this.layout(async()=>{
+    const workspace=this.options.app.workspace,previous=workspace.activeLeaf;
+    const created=this.options.createLeaf(action.reveal!==false);leaf=created;
+    await created.setViewState(state);
+    if(action.reveal===false&&previous&&previous!==created&&workspace.activeLeaf===created)workspace.setActiveLeaf(previous,{focus:false});
+    return created;
+   });
    const target=directTerminalMetadata(leaf);
    if(!this.options.app.workspace.getLeavesOfType(NATIVE_TERMINAL_VIEW).includes(leaf)||target?.instance!==action.instance){lifetime.close();this.enqueue({taskId:action.taskId,instance:action.instance,actionId:action.id,type:'closed',reason:'The terminal was closed while opening.'});return null}
    bindTerminalLifetime(leaf.view,lifetime);
    const session=this.bind(leaf,action.taskId,action.instance,lifetime,action.id);
    await session.binding.ready;
    if(!this.alive(session))return null;
-   await this.layout(async()=>{await this.options.reveal?.(leaf!)});return leaf;
+   if(action.reveal!==false)await this.layout(async()=>{await this.options.reveal?.(leaf!)});
+   return leaf;
   }catch(error){
    if(!leaf||leaf.getViewState().type!==NATIVE_TERMINAL_VIEW)lifetime.close();
    // The profile may already have launched a process. Leave that Terminal view

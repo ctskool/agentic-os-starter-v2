@@ -13,7 +13,7 @@ test('configured executable wins over PATH and missing pin never silently falls 
 });
 
 test('Luna classifier context restrictions do not remove worker tool access',()=>{
- const root=process.cwd(),cli={command:'test-codex',prefix:[]},base={id:'00000000-0000-4000-8000-000000000000',provider:'codex',model:'gpt-5.6-luna'};
+ const root=process.cwd(),cli={command:'test-codex',prefix:[]},base={id:'00000000-0000-4000-8000-000000000000',provider:'codex',model:'luna'};
  const quick=commandFor(root,base,cli).args;
  assert.ok(quick.includes('skills.max_context_tokens=1'));
  assert.ok(quick.includes('features.shell_tool=false'));
@@ -23,7 +23,7 @@ test('Luna classifier context restrictions do not remove worker tool access',()=
  assert.ok(!quick.includes('model_reasoning_effort="max"'));
  assert.ok(!quick.includes('model_reasoning_effort="low"'));
  assert.ok(quick.some(a=>a.startsWith('model_instructions_file=')));
- const worker=commandFor(root,{...base,model:'gpt-6-astra',skill:'vault-summary'},cli).args;
+ const worker=commandFor(root,{...base,model:'astra',skill:'vault-summary'},cli).args;
  assert.ok(!worker.includes('features.shell_tool=false'));
  assert.ok(worker.includes('model_reasoning_effort="medium"'));
  assert.ok(!worker.some(a=>a.startsWith('model_instructions_file=')));

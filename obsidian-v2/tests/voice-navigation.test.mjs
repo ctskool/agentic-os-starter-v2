@@ -23,10 +23,16 @@ test('explicit saved-report opens navigate directly in native Obsidian for eithe
 });
 
 const stubs={
- '../../obsidian-v2/shared/voice-session':`export const sessions=[];export class VoiceSession{constructor(){this.mode='idle';this.cancellations=[];sessions.push(this)}connect(){}destroy(){}cancel(reason){this.cancellations.push(reason);this.mode='idle';return 'cancel-result'} }export const browserVoiceTransport=()=>()=>{throw new Error('No network allowed')};`,
+ '../../obsidian-v2/shared/voice-session':`export const sessions=[];export class VoiceSession{constructor(){this.mode='idle';this.muted=false;this.cancellations=[];sessions.push(this)}connect(){}destroy(){}toggle(){this.mode='listening'}cancel(reason){this.cancellations.push(reason);this.mode='idle';return 'cancel-result'} }export const browserVoiceTransport=()=>()=>{throw new Error('No network allowed')};`,
  './work':`export const workCalls=[];export const workFeed={refresh:async()=>({tasks:[]})};export function syncWorkReply(){}export function openWork(ids=[],spoken=false){workCalls.push({ids,spoken})}export function getWorkSelection(){throw new Error('No request dispatched')}`,
  './bridge-auth':`export function authorizeBridge(){throw new Error('No authorization required')}`,
  '../../obsidian-v2/shared/timezone.mjs':`export const TIME_ZONE=new Intl.DateTimeFormat().resolvedOptions().timeZone;`,
+ // The vault's voice settings (spoken replies, voice, speed); a HUD from before them does not import this.
+ '../../obsidian-v2/shared/voice-prefs':`export const VOICE_RATES=[1],VOICE_SAMPLE='',rateLabel=()=>'',voiceGroups=()=>[];const snapshot={prefs:{spokenReplies:true,voice:null,rate:1,voiceMode:'local'},voices:[],fallback:null,ready:true};export const createVoicePrefsStore=()=>({getSnapshot:()=>snapshot,subscribe(fn){fn(snapshot);return ()=>{}},refresh:async()=>({}),save:async()=>({})})`,
+ // The HUD initializes Live support alongside Local, so stub the session and its transport.
+ '../../obsidian-v2/shared/live-session':`export const initialLive={state:'idle',occupied:null,unavailable:null};export class LiveSession{subscribe(fn){fn(initialLive);return ()=>{}}connect(){}configure(prefs){if(prefs.voiceMode!=='local')throw new Error('Expected Local mode')}stop(){return false}destroy(){}toggle(){throw new Error('Local voice must not start Live')}}`,
+ '../../obsidian-v2/shared/live-surface':`export const liveBridgeFetch=()=>()=>{throw new Error('No network allowed')}`,
+ '../../obsidian-v2/shared/task-activity':`export const localTaskSpeech=mode=>mode!=='live'`,
 };
 const jarvis=await load(await build({stdin:{contents:`export {voice} from '../jarvis-v2/lib/voiceClient';export {sessions} from '../../obsidian-v2/shared/voice-session';export {workCalls} from './work';`,loader:'ts',resolveDir:process.cwd()},bundle:true,platform:'node',format:'esm',write:false,plugins:[{name:'voice-navigation-fixture',setup(builder){
  builder.onResolve({filter:/.*/},args=>{if(args.path==='../jarvis-v2/lib/voiceClient')return {path:path.resolve('../jarvis-v2/lib/voiceClient.ts')};if(args.path in stubs)return {path:args.path,namespace:'fixture'};throw new Error('Unexpected voice dependency '+args.path)});
@@ -35,14 +41,18 @@ const jarvis=await load(await build({stdin:{contents:`export {voice} from '../ja
 
 test('Jarvis quick documents highlight does not open work, a report, or a reveal',()=>{
  const highlights=[];jarvis.voice.onPanels(value=>highlights.push(value));jarvis.voice.onOpenDoc(()=>assert.fail('no report opening'));jarvis.voice.onDeliverable(()=>assert.fail('no report callout'));jarvis.voice.onReveal(()=>assert.fail('no reveal'));
- jarvis.voice.init();const before=jarvis.workCalls.length;jarvis.sessions.at(-1).onReply(quickReply);assert.deepEqual(highlights,[['documents']]);assert.equal(jarvis.workCalls.length,before);jarvis.voice.destroy();
+ jarvis.voice.init();const before=jarvis.workCalls.length,session=jarvis.sessions.at(-1);
+ jarvis.voice.toggle();assert.equal(session.mode,'listening');
+ session.onReply(quickReply);assert.deepEqual(highlights,[['documents']]);assert.equal(jarvis.workCalls.length,before);jarvis.voice.destroy();
 });
 
-test('explicit terminal command and actual work IDs still open Jarvis work',()=>{
+// Voice-started work refreshes the task chips without taking over the screen; only an explicit
+// "open the terminal" command reveals the drawer (2026-11-22).
+test('voice-started work stays in the background and an explicit terminal command opens Jarvis work',()=>{
  jarvis.voice.init();const session=jarvis.sessions.at(-1),before=jarvis.workCalls.length;
  session.onReply({...quickReply,panels:[],workIds:['new-a','new-b'],action:'task'});
  session.onReply({...quickReply,panels:[],obsidian:{op:'command',id:'terminal:open-terminal.default.root',label:'terminal'}});
- assert.deepEqual(jarvis.workCalls.slice(before),[{ids:['new-a','new-b'],spoken:true},{ids:[],spoken:false}]);jarvis.voice.destroy();
+ assert.deepEqual(jarvis.workCalls.slice(before),[{ids:['new-a','new-b'],spoken:false},{ids:[],spoken:true}]);jarvis.voice.destroy();
 });
 
 test('explicit saved-report opens display the report in Jarvis without a terminal or extra callout',()=>{

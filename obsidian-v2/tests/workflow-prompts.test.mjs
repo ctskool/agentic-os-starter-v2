@@ -13,7 +13,7 @@ function setup(t,skill,provider='codex'){
  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
  const id=crypto.randomUUID(),spec=SKILLS[skill];
  const args=spec.arg?{[spec.arg]:spec.arg==='url'?'https://example.com/video':'A practical agent topic'}:{};
- const selection={provider,model:provider==='codex'?'gpt-6-astra':'sonnet'};
+ const selection={provider,model:provider==='codex'?'astra':'sonnet'};
  const workflow=prepareWorkflow(root,{id,selection,skill,args});
  const instructions=fs.readFileSync(path.join(root,ROOT,'task-instructions',id+'.md'),'utf8');
  return {root,workflow,instructions,record:{id,created:Date.now(),execution:'terminal',workflow}};

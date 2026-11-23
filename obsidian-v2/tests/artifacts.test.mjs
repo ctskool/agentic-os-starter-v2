@@ -91,7 +91,7 @@ test('Claude tool output capture is bounded to its matching session and last use
 for(const provider of ['codex','claude'])test(`${provider} explicit helper attaches to the exact request; invalid output does not swallow completion`,t=>{
  const f=fixture(t),processes=[];
  const manager=f.manager=new TerminalManager(f.root,{directory:path.join(f.base,'tasks'),spawn(command,args,options){const proc={pid:10,env:options.env,onData(){},onExit(){},write(){},kill(){},resize(){}};processes.push(proc);return proc;}});
- const record=manager.start({selection:{provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},prompt:'Create and show a file'});
+ const record=manager.start({selection:{provider,model:provider==='codex'?'astra':'sonnet'},prompt:'Create and show a file'});
  const file=write(path.join(f.root,'outputs','answer.md'),'# Result\nA useful document.');
  const helper=fileURLToPath(new URL('../runner/artifact-result.mjs',import.meta.url));
  const result=spawnSync(process.execPath,[helper,file,'--open','--label','Answer'],{env:processes[0].env,cwd:f.root,encoding:'utf8',windowsHide:true});assert.equal(result.status,0,result.stderr);

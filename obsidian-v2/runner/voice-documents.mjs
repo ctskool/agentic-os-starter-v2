@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {vaultPath} from './core.mjs';
+import {voiceReceiptTransport} from './voice-receipts.mjs';
 const indexes=new Map();
 export function resolveVoiceNote(root,query){
  const clean=query.replaceAll('\\','/');
@@ -18,9 +19,16 @@ export function resolveVoiceNote(root,query){
  const top=scored[0];return top&&top.score>=Math.max(1,words.length)&&top.score!==scored[1]?.score?top.file:null;
 }
 export function readVoiceReport(root,relative,runs,receipts){
- const known=runs.some(r=>r.deliverable_path===relative||r.artifact_path===relative)||receipts.some(r=>r.deliverable===relative||r.briefSource===relative||r.obsidian?.op==='open-note'&&r.obsidian.query===relative||r.reveals?.some(v=>v.kind==='doc'&&v.target===relative));
+ const known=runs.some(r=>r.deliverable_path===relative||r.artifact_path===relative)||receipts.some(r=>voiceReceiptTransport(r)==='local'&&(r.deliverable===relative||r.briefSource===relative||r.obsidian?.op==='open-note'&&r.obsidian.query===relative||r.reveals?.some(v=>v.kind==='doc'&&v.target===relative)));
  const daily=/^daily-notes\/\d{4}-\d{2}-\d{2}\.md$/.test(relative);
  if(!known&&!daily)throw new Error('Only referenced notes and recorded outputs can be opened');
+ return readReport(root,relative);
+}
+export function readLiveVoiceReport(root,relative,paths){
+ if(!paths?.has(relative)||relative.replaceAll('\\','/').split('/').some(part=>part.startsWith('.')))throw new Error('This report was not revealed in this Live call.');
+ return readReport(root,relative);
+}
+function readReport(root,relative){
  const file=vaultPath(root,relative),stat=fs.statSync(file);
  if(!stat.isFile()||stat.size>2000000)throw new Error('This report is too large to open here.');
  return {path:relative,content:fs.readFileSync(file,'utf8')};

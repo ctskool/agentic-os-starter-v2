@@ -1,15 +1,22 @@
 import test,{after} from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import crypto from 'node:crypto';
 import {SKILLS,ROOT,validateIntent} from '../shared/contract.mjs';
 import {mergeDaily,destinationFor} from '../runner/workflows.mjs';
-import {processJob,writeJson} from '../runner/core.mjs';
+import {processJob,writeJson,buildPrompt} from '../runner/core.mjs';
 import {routeVoice} from '../runner/bridge-core.mjs';
 import {parseWorkerResult} from '../runner/adapters.mjs';
 import {spawn} from 'node:child_process';
 import {MARKER} from '../shared/contract.mjs';
-const job=(skill,args={})=>({version:2,id:crypto.randomUUID(),provider:'codex',model:'gpt-6-astra',skill,args,ts:new Date().toISOString(),from:'plugin'});
+const job=(skill,args={})=>({version:2,id:crypto.randomUUID(),provider:'codex',model:'astra',skill,args,ts:new Date().toISOString(),from:'plugin'});
 const tempRoots=[];after(()=>{for(const root of tempRoots)fs.rmSync(root,{recursive:true,force:true})});
 const temp=()=>{const root=fs.mkdtempSync(path.join(os.tmpdir(),'aos-parity-'));tempRoots.push(root);return root};
 const note='---\nschema_version: 1\nfocus: Keep this\n---\n# Today\n\n## Current Focus\nMy words.\n\n## Top 3 Priorities\n1. [x] Shipped thing\n2. [ ] Existing commitment\n3. [ ] \n\n## Schedule\n- 10:00 — Old event\n\n## Daily Drivers\n- [x] Recorded\n\n## Notes\nPrivate notes stay here.\n\n## EOD Reflection\nKeep reflection.\n';
+test('worker instructions discover the selected provider’s Google connectors',()=>{
+ const root=temp(),prompt=buildPrompt(root,job('plan-today'));
+ assert.match(prompt,/names contain Google_Calendar, Gmail or Google_Drive/);assert.doesNotMatch(prompt,/mcp__claude_ai/);
+ assert.match(prompt,/In Codex, use its connected Google tools/);
+ assert.match(prompt,/after trying the appropriate connector/);
+ assert.doesNotMatch(prompt,/calendar_events|inbox_messages/);
+});
 test('daily merge fills empty slots and preserves all other content and checked items',()=>{
  const out=mergeDaily(note,'2026-09-06','- 14:00 — Real event',['New priority']);
  assert.match(out,/1\. \[x\] Shipped thing/);assert.match(out,/2\. \[ \] Existing commitment/);assert.match(out,/3\. \[ \] New priority/);assert.match(out,/14:00 — Real event/);assert.doesNotMatch(out,/Old event/);
@@ -36,8 +43,8 @@ test('all original workflows have deliverables and required args cannot be omitt
 });
 test('open-ended voice reaches Astra with the original request and provider-scoped context',async()=>{
  const root=temp(),id=crypto.randomUUID();writeJson(root,`${ROOT}/runner-status.json`,{ts:new Date().toISOString(),busy:false});writeJson(root,`${ROOT}/voice-results/old.json`,{ts:Date.now()-1000,provider:'codex',transcript:'My topic is agents',reply:'Okay'});
- const r=await routeVoice(root,{id,selection:{provider:'codex',model:'gpt-5.6-luna'},transcript:'Compare those approaches using my notes'},null,async()=>({text:'{"action":"task","skill":"voice-ask","args":{"prompt":"rewritten"},"reply":"Working on it"}'}));
- assert.equal(r.tier,3);const queued=JSON.parse(fs.readFileSync(path.join(root,`${ROOT}/queue/${id}.json`),'utf8'));assert.equal(queued.args.prompt,'Compare those approaches using my notes');assert.match(queued.args.context,/My topic is agents/);assert.equal(queued.model,'gpt-6-astra');
+ const r=await routeVoice(root,{id,selection:{provider:'codex',model:'luna'},transcript:'Compare those approaches using my notes'},null,async()=>({text:'{"action":"task","skill":"voice-ask","args":{"prompt":"rewritten"},"reply":"Working on it"}'}));
+ assert.equal(r.tier,3);const queued=JSON.parse(fs.readFileSync(path.join(root,`${ROOT}/queue/${id}.json`),'utf8'));assert.equal(queued.args.prompt,'Compare those approaches using my notes');assert.match(queued.args.context,/My topic is agents/);assert.equal(queued.model,'astra');
 });
 test('a blocked structured result is a failed run, never a successful deliverable',async()=>{
  assert.throws(()=>parseWorkerResult('Plain prose claiming completion'));

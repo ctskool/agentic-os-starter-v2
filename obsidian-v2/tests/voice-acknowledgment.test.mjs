@@ -5,7 +5,7 @@ import {build} from 'esbuild';
 const built=await build({entryPoints:['shared/voice-session.ts'],bundle:true,platform:'node',format:'esm',write:false});
 let moduleId=0;
 const fresh=async()=>import('data:text/javascript;base64,'+Buffer.from(built.outputFiles[0].text+'\n// isolated runtime '+(++moduleId)).toString('base64'));
-const selections=[{provider:'codex',model:'gpt-5.6-luna'},{provider:'claude',model:'haiku'}];
+const selections=[{provider:'codex',model:'luna'},{provider:'claude',model:'haiku'}];
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve}};
 const flush=async()=>{for(let n=0;n<6;n++)await new Promise(resolve=>setImmediate(resolve))};
 function fixture(t){

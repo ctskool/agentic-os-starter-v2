@@ -44,6 +44,7 @@ export class VoiceSession {
   if(this.kind&&!this.surface)this.surface=new VoiceSurface(this.transport,this.kind,()=>this.mode,async text=>{const attempt={started:false};const ok=await this.speak(text,this.generation,[],attempt);return {ok,started:attempt.started}},e=>{
    if(e.type==='disconnected'){const active=this.mode!=='idle';this.cancel('connection-lost');if(active)this.onMessage('Voice connection interrupted. Try again.',true);return}
    if(e.type==='owner'&&e.id!==this.surface?.id&&this.mode!=='idle')this.cancel('owner-change');
+   if(e.type==='stop-audio'&&this.playback){this.cancel();return}
    if(e.client!==this.surface?.id)return;
    if(e.type==='artifact-error'){this.onMessage(e.message||'The file could not be opened.',true);return}
    if(e.type==='capture-request'){if(!this.destroyed&&this.preparingCapture===null&&this.mode!=='listening')void this.start();return}
@@ -147,12 +148,16 @@ export class VoiceSession {
   try{if(blob.size<1000)throw new Error('Recording was too short. Try speaking for a little longer.');await this.dispatch('/voice/audio',await blob.arrayBuffer(),chosen,token,blob.type)}
   catch(e){this.fail(e,token)}
  }
- async sendText(transcript:string){this.primeAudio();this.cancel();const token=this.generation;this.id=crypto.randomUUID();this.beginTrace(this.id,'accepted');this.set('working',false);this.beginRequestFeedback(token);try{await this.surface?.focus();if(token!==this.generation)return;this.mark('ownership-ready');const chosen=await this.getSelection();if(token!==this.generation)return;this.mark('selection-ready');await this.dispatch('/voice/text',JSON.stringify({transcript}),chosen,token,'application/json')}catch(e){this.fail(e,token)}}
- private async dispatch(path:string,body:string|ArrayBuffer,chosen:VoiceSelection,token:number,mime:string){
+ async sendText(transcript:string,liveSurface?:Record<string,string>){if(!liveSurface)this.primeAudio();this.cancel();const token=this.generation;this.id=crypto.randomUUID();this.beginTrace(this.id,'accepted');this.set('working',false);this.beginRequestFeedback(token);try{if(!liveSurface)await this.surface?.focus();if(token!==this.generation)return;this.mark('ownership-ready');const chosen=await this.getSelection();if(token!==this.generation)return;this.mark('selection-ready');await this.dispatch('/voice/text',JSON.stringify({transcript}),chosen,token,'application/json',liveSurface)}catch(e){this.fail(e,token,!liveSurface)}}
+ private async dispatch(path:string,body:string|ArrayBuffer,chosen:VoiceSelection,token:number,mime:string,liveSurface?:Record<string,string>){
   if(token!==this.generation)return;this.request=new AbortController();this.mark('request-start');
-  const r=await this.checked(path,{method:'POST',body,headers:{'Content-Type':mime,'X-V2-Request':this.id!,'X-V2-Selection':JSON.stringify(chosen),...(this.surface?{'X-V2-Surface':this.surface.id}:{}),...(chosen.terminalMode?{'X-V2-Work':JSON.stringify({targetId:chosen.targetId||null})}:{})},signal:this.request.signal});
+  const r=await this.checked(path,{method:'POST',body,headers:{'Content-Type':mime,'X-V2-Request':this.id!,'X-V2-Selection':JSON.stringify(chosen),...(this.surface?{'X-V2-Surface':this.surface.id}:{}),...(chosen.terminalMode?{'X-V2-Work':JSON.stringify({targetId:chosen.targetId||null})}:{}),...liveSurface},signal:this.request.signal});
   if(token!==this.generation)return;this.mark('reply');this.clearRequestFeedback();this.id=null;await this.onReply(r.json);if(token!==this.generation)return;
-  if(r.json.reply?.trim()){
+  if(liveSurface){
+   if(r.json.reply?.trim())this.onMessage(r.json.reply);
+   for(const item of r.json.reveals||[])this.onReveal(item);
+   this.set('idle');
+  }else if(r.json.reply?.trim()){
    this.onMessage(r.json.reply);
    // The bridge selects speech before Markdown is flattened for TTS. Keep the
    // complete written reply for display and older bridge responses compatible.
@@ -160,7 +165,7 @@ export class VoiceSession {
    await this.speak(spoken,token,r.json.reveals||[]);
   }else this.set('idle');
  }
- private fail(e:unknown,token:number){if(token!==this.generation)return;this.clearRequestFeedback();this.id=null;this.release();this.set('error');this.onMessage(e instanceof Error?e.message:String(e),true)}
+ private fail(e:unknown,token:number,withCue=true){if(token!==this.generation)return;this.clearRequestFeedback();this.id=null;this.release();this.set('error',withCue);this.onMessage(e instanceof Error?e.message:String(e),true)}
  private listenDuringPlayback(token:number,reference:AnalyserNode){
   if(token!==this.generation||this.barge||!this.context||reference!==this.analyser||typeof navigator==='undefined'||!navigator.mediaDevices?.getUserMedia||typeof this.context.createScriptProcessor!=='function')return;
   let captureToken=token,selection:Promise<VoiceSelection>|null=null;
@@ -185,14 +190,31 @@ export class VoiceSession {
   });
   this.barge=capture;void capture.start();
  }
+ // Set by the screen that owns this session, from the vault's voice settings (shared/voice-prefs.ts keeps
+ // both screens in step). False until told otherwise: silence must never be the failure mode.
+ muted=false;
+ private speechReveals:VoiceReveal[]=[];
+ private showReveal(r:VoiceReveal){this.speechReveals=this.speechReveals.filter(x=>x!==r);this.onReveal(r)}
+ // Called by the screen when the setting changes. Off: nothing more is spoken, including a reply that is
+ // still loading or already playing; whatever it had not shown yet is shown now.
+ setMuted(off:boolean){
+  this.muted=off;
+  if(!off||!this.playback)return;
+  const rest=this.speechReveals;this.speechReveals=[];
+  this.cancel();
+  for(const r of rest)this.onReveal(r);
+ }
  async speak(input:string,token=this.generation,reveals:VoiceReveal[]=[],attempt={started:false}):Promise<boolean>{
   if(this.destroyed||token!==this.generation)return false;
   if(this.playback){this.cancel();token=this.generation}
   this.clearRequestFeedback();
   const text=speechText(input);if(!text){this.set('idle');return true}
+  // Spoken replies switched off for this vault (voice settings, on either screen): everything else happens
+  // as usual, the written reply and its links included. Only the sound is skipped.
+  if(this.muted){for(const r of reveals)this.onReveal(r);this.set('idle');return true}
   this.primeAudio();
   if(this.kind==='web'&&this.context?.state!=='running'){this.onMessage(`${input}\n\nClick or press a key to enable audio.`,true);this.set('error');return false}
-  const playback=new AbortController();this.playback=playback;this.set('working');
+  const playback=new AbortController();this.playback=playback;this.speechReveals=[...reveals];this.set('working');
   try{
    this.mark('audio-resume');if(this.context){await audioWait(this.context.resume(),2500,playback.signal);if(this.context.state&&this.context.state!=='running')throw new Error('Audio is suspended.')}if(token===this.generation)this.mark('audio-ready');
    if(token!==this.generation)return false;
@@ -209,8 +231,8 @@ export class VoiceSession {
       let settled=false;const finish=(ok:boolean)=>{if(settled)return;settled=true;clearTimeout(timeout);clearTimeout(firstAudio);audio.onended=null;audio.onerror=null;audio.onplaying=null;this.endPlayback=null;audio.pause();audio.removeAttribute('src');audio.load();this.media=null;audio.ontimeupdate=null;this.mediaNode?.disconnect();this.mediaNode=null;resolve(ok)};
       this.endPlayback=finish;const firstAudio=setTimeout(()=>{if(!began)finish(false)},8000);const timeout=setTimeout(()=>{if(began)finish(false);else{finish(false);}},90000);
       audio.onplaying=()=>{if(token!==this.generation){finish(false);return}began=true;attempt.started=true;this.mark('stream-playing');clearTimeout(firstAudio);this.set('speaking');if(outputReference)this.listenDuringPlayback(token,outputReference)};
-      const pending=new Set(reveals);audio.ontimeupdate=()=>{if(!began||token!==this.generation)return;for(const r of pending)if(audio.currentTime>=r.at/15){pending.delete(r);this.onReveal(r)}};
-      audio.onended=()=>{for(const r of pending)if(token===this.generation)this.onReveal(r);finish(true)};
+      const pending=new Set(reveals);audio.ontimeupdate=()=>{if(!began||token!==this.generation)return;for(const r of pending)if(audio.currentTime>=r.at/15){pending.delete(r);this.showReveal(r)}};
+      audio.onended=()=>{for(const r of pending)if(token===this.generation)this.showReveal(r);finish(true)};
       audio.onerror=()=>finish(false);try{void audio.play().catch(()=>finish(false))}catch{finish(false)};
      });
      if(token!==this.generation)return false;if(ok){this.set('idle');return true}
@@ -223,10 +245,12 @@ export class VoiceSession {
    if(token!==this.generation)return false;
    this.request=new AbortController();this.mark('buffered-start');const r=await audioWait(this.checked('/voice/speak',{method:'POST',body:JSON.stringify({text}),signal:this.request.signal}),20000,playback.signal);
    if(token!==this.generation)return false;
+   // The bridge sends no audio for a vault whose spoken replies are off, whatever this screen believed.
+   if(r.json?.muted===true&&!r.audio){this.muted=true;for(const x of reveals)this.onReveal(x);this.set('idle');return true}
    this.mark('buffered-ready');const buffer=await audioWait(this.context.decodeAudioData(r.audio!.slice(0)),5000,playback.signal);if(token!==this.generation)return false;
    this.analyser??=this.context.createAnalyser();this.analyser.fftSize=512;this.samples=new Uint8Array(512);this.analyser.disconnect();this.analyser.connect(this.context.destination);
    const source=this.context.createBufferSource();this.source=source;source.buffer=buffer;source.connect(this.analyser);
-   const pending=new Set(reveals);const reveal=(r:VoiceReveal)=>{if(token===this.generation&&pending.delete(r))this.onReveal(r)};
+   const pending=new Set(reveals);const reveal=(r:VoiceReveal)=>{if(token===this.generation&&pending.delete(r))this.showReveal(r)};
    this.revealTimers=reveals.map(r=>setTimeout(()=>reveal(r),Math.max(0,Math.min(1,r.at/Math.max(1,input.length)))*buffer.duration*1000));
    const ok=await new Promise<boolean>((resolve,reject)=>{let settled=false;const finish=(ok:boolean)=>{if(settled)return;settled=true;clearTimeout(timeout);source.onended=null;try{source.stop()}catch{}source.disconnect();this.endPlayback=null;resolve(ok)};
     const timeout=setTimeout(()=>finish(false),Math.min(90000,Math.max(5000,buffer.duration*1000+5000)));this.endPlayback=finish;
@@ -236,7 +260,7 @@ export class VoiceSession {
    this.endPlayback=null;this.revealTimers.forEach(clearTimeout);this.revealTimers=[];
    if(token!==this.generation)return false;this.source=null;if(!ok)throw new Error('Audio was interrupted.');this.set('idle');return true;
   }catch(e){if(token===this.generation){this.request?.abort();this.set('error');this.onMessage(`${input}\n\nSpoken playback failed. The written result is still available.`,true)}return false}
-  finally{if(token===this.generation){this.barge?.close();this.barge=null}if(this.playback===playback)this.playback=null}
+  finally{if(token===this.generation){this.barge?.close();this.barge=null}if(this.playback===playback){this.playback=null;this.speechReveals=[]}}
  }
 
 }

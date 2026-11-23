@@ -19,7 +19,7 @@ function fixture(t){
  return {root,write};
 }
 test('direct work stays inside its captured conversation; explicit new reference can carry the last quick answer',async t=>{
- const {root}=fixture(t),base={id:'lookup-test',chosen:{provider:'codex',model:'gpt-6-astra'},execute:()=>assert.fail('No classifier')};
+ const {root}=fixture(t),base={id:'lookup-test',chosen:{provider:'codex',model:'astra'},execute:()=>assert.fail('No classifier')};
  const other=await classifyVoice(root,{...base,transcript:'Create a chart about project B',workTarget:'project-b'});
  assert.equal(other.tier,3);assert.doesNotMatch(other.context,/UNRELATED_REPORT_SENTINEL/);
  const explicit=await classifyVoice(root,{...base,transcript:'Create a document about that story',workTarget:null,newConversation:true});
@@ -28,7 +28,7 @@ test('direct work stays inside its captured conversation; explicit new reference
 test('scoped metric answers do not expose data-file links or unrelated saved report context',async t=>{
  const {root,write}=fixture(t);
  write('system/metrics/metrics.csv',`timestamp,source,metric,value,status,error\n${new Date().toISOString()},instagram,followers,42,ok,\n`);
- const result=await classifyVoice(root,{id:'lookup-test',chosen:{provider:'codex',model:'gpt-6-astra'},transcript:'What does my Instagram follower count mean?',workTarget:'project-a',terminals:{list:()=>assert.fail('No dashboard task snapshot')},execute:async(_root,_job,_prompt,options)=>{
+ const result=await classifyVoice(root,{id:'lookup-test',chosen:{provider:'codex',model:'astra'},transcript:'What does my Instagram follower count mean?',workTarget:'project-a',terminals:{list:()=>assert.fail('No dashboard task snapshot')},execute:async(_root,_job,_prompt,options)=>{
   assert.doesNotMatch(options.system,/UNRELATED_REPORT_SENTINEL/);assert.match(options.system,/"value":42/);
   return {text:JSON.stringify({tier:2,reply:'The saved reading says your Instagram account has 42 followers.'})};
  }});

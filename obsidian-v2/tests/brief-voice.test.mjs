@@ -18,7 +18,7 @@ test('news questions read the ranked story without a model or terminal, for both
  const {root,write}=fixture(t);
  write(localDate(),'## TL;DR\n- Private invoice details.\n\n## Top Story\n**A new open model shipped.**\n\nExtra detail [source](https://example.com).\n\n## AI News\nOther news.');
  for(const provider of ['codex','claude']){
-  const result=await routeVoice(root,{id:crypto.randomUUID(),selection:{provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},transcript:'So what was the biggest news in AI today?',terminalMode:true,workTarget:crypto.randomUUID()},undefined,()=>assert.fail('No model should run'),{get(){assert.fail('No terminal should be touched')}});
+  const result=await routeVoice(root,{id:crypto.randomUUID(),selection:{provider,model:provider==='codex'?'astra':'sonnet'},transcript:'So what was the biggest news in AI today?',terminalMode:true,workTarget:crypto.randomUUID()},undefined,()=>assert.fail('No model should run'),{get(){assert.fail('No terminal should be touched')}});
   assert.equal(result.tier,1);assert.equal(result.model,null);assert.equal(result.workerModel,null);assert.deepEqual(result.workIds,[]);
   // The story under the headline is read too (its first sentences), never the private TL;DR or the other sections.
   assert.equal(result.reply,"From today's morning brief: A new open model shipped. Extra detail source.");assert.doesNotMatch(result.reply,/Private invoice|Other news/);assert.ok(result.briefSource.endsWith('-intel.md'));
@@ -40,7 +40,7 @@ test('natural daily top-news phrasing uses the attributed saved brief for both p
   "Today's top headline",
  ];
  for(const provider of ['codex','claude'])for(const transcript of phrases){
-  const result=await routeVoice(root,{id:crypto.randomUUID(),selection:{provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},transcript,terminalMode:true,workTarget:crypto.randomUUID()},undefined,()=>assert.fail('A saved-news lookup must not call a model'),{get(){assert.fail('A saved-news lookup must not access a terminal')}});
+  const result=await routeVoice(root,{id:crypto.randomUUID(),selection:{provider,model:provider==='codex'?'astra':'sonnet'},transcript,terminalMode:true,workTarget:crypto.randomUUID()},undefined,()=>assert.fail('A saved-news lookup must not call a model'),{get(){assert.fail('A saved-news lookup must not access a terminal')}});
   assert.equal(result.tier,1,transcript);assert.equal(result.model,null);assert.deepEqual(result.workIds,[]);
   assert.equal(result.transcript,transcript);assert.equal(result.reply,"From today's morning brief: The saved editorial lead.");
   assert.equal(result.briefSource,`inbox/research/morning-intel/${localDate()}-intel.md`);
@@ -91,6 +91,6 @@ test('canonical intel wins over legacy brief and top-story fallback skips inbox 
 });
 test('cancelled news request neither reads nor saves a response',async t=>{
  const {root}=fixture(t),controller=new AbortController();controller.abort();
- await assert.rejects(routeVoice(root,{id:crypto.randomUUID(),selection:{provider:'codex',model:'gpt-6-astra'},transcript:'What is the biggest AI news today?'},controller.signal),/cancelled/);
+ await assert.rejects(routeVoice(root,{id:crypto.randomUUID(),selection:{provider:'codex',model:'astra'},transcript:'What is the biggest AI news today?'},controller.signal),/cancelled/);
  assert.equal(fs.existsSync(path.join(root,'system')),false);
 });

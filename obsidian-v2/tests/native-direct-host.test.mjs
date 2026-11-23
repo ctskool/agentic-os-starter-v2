@@ -1,11 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {build} from 'esbuild';
-const built=await build({entryPoints:['src/lib/native-direct-host.ts'],bundle:true,platform:'node',format:'esm',write:false});
-const {NativeDirectHost}=await import('data:text/javascript;base64,'+Buffer.from(built.outputFiles[0].text).toString('base64'));
-// The real binding from a separate bundle: its error class is not the host's, so only the name check can recognise it.
-const ptyBuilt=await build({entryPoints:['src/lib/direct-terminal-pty.ts'],bundle:true,platform:'node',format:'esm',write:false});
-const {bindDirectTerminal}=await import('data:text/javascript;base64,'+Buffer.from(ptyBuilt.outputFiles[0].text).toString('base64'));
+import {createJiti} from 'jiti';
+const {NativeDirectHost}=createJiti(import.meta.url,{fsCache:false})('../src/lib/native-direct-host.ts');
+// Load the binding separately to exercise the host's cross-bundle error name check.
+const {bindDirectTerminal}=createJiti(import.meta.url,{fsCache:false,moduleCache:false})('../src/lib/direct-terminal-pty.ts');
 const task='11111111-1111-4111-8111-111111111111',instance='22222222-2222-4222-8222-222222222222',launchId='33333333-3333-4333-8333-333333333333',sendId='44444444-4444-4444-8444-444444444444',key='55555555-5555-4555-8555-555555555555';
 function fixture(){
  const leaves=[],calls=[],notices=[],revealed=[],bindings=[],pending=[],lifetimes=[];
@@ -28,6 +26,12 @@ test('a launch uses a native Terminal ticket with normal theme and no attachment
  const f=fixture(),before=structuredClone(f.app.plugins.plugins.terminal.settings);f.queue(f.launch);await f.host.sync();
  assert.equal(f.leaves.length,1);const state=f.leaves[0].state.state['terminal:terminal'];assert.equal(state.profile.executable,f.launch.launch.executable);assert.deepEqual(state.profile.args,f.launch.launch.args);assert.equal(state.profile.useWin32Conhost,true);assert.equal(state.profile.restoreHistory,false);assert.equal(state.serial,null);assert.equal(state.profile.terminalOptions.fontSize,15);assert.doesNotMatch(JSON.stringify(state),/terminal-attach|screenrelay|Follow up/);
  assert.deepEqual(f.app.plugins.plugins.terminal.settings,before);assert.equal(events(f).find(event=>event.type==='launched').hostPid,789);assert.ok(f.revealed.includes(f.leaves[0]));
+});
+test('a background native launch binds the terminal without revealing it',async()=>{
+ const f=fixture();f.queue({...f.launch,reveal:false});await f.host.sync();
+ assert.equal(f.leaves.length,1);assert.equal(f.leaves[0].state.active,false);
+ assert.equal(events(f).find(event=>event.type==='launched').hostPid,789);
+ assert.deepEqual(f.revealed,[]);
 });
 test('a launch whose terminal becomes ready late is an ordinary launch: launched, no error, no notice, follow-ups work',async()=>{
  const f=fixture(),bind=f.options.bind;let release;

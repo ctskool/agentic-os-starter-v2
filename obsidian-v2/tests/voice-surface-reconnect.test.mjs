@@ -97,7 +97,7 @@ test('EventSource constructor failures recover with the same bounded scheduling'
 });
 
 test('recovery does not replay a cancelled voice capture or accept its late transcript',async t=>{
- const f=fixture(t),voice=new VoiceSession(f.transport,async()=>({provider:'codex',model:'gpt-6-astra'}),'native',f.info);t.after(()=>voice.destroy());let message='';voice.onMessage=text=>message=text;
+ const f=fixture(t),voice=new VoiceSession(f.transport,async()=>({provider:'codex',model:'astra'}),'native',f.info);t.after(()=>voice.destroy());let message='';voice.onMessage=text=>message=text;
  voice.connect();await flush();const first=f.streams[0],client=new URL(first.url).searchParams.get('client');first.open();first.message({type:'wake',client});assert.equal(voice.mode,'listening');
  first.fail();await flush();assert.equal(voice.mode,'idle');assert.match(message,/connection interrupted/);
  await f.advance(1000);const next=f.streams[1];next.open();next.message({type:'transcript',client,text:'A late request must not run'});await flush();
@@ -132,7 +132,7 @@ test('window focus recovers a stale browser stream after renderer timers were su
 
 test('a new voice turn waits briefly for the recovered stream and submits once when it opens',async t=>{
  const f=fixture(t),requests=[];
- const voice=new VoiceSession(async(path,options)=>{requests.push({path,body:JSON.parse(options.body)});return {status:200,json:path==='/voice/text'?{reply:''}:null}},async()=>({provider:'codex',model:'gpt-6-astra'}),'native',f.info);t.after(()=>voice.destroy());
+ const voice=new VoiceSession(async(path,options)=>{requests.push({path,body:JSON.parse(options.body)});return {status:200,json:path==='/voice/text'?{reply:''}:null}},async()=>({provider:'codex',model:'astra'}),'native',f.info);t.after(()=>voice.destroy());
  voice.connect();await flush();const old=f.streams[0];old.open();await flush();await f.advance(30001,false);
  const pending=voice.sendText('A new request after waking');await flush();assert.equal(f.streams.length,2);
  assert.equal(requests.some(request=>request.body.focus),false);assert.equal(requests.some(request=>request.path==='/voice/text'),false);
@@ -143,7 +143,7 @@ test('a new voice turn waits briefly for the recovered stream and submits once w
 });
 
 test('cancelling while the replacement stream connects never takes ownership or resends the cancelled turn',async t=>{
- const f=fixture(t),voice=new VoiceSession(f.transport,async()=>({provider:'codex',model:'gpt-6-astra'}),'native',f.info);t.after(()=>voice.destroy());
+ const f=fixture(t),voice=new VoiceSession(f.transport,async()=>({provider:'codex',model:'astra'}),'native',f.info);t.after(()=>voice.destroy());
  voice.connect();await flush();f.streams[0].open();await flush();await f.advance(30001,false);
  const pending=voice.sendText('Cancel this request');await flush();voice.cancel();f.streams[1].open();await pending;
  assert.equal(f.requests.some(request=>request.body.focus),false);assert.equal(f.requests.some(request=>request.path==='/voice/text'),false);assert.equal(voice.mode,'idle');

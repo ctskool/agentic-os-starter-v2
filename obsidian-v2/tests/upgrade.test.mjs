@@ -20,10 +20,13 @@ function put(root, relative, value) {
   fs.writeFileSync(file, typeof value === 'string' ? value : JSON.stringify(value));
   return file;
 }
+// Newer Git tidies a repository in the background after a commit, creating and removing a lock file
+// under .git/objects for a moment. The snapshots below read every file, so the fixture's own commits
+// must not start that (seen on the Mac test machine: the lock vanished between listing and reading).
 function git(root, ...args) {
   const env = {...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_CONFIG_NOSYSTEM: '1'};
   for (const name of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_CONFIG_COUNT']) delete env[name];
-  const result = spawnSync('git', ['-c', `safe.directory=${root.replaceAll('\\', '/')}`, '-c', 'core.hooksPath=', '-c', 'commit.gpgsign=false', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com', '-C', root, ...args], {env, encoding: 'utf8', windowsHide: true, timeout: 15000});
+  const result = spawnSync('git', ['-c', `safe.directory=${root.replaceAll('\\', '/')}`, '-c', 'core.hooksPath=', '-c', 'commit.gpgsign=false', '-c', 'maintenance.auto=false', '-c', 'gc.auto=0', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com', '-C', root, ...args], {env, encoding: 'utf8', windowsHide: true, timeout: 15000});
   assert.equal(result.status, 0, result.stderr);
   return result.stdout.trim();
 }

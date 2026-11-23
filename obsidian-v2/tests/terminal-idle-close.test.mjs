@@ -24,7 +24,7 @@ function bench(t,{Manager=TerminalManager,...options}={}){
   deliveryWatch:()=>({poll:()=>proof.submitted,close(){}}),...options});
  // A terminal that finished its first turn: ready at its prompt, with a saved session. Nobody has typed in it.
  const ready=(provider='codex',fields={})=>{
-  const task=manager.start({selection:{provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},prompt:'Do the work.',...fields});
+  const task=manager.start({selection:{provider,model:provider==='codex'?'astra':'sonnet'},prompt:'Do the work.',...fields});
   manager.accept(task.id,{type:provider==='codex'?'complete':'Stop',sessionId:crypto.randomUUID(),turnId:'first',text:'Done.',ts:clock.now});
   assert.equal(manager.get(task.id).state,'ready');return manager.get(task.id);
  };
@@ -62,7 +62,7 @@ test('only the sweep labels a close as idle; an ordinary Stop never does, and th
 
 test('nothing that is busy, unfinished, unsaved, foreign or in flight is ever closed',t=>{
  const b=bench(t),m=b.manager;
- const working=m.start({selection:{provider:'codex',model:'gpt-6-astra'},prompt:'Still working.'});
+ const working=m.start({selection:{provider:'codex',model:'astra'},prompt:'Still working.'});
  const unsaved=m.start({selection:{provider:'claude',model:'sonnet'},prompt:'No session yet.'});m.get(unsaved.id).state='ready';
  const approval=b.ready();m.get(approval.id).state='needs input';
  const stopping=b.ready();m.get(stopping.id).state='stopping';

@@ -48,6 +48,7 @@ You do not need to know your installation's path. The agent helps find it, recom
 | **Jarvis HUD** | A full-screen browser dashboard with Claude Code and Codex terminals, provider switching, system vitals, and usage meters. |
 | **Your skill buttons** | Starter workflows such as Plan Today, Morning Intel, and Deep Research, plus your own skills. Change them later with **Customize dashboard**. |
 | **Local voice** | Click the microphone or use the shortcut, speak, then pause. Whisper transcribes; Kokoro speaks the reply. |
+| **Live voice** | Optional GPT-Live calls. Talk to an assistant that answers from your day and hands real work to your agents, with hand-off cards, a cancel window, and a cost estimate. [Set up Live voice](docs/LIVE-VOICE.md). |
 | **Jev** | Helps route eligible voice requests to the right destination. |
 | **Health checks and autostart** | A doctor to diagnose problems, a monitor to recover services, and optional startup at login. |
 

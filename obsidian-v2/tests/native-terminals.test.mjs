@@ -22,7 +22,7 @@ function fixture(t){
  const open=()=>{const manager=new NativeTerminalManager(root,options);managers.push(manager);return manager};
  const manager=open();
  t.after(()=>{for(const item of managers)item.close();fs.rmSync(root,{recursive:true,force:true})});
- const start=(provider='codex',extra={})=>manager.start({selection:{provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},prompt:'Initial request',execution:'native',...extra});
+ const start=(provider='codex',extra={})=>manager.start({selection:{provider,model:provider==='codex'?'astra':'sonnet'},prompt:'Initial request',execution:'native',...extra});
  const action=(task,type)=>task.native.actions.find(item=>item.type===type&&item.state==='pending');
  const launched=task=>{const launch=action(task,'launch');manager.claimNative(launch.id);manager.accept(task.id,{type:'native-start',taskId:task.id,nativeInstance:task.native.instance,pid:700,ts:now});manager.nativeEvent({taskId:task.id,instance:task.native.instance,actionId:launch.id,type:'launched',hostPid:600});return launch};
  const ready=task=>{launched(task);manager.accept(task.id,{type:task.provider==='codex'?'complete':'Stop',sessionId:crypto.randomUUID(),nativeInstance:task.native.instance,turnId:crypto.randomUUID(),text:'The first saved answer.',ts:now});assert.equal(task.state,'ready');return task};
@@ -33,7 +33,7 @@ function fixture(t){
 
 for(const sessionId of [undefined,'11111111-1111-4111-8111-111111111111']){
  test(`native Codex ${sessionId?'resume':'launch'} requests builtin automatic review without bypassing sandbox or prompts`,t=>{
-  const f=fixture(t),record={provider:'codex',model:'gpt-6-astra',prompt:'A harmless fixture',execution:'native',sessionId};
+  const f=fixture(t),record={provider:'codex',model:'astra',prompt:'A harmless fixture',execution:'native',sessionId};
   const spec=terminalSpec(f.root,record,f.resolveNativeCli('codex'));
   const flags=spec.args.slice(0,spec.args.indexOf('--'));
   assert.ok(flags.includes('--approve-for-me'));
@@ -41,7 +41,7 @@ for(const sessionId of [undefined,'11111111-1111-4111-8111-111111111111']){
   if(sessionId)assert.deepEqual(flags.slice(1,3),['resume',sessionId]);
  });
  test(`web Codex ${sessionId?'resume':'launch'} keeps explicit sandbox and user review`,t=>{
-  const f=fixture(t),spec=terminalSpec(f.root,{provider:'codex',model:'gpt-6-astra',prompt:'A harmless fixture',sessionId},f.resolveNativeCli('codex'));
+  const f=fixture(t),spec=terminalSpec(f.root,{provider:'codex',model:'astra',prompt:'A harmless fixture',sessionId},f.resolveNativeCli('codex'));
   assert.ok(!spec.args.includes('--approve-for-me'));
   assert.equal(spec.args[spec.args.indexOf('-s')+1],'workspace-write');
   assert.equal(spec.args[spec.args.indexOf('-a')+1],'on-request');
@@ -105,7 +105,7 @@ for(const provider of ['codex','claude']){
 }
 
 test('bridge close leaves native Terminal processes alone and still stops web-owned PTYs',t=>{
- const f=fixture(t),native=f.ready(f.start()),web=f.manager.start({selection:{provider:'codex',model:'gpt-6-astra'},prompt:'Web request'});
+ const f=fixture(t),native=f.ready(f.start()),web=f.manager.start({selection:{provider:'codex',model:'astra'},prompt:'Web request'});
  assert.equal(f.processes.length,1);assert.equal(f.processes[0].killed,false);
  const before=JSON.stringify(native);f.manager.close();assert.equal(f.processes[0].killed,true);assert.equal(web.state,'stopped');
  assert.equal(JSON.stringify(native),before);assert.equal(f.manager.live.has(native.id),true);assert.equal(f.manager.live.get(native.id).proc,undefined);
@@ -127,7 +127,7 @@ test('native process screens and terminal input cannot be proxied through the br
 });
 
 test('same request ID cannot change terminal ownership and provider selections reject the other app',t=>{
- const f=fixture(t),native=f.start(),web=f.manager.start({selection:{provider:'codex',model:'gpt-6-astra'},prompt:'Web request'});
+ const f=fixture(t),native=f.start(),web=f.manager.start({selection:{provider:'codex',model:'astra'},prompt:'Web request'});
  assert.throws(()=>f.manager.start({id:native.id,selection:{provider:native.provider,model:native.model},prompt:native.prompt}),/already used/);
  assert.throws(()=>f.manager.start({id:web.id,selection:{provider:web.provider,model:web.model},prompt:web.prompt,execution:'native'}),/already used/);
  setCurrent(f.root,f.manager,{scope:'native',provider:'codex',id:native.id});setCurrent(f.root,f.manager,{provider:'codex',id:web.id});
@@ -329,7 +329,7 @@ for(const provider of ['codex','claude'])test(`${provider}: a promised open on a
 
 for(const provider of ['codex','claude'])test(`${provider}: the production manager forwards a promised open for a non-native conversation too`,t=>{
  const f=fixture(t),done=provider==='codex'?'complete':'Stop';
- const task=f.manager.start({selection:{provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},prompt:'Initial request',spoken:true});
+ const task=f.manager.start({selection:{provider,model:provider==='codex'?'astra':'sonnet'},prompt:'Initial request',spoken:true});
  f.manager.accept(task.id,{type:done,sessionId:crypto.randomUUID(),turnId:'first',text:'Ready.'});
  fs.writeFileSync(path.join(f.root,'web-result.md'),'# Revised document\n');
  f.manager.send(task.id,'Create the revised document and open it when done.',{spoken:true,openWhenDone:true});

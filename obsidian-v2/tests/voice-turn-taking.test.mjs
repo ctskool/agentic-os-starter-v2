@@ -4,7 +4,7 @@ import {build} from 'esbuild';
 const built=await build({entryPoints:['shared/voice-turn-taking.ts','shared/voice-session.ts'],bundle:true,platform:'node',format:'esm',outdir:'unused',write:false});
 const modules=await Promise.all(built.outputFiles.map(file=>import('data:text/javascript;base64,'+Buffer.from(file.text).toString('base64'))));
 const {VoiceCaptureGate,PlaybackSpeechGate,VoicePcmWindow,voiceWav,PlaybackCapture}=modules.find(m=>m.PlaybackCapture),{VoiceSession}=modules.find(m=>m.VoiceSession);
-const chosen={provider:'codex',model:'gpt-6-astra',targetId:'retained-conversation',terminalMode:true};
+const chosen={provider:'codex',model:'astra',targetId:'retained-conversation',terminalMode:true};
 const flush=async()=>{for(let i=0;i<8;i++)await new Promise(resolve=>setImmediate(resolve))};
 function replace(t,key,value){const old=Object.getOwnPropertyDescriptor(globalThis,key);Object.defineProperty(globalThis,key,{configurable:true,writable:true,value});t.after(()=>old?Object.defineProperty(globalThis,key,old):delete globalThis[key])}
 

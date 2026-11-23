@@ -20,7 +20,7 @@ test('a known brief question reads only the brief, without voice memory or dashb
   return fn.call(this,file,...args);
  };
  for(const provider of ['codex','claude']){
-  const result=await classifyVoice(root,{id:'isolated-fast-read',transcript:'What is the biggest AI story today?',chosen:{provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},workTarget:'a-stopped-conversation',terminals:{list(){assert.fail('No terminal snapshot')},get(){assert.fail('No selected-terminal read')}},execute:()=>assert.fail('No model')});
+  const result=await classifyVoice(root,{id:'isolated-fast-read',transcript:'What is the biggest AI story today?',chosen:{provider,model:provider==='codex'?'astra':'sonnet'},workTarget:'a-stopped-conversation',terminals:{list(){assert.fail('No terminal snapshot')},get(){assert.fail('No selected-terminal read')}},execute:()=>assert.fail('No model')});
   assert.equal(result.engine,'rules');assert.match(result.reply,/verified fixture headline/);
  }
  assert.ok(reads.some(file=>file.endsWith('-intel.md')));

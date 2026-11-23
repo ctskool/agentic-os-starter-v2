@@ -37,11 +37,11 @@ function fixture(t,provider){
  writeJson(root,'system/v2/voice-results/refusal.json',{ts:Date.now()-1000,provider,transcript:requests[0],reply:refusal});
  const calls=[],tasks=[];
  const terminals={live:new Map(),list:()=>tasks,get:id=>tasks.find(task=>task.id===id),start(options){calls.push(options);tasks.push({id:options.id,provider,title:options.title,state:'working',turns:[]});return{id:options.id}},send(){assert.fail('No existing task was selected')},startWorkflow(){assert.fail('General creation does not require a named workflow')}};
- return {root,calls,terminals,selection:{provider,model:provider==='codex'?'gpt-6-astra':'sonnet'}};
+ return {root,calls,terminals,selection:{provider,model:provider==='codex'?'astra':'sonnet'}};
 }
 
 test('restricted Luna classifier receives the explicit delegation contract without enabling execution tools',()=>{
- const args=commandFor(os.tmpdir(),{id:crypto.randomUUID(),provider:'codex',model:'gpt-5.6-luna'},{command:'unused-test-cli',prefix:[]}).args;
+ const args=commandFor(os.tmpdir(),{id:crypto.randomUUID(),provider:'codex',model:'luna'},{command:'unused-test-cli',prefix:[]}).args;
  assert.equal(args[args.indexOf('--sandbox')+1],'read-only');
  assert.ok(args.includes('features.shell_tool=false'));
  const option=args.find(arg=>arg.startsWith('model_instructions_file='));
@@ -75,7 +75,7 @@ for(const provider of ['codex','claude']){
   for(const transcript of questions)await t.test(transcript,async t=>{
    const f=fixture(t,provider);let classifications=0;
    const result=await routeVoice(f.root,{id:crypto.randomUUID(),transcript,selection:f.selection,terminalMode:true},undefined,async(_root,job,_prompt,options)=>{
-    classifications++;assert.equal(job.model,provider==='codex'?'gpt-5.6-luna':'haiku');assert.equal(options.user,transcript);
+    classifications++;assert.equal(job.model,provider==='codex'?'luna':'haiku');assert.equal(options.user,transcript);
     return {text:JSON.stringify({tier:2,reply:'I can explain the options from the supplied context without starting work.'})};
    },f.terminals,{resolveCli:()=>({command:'unused-test-cli',prefix:[]})});
    assert.equal(classifications,1);assert.equal(result.tier,2);assert.deepEqual(result.workIds,[]);assert.equal(f.calls.length,0);

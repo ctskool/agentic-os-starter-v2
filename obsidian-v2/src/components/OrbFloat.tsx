@@ -4,12 +4,17 @@ import {h} from 'preact';
 import {useEffect,useLayoutEffect,useMemo,useRef,useState} from 'preact/hooks';
 import type ChaseCommandCenter from '../main';
 import {useProvider} from '../lib/provider';
-import {v2VoiceTransport,assertVoiceVault} from '../lib/v2-voice';
-import {VoiceSession,type VoiceMode} from '../../shared/voice-session';
+import {v2VoiceTransport,v2LiveFetch,assertVoiceVault} from '../lib/v2-voice';
+import {VoiceSession,type VoiceMode,type VoiceReply,type VoiceReveal} from '../../shared/voice-session';
+import {LiveSession} from '../../shared/live-session';
+import {liveLabel,liveToggleLabel} from '../../shared/live-controls';
+import {LiveCallBar,LiveVoiceSettings} from './LiveVoiceControls';
 import GalaxyCore from './GalaxyCore';
 import {GraphCore} from './GraphCore';
+import {localTaskSpeech} from '../../shared/task-activity';
 import {workFeed,workTarget,chooseWork,openWork,workConversations,setWorkProvider,type WorkTask} from '../lib/work';
 import {shortConversationTitle} from '../../shared/work-presentation';
+import {createVoicePrefsStore,voiceGroups,VOICE_RATES,rateLabel,VOICE_SAMPLE,type VoicePrefs,type VoicePrefsSnapshot} from '../../shared/voice-prefs';
 export function OrbFloat({plugin,surfaceKind='native'}:{plugin:ChaseCommandCenter;surfaceKind?:'web'|'native'}){
  const state=useProvider(plugin.app);
  const clampPosition=(right:number,bottom:number)=>({right:Math.max(4,Math.min(right,document.documentElement.clientWidth-128)),bottom:Math.max(4,Math.min(bottom,document.documentElement.clientHeight-152))});
@@ -55,67 +60,104 @@ export function OrbFloat({plugin,surfaceKind='native'}:{plugin:ChaseCommandCente
  const [tasks,setTasks]=useState<WorkTask[]>([]),[target,setTarget]=useState<string|null>(workTarget());
  const selectionRef=useRef(state.selection);selectionRef.current=state.selection;
  const previousProvider=useRef(state.selection.provider);
- const voice=useMemo(()=>new VoiceSession(v2VoiceTransport,async()=>{const chosen={...selectionRef.current};await assertVoiceVault(plugin.app);return workConversations.getSelection(chosen)},surfaceKind,{version:plugin.manifest?.version,heartbeat:surfaceKind==='native'?plugin.voiceHeartbeat:undefined}),[plugin,surfaceKind]);
+ const getSelection=useMemo(()=>async()=>{const chosen={...selectionRef.current};await assertVoiceVault(plugin.app);return workConversations.getSelection(chosen)},[plugin]);
+ const voice=useMemo(()=>new VoiceSession(v2VoiceTransport,getSelection,surfaceKind,{version:plugin.manifest?.version,heartbeat:surfaceKind==='native'?plugin.voiceHeartbeat:undefined}),[plugin,surfaceKind,getSelection]);
+ const live=useMemo(()=>new LiveSession({scope:'native',fetch:v2LiveFetch,getSelection,heartbeat:plugin.voiceHeartbeat}),[plugin,getSelection]);
+ const [call,setCall]=useState(live.getSnapshot),[liveReveals,setLiveReveals]=useState<VoiceReveal[]>([]);
+ // How voice sounds in this vault (spoken replies on or off, voice, speed), shared with the web app.
+ const voicePrefs=useMemo(()=>createVoicePrefsStore(v2VoiceTransport),[]);
+ const [sound,setSound]=useState<VoicePrefsSnapshot>(()=>voicePrefs.getSnapshot());
+ // The session is told at once, so the very next reply follows the setting.
+ // Switching them off stops a reply that is loading or being spoken (voice-session.ts).
+ useEffect(()=>voicePrefs.subscribe(next=>{const off=!localTaskSpeech(next.prefs.voiceMode)||next.ready&&!next.prefs.spokenReplies;if(off!==voice.muted)voice.setMuted(off);if(surfaceKind==='native')live.configure(next.prefs);setSound(next)}),[voice,voicePrefs,live,surfaceKind]);
+ const saveSound=(changes:Partial<VoicePrefs>,sample=false)=>{void voicePrefs.save(changes).then(()=>{if(sample&&localTaskSpeech(voicePrefs.getSnapshot().prefs.voiceMode)&&voice.mode==='idle'&&!voice.muted)voice.enqueue(VOICE_SAMPLE)}).catch(e=>{setMessage(String(e?.message||e));setError(true)})};
  // The recording command can mount the orb and dispatch its toggle immediately.
  useLayoutEffect(()=>{
   let alive=true,checkingCompletions=false;
   voice.onArtifact=async(artifact,signal)=>{if(!alive)throw new Error('Opening was cancelled.');await openVoiceArtifact(plugin.app,artifact,signal);if(alive){setMessage(`Opened ${artifact.label}.`);setError(false);setUnread(true)}};
+  live.onArtifact=voice.onArtifact;
   voice.connect();voice.onState=setVoiceMode;voice.onMessage=(msg,isError=false)=>{setMessage(msg);setError(isError)};
-  voice.onReply=async r=>{if(!alive)return;workConversations.sync({...workFeed.getSnapshot(),current:r.current,currentRevision:r.currentRevision});setUnread(true);if(r.queued)pendingVoice.current.add(r.queued);if(r.workIds?.length&&!r.conversationSuperseded)openWork(r.workIds);void workFeed.refresh();const message=await applyVoiceAction(plugin.app,r,()=>plugin.activateView(),()=>openWork());if(alive&&message)setMessage(message)};
+  const showReply=async(r:Partial<VoiceReply>)=>{if(!alive)return;workConversations.sync({...workFeed.getSnapshot(),current:r.current,currentRevision:r.currentRevision});setUnread(true);if(r.queued)pendingVoice.current.add(r.queued);void workFeed.refresh();const message=await applyVoiceAction(plugin.app,r,()=>plugin.activateView(),()=>openWork());if(alive&&message)setMessage(message)};
+  voice.onReply=showReply;
+  live.onEffect=async r=>{
+   await showReply(r);if(!alive)return;
+   if(r.reply)setMessage(r.reply);
+   const reveals=r.reveals??(r.deliverable&&r.reveal!=='open'?[{kind:'doc' as const,target:r.deliverable,label:r.deliverable.split('/').pop()||'Report',at:0}]:[]);
+   if(reveals.length)setLiveReveals(reveals);
+   if(r.panels?.some(id=>id==='pipeline'||id==='diagnostics')&&!r.workIds?.length)openWork();
+   else if(r.panels?.length&&!r.obsidian&&!r.deliverable&&!reveals.length&&!r.workIds?.length)await plugin.activateView();
+  };
+  live.onError=message=>{setMessage(message);setError(true)};
+  live.onStopLocalAudio=()=>{if(voice.mode==='speaking')voice.cancel()};
+  const stopLive=live.subscribe(setCall);if(surfaceKind==='native')live.connect();
   const stopWork=workFeed.subscribe((r:any)=>{workConversations.sync(r);setTasks(r.tasks);setTarget(workTarget(selectionRef.current.provider))});
   const targetChanged=()=>setTarget(workTarget());window.addEventListener('aos-work-target',targetChanged);
   const targetError=(event:Event)=>{setMessage((event as CustomEvent<string>).detail);setError(true)};window.addEventListener('aos-work-error',targetError);
   const completions=window.setInterval(async()=>{
    if(!alive||checkingCompletions||voice.mode!=='idle')return;
    checkingCompletions=true;
-   try{for(const id of pendingVoice.current){const run=await readRun(plugin.app,id);if(!alive||voice.mode!=='idle')return;if(run&&run.status!=='running'){pendingVoice.current.delete(id);setMessage(run.summary);setUnread(true);void voice.announce(`run:${id}`,run.summary).catch(()=>{if(alive)pendingVoice.current.add(id)});break}}}
+   try{for(const id of pendingVoice.current){const run=await readRun(plugin.app,id);if(!alive||voice.mode!=='idle')return;if(run&&run.status!=='running'){pendingVoice.current.delete(id);setMessage(run.summary);setUnread(true);if(localTaskSpeech(voicePrefs.getSnapshot().prefs.voiceMode))void voice.announce(`run:${id}`,run.summary).catch(()=>{if(alive)pendingVoice.current.add(id)});break}}}
    catch{/* Keep the pending result for the next poll. */}finally{checkingCompletions=false}
   },3000);
   const sync=()=>setPaused(plugin.settings.pauseMotion);
-  const toggleVoice=()=>void voice.toggle();window.addEventListener('aos-toggle-voice',toggleVoice);
+  const toggleVoice=()=>{if(surfaceKind==='native'&&voicePrefs.getSnapshot().prefs.voiceMode==='live'){if(live.isActive())void live.toggle()}else void voice.toggle()};window.addEventListener('aos-toggle-voice',toggleVoice);
+  // Escape never ends a Live call; only End call does (Chase, 2026-11-22). It still stops Local voice below.
   const escape=(e:KeyboardEvent)=>{if(e.key!=='Escape')return;if(['listening','working','speaking'].includes(voice.mode)){voice.cancel();setMessage('Voice stopped. Agent tasks keep running.')}setOpen(false);setError(false);if(floatRef.current?.contains(document.activeElement))toggleRef.current?.focus()};
   window.addEventListener('aos-v2-settings',sync);window.addEventListener('keydown',escape);
-  return()=>{alive=false;voice.onState=()=>{};voice.onMessage=()=>{};voice.onReply=()=>{};voice.onArtifact=undefined;window.removeEventListener('aos-toggle-voice',toggleVoice);window.clearInterval(completions);stopWork();window.removeEventListener('aos-work-target',targetChanged);window.removeEventListener('aos-work-error',targetError);void voice.destroy();window.removeEventListener('aos-v2-settings',sync);window.removeEventListener('keydown',escape)};
- },[plugin,voice]);
+  return()=>{alive=false;stopLive();live.destroy();voice.onState=()=>{};voice.onMessage=()=>{};voice.onReply=()=>{};voice.onArtifact=undefined;window.removeEventListener('aos-toggle-voice',toggleVoice);window.clearInterval(completions);stopWork();window.removeEventListener('aos-work-target',targetChanged);window.removeEventListener('aos-work-error',targetError);void voice.destroy();window.removeEventListener('aos-v2-settings',sync);window.removeEventListener('keydown',escape)};
+ },[plugin,voice,live,surfaceKind,voicePrefs]);
  useEffect(()=>{
   setWorkProvider(state.selection.provider);setTarget(workTarget(state.selection.provider));
   if(previousProvider.current===state.selection.provider)return;
   previousProvider.current=state.selection.provider;
+  // A Live call keeps running across a provider switch (the bridge moves its hand-offs); only Local voice stops.
   voice.cancelArtifact();
   const active=['listening','working','speaking'].includes(voice.mode);if(active)voice.cancel('provider-change');
   setError(false);setUnread(false);
   setMessage(active?'Voice stopped after switching providers. Click the orb to start again.':'');
- },[state.selection.provider,voice]);
+ },[state.selection.provider,voice,live]);
+ useEffect(()=>live.pushContext(),[live,target,state.selection.provider,state.selection.model]);
  const voiceProvider=state.selection.provider;
  const selectedTask=tasks.find(t=>t.id===target&&t.provider===voiceProvider&&!['script','headless'].includes(t.execution||''));
  const [visitedProviders,setVisitedProviders]=useState({codex:voiceProvider==='codex',claude:voiceProvider==='claude'});
  useEffect(()=>setVisitedProviders(previous=>previous[voiceProvider]?previous:{...previous,[voiceProvider]:true}),[voiceProvider]);
- const mode=voiceMode;
+ const useLive=surfaceKind==='native'&&sound.prefs.voiceMode==='live';
+ const mode:VoiceMode=useLive?call.state==='speaking'?'speaking':call.state==='listening'?'listening':call.state==='connecting'?'working':'idle':voiceMode;
  const active=['listening','working','speaking'].includes(voiceMode);
  const workingLabel=message.startsWith('Still working')?'Working…':'Thinking';
  const modeLabel={idle:'Tap to talk',listening:'Listening',working:workingLabel,speaking:'Speaking',error:'Try again'}[mode];
- const chooseConversation=(id:string|null)=>{if(active)return;voice.cancelArtifact();setMessage('');setError(false);setUnread(false);chooseWork(id,voiceProvider)};
+ const label=useLive?liveLabel(call):modeLabel;
+ const textBlocked=!!call.occupied||call.state==='connecting';
+ const chooseConversation=(id:string|null)=>{if(active)return;voice.cancelArtifact();setMessage('');setError(false);setUnread(false);chooseWork(id,voiceProvider);live.pushContext()};
  return <div ref={floatRef} className="v2-voice-float" data-provider={voiceProvider} data-paused={paused} style={{right:position.right,bottom:position.bottom,'--voice-right':`${position.right}px`,'--voice-bottom':`${position.bottom}px`}}>
   {error&&!open&&<div className="v2-voice-notice"><button onClick={showPanel}><span role="alert">Voice needs attention</span><span>View message</span></button><button onClick={()=>setError(false)} aria-label="Dismiss voice notice">×</button></div>}
-  <span className="v2-voice-sr" role="status" aria-atomic="true">{modeLabel}</span>
+  <span className="v2-voice-sr" role="status" aria-atomic="true">{label}</span>
+  <LiveCallBar live={call} session={live} openTask={id=>openWork([id])}/>
   {open&&<section id="v2-voice-controls" className="v2-voice-panel" aria-label="Voice controls">
    <div className="v2-voice-heading"><strong>Voice <span>· {voiceProvider==='codex'?'Codex':'Claude'}</span></strong><button className="v2-voice-close" onClick={closePanel} aria-label="Close voice controls">×</button></div>
    <div className="v2-voice-conversation">
     <div className="v2-voice-conversation-heading"><label htmlFor="v2-voice-conversation">Conversation</label><button type="button" disabled={active} onClick={()=>chooseConversation(null)}>+ New conversation</button></div>
     <select id="v2-voice-conversation" ref={conversationRef} aria-label="Voice conversation" title={selectedTask?.title||undefined} value={target||''} disabled={active} onChange={e=>chooseConversation(e.currentTarget.value||null)}><option value="">New conversation</option>{target&&!selectedTask&&<option value={target}>Conversation unavailable</option>}{tasks.filter(t=>t.provider===voiceProvider&&!['script','headless'].includes(t.execution||'')).map(t=><option key={t.id} value={t.id} title={t.title}>{shortConversationTitle(t)}</option>)}</select>
    </div>
-   <form onSubmit={e=>{e.preventDefault();if(text.trim()&&voiceMode!=='working'&&voiceMode!=='listening'){setError(false);void voice.sendText(text);setText('')}}}>
-    <input aria-label="Type a voice request" placeholder="Ask or continue…" value={text} maxLength={4000} onInput={e=>setText(e.currentTarget.value)}/><button type="submit" disabled={!text.trim()||voiceMode==='working'||voiceMode==='listening'}>Send</button>
+   {sound.ready&&!useLive&&<div className="v2-voice-sound">
+    <button type="button" className="v2-voice-mute" aria-pressed={!sound.prefs.spokenReplies} title="Replies are still written here, and hearing you keeps working." onClick={()=>saveSound({spokenReplies:!sound.prefs.spokenReplies})}><span>Spoken replies</span><strong>{sound.prefs.spokenReplies?'On':'Off'}</strong></button>
+    {sound.voices.length>0&&<label>Voice<select aria-label="Voice" disabled={active} value={sound.prefs.voice||sound.fallback||''} onChange={e=>saveSound({voice:e.currentTarget.value===sound.fallback?null:e.currentTarget.value},true)}>{voiceGroups(sound.voices).map(set=><optgroup key={set.group} label={set.group}>{set.voices.map(choice=><option key={choice.id} value={choice.id}>{choice.name}</option>)}</optgroup>)}</select></label>}
+    <label>Speed<select aria-label="Speaking speed" disabled={active} value={String(sound.prefs.rate)} onChange={e=>saveSound({rate:Number(e.currentTarget.value)},true)}>{(VOICE_RATES.includes(sound.prefs.rate)?VOICE_RATES:[...VOICE_RATES,sound.prefs.rate].sort((a,b)=>a-b)).map(rate=><option key={rate} value={String(rate)}>{rateLabel(rate)}</option>)}</select></label>
+   </div>}
+   {sound.ready&&surfaceKind==='native'&&<LiveVoiceSettings prefs={sound.prefs} live={call} save={saveSound}/>}
+   <form onSubmit={e=>{e.preventDefault();if(!textBlocked&&text.trim()&&voiceMode!=='working'&&voiceMode!=='listening'){setError(false);void voice.sendText(text,live.surfaceHeaders());setText('')}}}>
+    <input aria-label="Type a voice request" placeholder="Ask or continue…" value={text} maxLength={4000} onInput={e=>setText(e.currentTarget.value)}/><button type="submit" disabled={textBlocked||!text.trim()||voiceMode==='working'||voiceMode==='listening'}>Send</button>
    </form>
    {message&&<p className="v2-voice-message" data-error={error} role="status" tabIndex={0}>{message}</p>}
-   <div className="v2-voice-actions"><button onClick={()=>{setOpen(false);openWork()}}>Terminals <span aria-hidden="true">↗</span></button>{active?<button onClick={()=>{voice.cancel();setMessage('Voice stopped. Agent tasks keep running.')}}>Stop voice</button>:<span>Tap the orb to talk</span>}</div>
+   {useLive&&liveReveals.length>0&&<div className="v2-voice-actions">{liveReveals.map(item=>item.kind==='doc'?<button key={item.target} onClick={()=>void applyVoiceAction(plugin.app,{deliverable:item.target,reveal:'open'},()=>plugin.activateView(),()=>openWork()).catch(e=>live.onError(String(e?.message||e)))}>{item.label}</button>:/^https?:\/\//i.test(item.target)?<a key={item.target} href={item.target} target="_blank" rel="noopener noreferrer">{item.label}</a>:null)}</div>}
+   <div className="v2-voice-actions"><button onClick={()=>{setOpen(false);openWork()}}>Terminals <span aria-hidden="true">↗</span></button>{active?<button onClick={()=>{voice.cancel();setMessage('Voice stopped. Agent tasks keep running.')}}>Stop voice</button>:<span>{useLive?liveToggleLabel(call):'Tap the orb to talk'}</span>}</div>
   </section>}
-  <button className="v2-orb" data-provider={voiceProvider} data-mode={mode} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerCancel} onLostPointerCapture={pointerCancel} onClick={e=>{if(e.detail!==0&&suppressClick.current){suppressClick.current=false;return}setError(false);setOpen(false);void voice.toggle()}} aria-label={voiceMode==='listening'?'Send voice recording':voiceMode==='working'?'Cancel voice request':voiceMode==='speaking'?'Interrupt and talk':'Start voice recording'} title="Click to talk · Drag to move · Pause to send · Escape to cancel">
+  <button className="v2-orb" data-provider={voiceProvider} data-mode={mode} data-live-state={useLive?call.state:undefined} aria-disabled={!!call.occupied||useLive&&!!call.unavailable} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerCancel} onLostPointerCapture={pointerCancel} onClick={e=>{if(e.detail!==0&&suppressClick.current){suppressClick.current=false;return}if(call.occupied)return;if(useLive&&call.unavailable){setMessage(call.unavailable);showPanel();return}setError(false);setOpen(false);if(useLive)void live.toggle();else void voice.toggle()}} aria-label={useLive?liveToggleLabel(call):voiceMode==='listening'?'Send voice recording':voiceMode==='working'?'Cancel voice request':voiceMode==='speaking'?'Interrupt and talk':'Start voice recording'} title={useLive?liveToggleLabel(call):'Click to talk · Drag to move · Pause to send · Escape to cancel'}>
    <div className="v2-orb-art" aria-hidden="true">
-    <div className="v2-orb-provider-art" hidden={voiceProvider!=='codex'}>{(visitedProviders.codex||voiceProvider==='codex')&&<GalaxyCore mode={mode} getLevel={voice.getLevel} paused={paused||voiceProvider!=='codex'} variant="tight" compact/>}</div>
-    <div className="v2-orb-provider-art" hidden={voiceProvider!=='claude'}>{(visitedProviders.claude||voiceProvider==='claude')&&<GraphCore mode={mode} getLevel={voice.getLevel} bloom={false} compact paused={paused||voiceProvider!=='claude'}/>}</div>
+    <div className="v2-orb-provider-art" hidden={voiceProvider!=='codex'}>{(visitedProviders.codex||voiceProvider==='codex')&&<GalaxyCore mode={mode} getLevel={useLive?live.getLevel:voice.getLevel} paused={paused||voiceProvider!=='codex'} variant="tight" compact/>}</div>
+    <div className="v2-orb-provider-art" hidden={voiceProvider!=='claude'}>{(visitedProviders.claude||voiceProvider==='claude')&&<GraphCore mode={mode} getLevel={useLive?live.getLevel:voice.getLevel} bloom={false} compact paused={paused||voiceProvider!=='claude'}/>}</div>
    </div>
-   <span className="v2-orb-label">{voiceProvider==='codex'?'CODEX':'CLAUDE'} · {modeLabel}</span>
+   <span className="v2-orb-label">{voiceProvider==='codex'?'CODEX':'CLAUDE'} · {label}</span>
   </button>
   <button ref={toggleRef} className="v2-voice-toggle" data-unread={unread&&!open} aria-label="Voice controls and last reply" aria-expanded={open} aria-controls="v2-voice-controls" title="Type, choose a conversation, or read the last reply" onClick={()=>open?closePanel():showPanel()}>···</button>
  </div>;

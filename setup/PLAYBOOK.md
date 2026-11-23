@@ -15,9 +15,9 @@ An `obsidian-v2/.runtime/aos-setup.json` marker records a previous setup. It mus
 ## Rules
 
 - One question at a time. If a fix is safe and reversible, do it and say what you did.
-- **Never ask for a secret in chat and never print one.** Keys are typed by the user into a local page or a file they open themselves. Never read, print or copy `jev.json`, `bridge-auth.json`, `providers.json`, `.credentials.json` or `~/.claude/.env`. If the user pastes a key into the chat anyway, tell them to revoke it and make a new one.
+- **Never ask for a secret in chat and never print one.** Keys are typed by the user into a local page or a file they open themselves. Never read, print or copy `jev.json`, `openai.json`, `bridge-auth.json`, `speech-auth.json`, `providers.json`, `.credentials.json` or `~/.claude/.env`. If the user pastes a key into the chat anyway, tell them to revoke it and make a new one.
 - Never overwrite a note, and never edit the `.obsidian/` settings of a vault that already exists. `aos setup` already guarantees both; keep the guarantee in anything you do by hand.
-- Everything runs on this computer, on `127.0.0.1` ports 3217–3221. Do not open firewall ports, tunnels or remote access.
+- The local services listen on `127.0.0.1` ports 3217–3221. Do not open firewall ports, tunnels or remote access. Live voice (GPT-Live) is offered once, in Phase 7, and only the member can opt in: they review the disclosure and enter their key on a local page. Reference: [Live voice setup](../docs/LIVE-VOICE.md).
 - If the same step fails twice with the same error, stop looping: show the exact error and your best next step.
 - All commands below run from the repository root (the folder with `aos.mjs`).
 - Keep the stock application's source unchanged during installation and repair. Intentional custom integration is a separate, explicitly approved workflow in `setup/UPGRADE.md`, not a workaround for a failed setup.
@@ -133,6 +133,20 @@ On Mac with its own voice service, also put another app in front, press **Contro
 
 ## Phase 7 — Make it theirs (each item optional)
 
+### Tell your assistant about you
+
+“This goes in your vault's AGENTS.md. Your Claude/Codex agents read it, and if you use Live voice it's sent to OpenAI at the start of every call.”
+
+Ask these one at a time. The member can skip any question or the whole intake.
+
+1. What’s your name and what do you do, in a sentence or two?
+2. What are you focused on right now, such as projects or goals this month?
+3. Who comes up in your work or life that you’d like the assistant to know about, and what are their roles?
+4. How do you like answers, including length, tone, and anything the assistant should always keep in mind?
+5. Is there anything the assistant should never say or do?
+
+Draft an **About me** section from what the member shares. Show it and get their OK. Save the approved body to a temporary file, run `node aos.mjs about write --from <tmp file>`, then run `node aos.mjs about show` to confirm what Live will see. The member can repeat this intake later by asking “update my About me”.
+
 ### Choose their dashboard buttons
 
 Ask: *"Would you like me to wire your own skills into the button section of both dashboards? Tell me what you want those buttons to do, or we can keep the starter buttons for now."* Keeping the starter buttons is a complete answer: leave their selection unchanged and continue.
@@ -163,10 +177,26 @@ Read `node aos.mjs dashboard list` again to confirm the saved order. Both the Ob
 
 Full commands and limits: `docs/DASHBOARD.md`. Dashboard choices live in `system/v2/dashboard.json` inside their vault and survive updates; do not change application source code to customize them.
 
+### Live voice (optional)
+
+Ask: *"Would you like to be able to talk to your assistant on a live call? It answers from your day's plan and hands real work to your agents. It needs your own OpenAI API key and OpenAI bills it, roughly five cents a minute while you're talking."* A no is a complete answer: Local voice keeps working and costs nothing.
+
+Only with a clear yes:
+
+1. Run `node aos.mjs openai-key` and give them the local page it prints. They read the disclosure, type the key and save their consent on that page. Never ask for the key in chat, and never read `openai.json`.
+2. Have them open **···** on the HUD Voice card or beside the Obsidian orb, choose **Live**, start a call and allow the microphone.
+3. Have them try three things: a general question, *"What's on my plan today?"* (Live answers from what it has), and *"Run Inbox Brief"* (Live hands it to V2; they can say "stop" within about 2.5 seconds). Then **End call**.
+4. Mention **Share morning brief** in the Live settings and leave the choice to them. It is off by default. Turned on, their whole morning brief, including its email section, goes to OpenAI at the start of each call so Live can answer from it. It is only useful if they run Morning Intel, so offer it together with the scheduled Intel Brief below.
+
+Details, settings and costs: `docs/LIVE-VOICE.md`. Do not turn on Live, Share morning brief or any other sharing setting for them.
+
 ### Other preferences
 
 - **Daily Drivers:** ask for the three or four things they want on every day's checklist, and write them to `<vault>/system/v2/profile.json` as `{"dailyDrivers": ["…", "…"]}` (1–8 short labels). Optional `"cta"`: the closing paragraph Content Cascade should use for their community or newsletter.
 - **Metrics cards** (YouTube, Instagram, TikTok, GitHub): the settings live in `~/.claude/.env`. That is only a file this system reads; it does not need Claude Code. If the `~/.claude` folder does not exist (a Codex-only computer), create the folder first, then create the file from `docs/env.example`. Open it in their editor (`notepad` / `open -e`), tell them which lines to fill, and wait. Handles are not secret; the YouTube key is, so they type it, not you.
+- **Scheduled workflows:** ask whether they want anything to run by itself, most often Plan Today in the morning or the Intel Brief before they start. Only with a clear yes: `node aos.mjs schedule add plan-today 07:00 --days weekdays` (`node aos.mjs schedule skills` lists what can be scheduled). Say plainly that it runs only while the services are running and uses their plan the same as pressing the button. Never schedule anything they did not ask for.
+- **Voice sound and words:** if they use voice, ask whether they want replies spoken (`node aos.mjs voice mute` turns that off), offer a different voice or speed (`node aos.mjs voice use <name>`, `node aos.mjs voice speed 1.1`), and teach it the two or three names it must not mishear: their own name, their company, their main product (`node aos.mjs voice teach "<word>" "<word>"`). `node aos.mjs voice` shows the result. They can change all of it later from the voice menu on either screen.
+- **Voice language:** voice hears and speaks English. If they will speak Spanish, French, Italian or Brazilian Portuguese to it, add `"speechLanguage": "es"` (`fr`, `it`, `pt`) to the same `profile.json`, then run `node aos.mjs stop` and `node aos.mjs setup --voice yes` (it downloads that language's speech model, about 460 MB) and `node aos.mjs doctor`. Tell them plainly: the instant spoken commands stay English, so in another language each request takes a few seconds longer. Any other language is not supported; leave the setting out.
 - **Time zone:** dates follow the computer's clock. After changing the computer's time zone: `node aos.mjs stop`, then `node aos.mjs start`.
 
 ## Phase 8 — Hand over
@@ -174,7 +204,7 @@ Full commands and limits: `docs/DASHBOARD.md`. Dashboard choices live in `system
 A short, personal wrap-up:
 
 - What now runs by itself: the bridge, the HUD and voice (and at login, if they chose that). Explain the requests to their Claude / Codex account, optional Jev routing through OpenRouter, and any web searches or connected services. Review the data access and external actions required by their selected personal skills.
-- Costs: their Claude and/or Codex provider plan, optional OpenRouter usage for Jev, and any paid tools or services used by their personal skills. Local speech has no API charge.
+- Costs: their Claude and/or Codex provider plan, optional OpenRouter usage for Jev, optional OpenAI usage for Live voice calls, and any paid tools or services used by their personal skills. Local speech has no API charge.
 - Day-to-day: `node aos.mjs status | stop | start | doctor | update`. Explain that `update` maintains a stock starter as a whole; `upgrade` is read-only discovery and planning for an existing or customized system.
 - Where things land: reports in `inbox/reports/` and `inbox/research/`, daily notes in `daily-notes/`, conventions in the vault's `CLAUDE.md` / `AGENTS.md`.
 - Voice shortcut: **Control–Option–J** on Mac, **Ctrl–Alt–J** on Windows, with this installation's own voice service. Press once, speak, pause to send. Keep Obsidian with its orb enabled or the HUD visible. On Mac the Claude weekly-usage meter may read "unavailable". Mac support is new — if something is off, `node aos.mjs doctor` first.

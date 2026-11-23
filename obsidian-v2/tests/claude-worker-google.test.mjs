@@ -7,7 +7,7 @@ import {workflowPrompt} from '../runner/workflows.mjs';
 import {SKILLS} from '../shared/contract.mjs';
 
 const cli=provider=>({command:provider,prefix:[]});
-const args=(job,provider='claude')=>commandFor(os.tmpdir(),{id:crypto.randomUUID(),provider,model:provider==='claude'?'sonnet':'gpt-6-astra',...job},cli(provider)).args;
+const args=(job,provider='claude')=>commandFor(os.tmpdir(),{id:crypto.randomUUID(),provider,model:provider==='claude'?'sonnet':'astra',...job},cli(provider)).args;
 const allowed=list=>list[list.indexOf('--allowedTools')+1].split(',');
 const BEFORE=['Read','Glob','Grep','WebSearch','WebFetch','mcp__agentic_vault__*','Bash(python:*)','Bash(notebooklm:*)','Bash(yt-dlp:*)','Bash(gh:*)','Bash(firecrawl:*)'];
 const GOOGLE=['mcp__claude_ai_Google_Calendar__*','mcp__claude_ai_Gmail__*','mcp__claude_ai_Google_Drive__*'];
@@ -28,7 +28,7 @@ test('tool-free launches, Codex and the permission mode are untouched',()=>{
   const list=args(job);assert.equal(list.includes('--allowedTools'),false);assert.equal(list[list.indexOf('--tools')+1],'');assert.doesNotMatch(list.join(' '),/claude_ai/);
  }
  const worker=args({skill:'plan-today'});assert.equal(worker[worker.indexOf('--permission-mode')+1],'acceptEdits');assert.equal(worker.includes('--dangerously-skip-permissions'),false);
- for(const job of [{model:'gpt-5.6-luna'},{skill:'plan-today'},{skill:'inbox-brief'}])assert.doesNotMatch(args(job,'codex').join(' '),/claude_ai|allowedTools/);
+ for(const job of [{model:'luna'},{skill:'plan-today'},{skill:'inbox-brief'}])assert.doesNotMatch(args(job,'codex').join(' '),/claude_ai|allowedTools/);
 });
 
 test('both providers are told that calendar and mail text is data, never instructions, and the no-mutation rule stays',()=>{

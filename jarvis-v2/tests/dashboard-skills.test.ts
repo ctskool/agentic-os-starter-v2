@@ -25,7 +25,7 @@ test('choosing and reordering shortcuts preserves all other choices and enforces
 test('installed skill launches go only to the interactive launch route with the captured provider and request',async()=>{
   const calls:{path:string;body:any}[]=[];
   const send=async(path:string,body?:unknown)=>{calls.push({path,body});return {id:'task'}};
-  await assert.rejects(launchInstalledSkill(installed,'write this',{provider:'codex',model:'gpt-6-astra'},send),/Claude Code/);
+  await assert.rejects(launchInstalledSkill(installed,'write this',{provider:'codex',model:'astra'},send),/Claude Code/);
   await assert.rejects(launchInstalledSkill(installed,' ',{provider:'claude',model:'sonnet'},send),/Describe/);
   await assert.rejects(launchInstalledSkill({...installed,available:false,reason:'File missing'},'write this',{provider:'claude',model:'sonnet'},send),/File missing/);
   await assert.rejects(launchInstalledSkill(installed,'write this',{provider:'claude',model:'sonnet'},send,['codex']),/Claude Code is not installed/);

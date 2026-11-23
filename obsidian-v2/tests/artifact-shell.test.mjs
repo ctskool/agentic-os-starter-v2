@@ -49,7 +49,7 @@ for(const provider of ['codex','claude'])test(`${provider} native launch and fol
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'aos-shell-native-'));
  const manager=new NativeTerminalManager(root,{directory:path.join(root,'tasks'),resolveNativeCli:()=>({command:process.execPath,prefix:[]}),schedule:()=>({unref(){}}),cancelSchedule(){},defer:()=>({unref(){}}),cancelDeferred(){},deliveryWatch:()=>({poll:()=>false,close(){}})});
  t.after(()=>{manager.close();fs.rmSync(root,{recursive:true,force:true});});
- const task=manager.start({selection:{provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},prompt:'Make a file',execution:'native'});
+ const task=manager.start({selection:{provider,model:provider==='codex'?'astra':'sonnet'},prompt:'Make a file',execution:'native'});
  const ticket=JSON.parse(fs.readFileSync(task.native.ticket,'utf8'));
  assert.ok(ticket.args.at(-1).includes(`command (${shellName(provider)}):`));
  const launch=task.native.actions.find(action=>action.type==='launch');manager.claimNative(launch.id);

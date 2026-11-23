@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import {prepareWorkflow,saveWorkflowResult} from '../runner/terminal-workflows.mjs';
 import {destinationFor} from '../runner/workflows.mjs';
 
-const selection={provider:'codex',model:'gpt-6-astra'};
+const selection={provider:'codex',model:'astra'};
 function fixture(t,skill='plan-tomorrow'){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'v2-planner-parity-'));
  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));

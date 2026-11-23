@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {resolveCodexModel} from '../runner/codex-models.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,7 +17,7 @@ const noModel = () => assert.fail('This request must not call a model');
 function fixture(t, provider) {
  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aos-voice-resume-'));
  const directory = path.join(root, 'sessions'), processes = [], managers = [], updates = [];
- const selection = {provider, model: provider === 'codex' ? 'gpt-6-astra' : 'sonnet'};
+ const selection = {provider, model: provider === 'codex' ? 'astra' : 'sonnet'};
  const spawn = (command, args, options) => {
   const proc = {pid: 12000 + processes.length, command, args, options, writes: [],
    onData(fn) { this.data = fn; }, onExit(fn) { this.exit = fn; },
@@ -62,7 +63,7 @@ for (const provider of ['codex', 'claude']) {
   assert.equal(task.sessionId, sessionId); assert.equal(task.provider, provider);
   assert.equal(f.manager.records.size, 1); assert.equal(f.processes.length, 2);
   const resumed = f.processes[1], prompt = resumed.args.at(-1);
-  assert.ok(resumed.args.includes(sessionId)); assert.ok(resumed.args.includes(task.model));
+  assert.ok(resumed.args.includes(sessionId)); assert.ok(resumed.args.includes(provider === 'codex' ? resolveCodexModel(task.model) : task.model));
   assert.ok(prompt.startsWith(request)); assert.ok(prompt.includes(story)); assert.ok(prompt.includes(f.report));
   assert.doesNotMatch(prompt, /Briefly confirm you are ready|The original request must never replay/);
   assert.deepEqual(resumed.writes, []); assert.equal(task.state, 'working');
@@ -88,7 +89,7 @@ for (const provider of ['codex', 'claude']) {
  });
 
  test(`${provider}: existing live ready session uses one normal send, preserving its model`, async t => {
-  const f = fixture(t, provider), task = f.manager.start({selection: {provider, model: provider === 'codex' ? 'gpt-5.6-luna' : 'opus'}, prompt: 'Original'});
+  const f = fixture(t, provider), task = f.manager.start({selection: {provider, model: provider === 'codex' ? 'luna' : 'opus'}, prompt: 'Original'});
   f.complete(task);
   const result = await f.speak(request, task.id);
   assert.equal(result.workerModel, task.model); assert.equal(f.processes.length, 1);
@@ -120,7 +121,7 @@ for (const provider of ['codex', 'claude']) {
   const f = fixture(t, provider);
   const unsaved = f.manager.start({selection: f.selection, prompt: 'No saved session yet'}); f.manager.stop(unsaved.id);
   const script = f.saved(); script.execution = 'script';
-  const foreign = f.saved({selection: provider === 'codex' ? {provider: 'claude', model: 'sonnet'} : {provider: 'codex', model: 'gpt-6-astra'}});
+  const foreign = f.saved({selection: provider === 'codex' ? {provider: 'claude', model: 'sonnet'} : {provider: 'codex', model: 'astra'}});
   const count = f.processes.length;
   for (const id of [crypto.randomUUID(), unsaved.id, script.id, foreign.id]) await assert.rejects(f.speak(request, id));
   assert.equal(f.processes.length, count); assert.equal(f.updates.length, 0); assert.equal(f.manager.live.size, 0);

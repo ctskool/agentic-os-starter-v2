@@ -12,7 +12,7 @@ const bundled = await build({
    'preact/hooks': 'export function useEffect(){}; export function useState(){}',
    './provider': `export async function assertTestVault(){globalThis.dashboardPluginFixture.events.push('vault')}; export async function readSelection(){globalThis.dashboardPluginFixture.selectionReads++;return globalThis.dashboardPluginFixture.selection}`,
    './v2-voice': `export async function assertVoiceVault(){globalThis.dashboardPluginFixture.events.push('bridge-vault')}; export async function v2VoiceTransport(path,options){const f=globalThis.dashboardPluginFixture;f.events.push(path);f.calls.push({path,options});return f.handler(path,options)}`,
-   './work': `export const workConversations={async startSession(){globalThis.dashboardPluginFixture.events.push('session')}};export function publishWorkTask(task){globalThis.dashboardPluginFixture.published.push(task)};export function openWork(ids){globalThis.dashboardPluginFixture.opened.push(ids)}`,
+   './work': `export const workConversations={async startSession(){globalThis.dashboardPluginFixture.events.push('session')}};export function publishWorkTask(task){globalThis.dashboardPluginFixture.published.push(task)};export function openWork(ids){globalThis.dashboardPluginFixture.opened.push(ids)}export const workFeed={subscribe(){return ()=>{}},getSnapshot(){return {vault:'',tasks:[]}}};`,
    './queue': `export async function writeIntent(app,id,args){globalThis.dashboardPluginFixture.stock.push({app,id,args})}`,
   };
   builder.onResolve({ filter: /^(preact\/hooks|\.\/provider|\.\/v2-voice|\.\/work|\.\/queue)$/ }, args => ({ path: args.path, namespace: 'dashboard-fixture' }));
@@ -25,7 +25,7 @@ const installed = { id: 'installed:1234567890abcdef12345678', label: 'Proposal',
 const state = (extra = {}) => ({ revision: 'one', configured: false, selected: null, catalog: [stock, installed], ...extra });
 const nativeApp = (version = '3.27.1') => ({ vault: { adapter: { getBasePath: () => 'C:\\test-vault' } }, plugins: { plugins: version ? { terminal: { manifest: { version } } } : {} } });
 function fixture() {
- const f = { events: [], calls: [], stock: [], published: [], opened: [], selectionReads: 0, selection: { provider: 'codex', model: 'gpt-6-astra' }, response: state() };
+ const f = { events: [], calls: [], stock: [], published: [], opened: [], selectionReads: 0, selection: { provider: 'codex', model: 'astra' }, response: state() };
  f.handler = () => ({ status: 200, json: f.response });
  globalThis.dashboardPluginFixture = f;
  return f;
@@ -104,7 +104,7 @@ test('stock skills retain the background queue path and preserve argument values
 
 test('installed skills bind one provider selection, establish the native session and open the returned work task', async () => {
  const f = fixture();
- const task = { id: 'task-id', provider: 'codex', model: 'gpt-6-astra', execution: 'native', state: 'starting', turns: [] };
+ const task = { id: 'task-id', provider: 'codex', model: 'astra', execution: 'native', state: 'starting', turns: [] };
  f.handler = () => ({ status: 200, json: task });
  await dashboard.launchDashboardSkill(nativeApp(), installed, '  Write an offer for my client  ');
  const call = f.calls[0], payload = JSON.parse(call.options.body);
@@ -132,7 +132,7 @@ test('custom launch rejects empty requests and provider mismatches before creati
 test('verified and newer untested Terminal versions both launch personal skills natively', async () => {
  for (const version of ['3.27.1', '3.27.2', '3.28.0']) {
   const f = fixture();
-  f.handler = () => ({ status: 200, json: { id: 'task-' + version, provider: 'codex', model: 'gpt-6-astra', execution: 'native', state: 'starting', turns: [] } });
+  f.handler = () => ({ status: 200, json: { id: 'task-' + version, provider: 'codex', model: 'astra', execution: 'native', state: 'starting', turns: [] } });
   await dashboard.launchDashboardSkill(nativeApp(version), installed, 'Write a proposal');
   assert.deepEqual(f.opened, [['task-' + version]], version);
  }
@@ -160,7 +160,7 @@ test('missing or unsupported native Terminal prevents session writes and pending
 
 test('browser personal skills do not require the Obsidian Terminal plugin', async () => {
  const f = fixture();
- const task = { id: 'browser-task', provider: 'codex', model: 'gpt-6-astra', state: 'starting', turns: [] };
+ const task = { id: 'browser-task', provider: 'codex', model: 'astra', state: 'starting', turns: [] };
  f.handler = () => ({ status: 200, json: task });
  await dashboard.launchDashboardSkill({ vault: { adapter: {} } }, installed, 'Write a proposal');
  assert.equal(f.calls[0].path, '/dashboard/launch');

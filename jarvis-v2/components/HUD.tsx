@@ -5,11 +5,18 @@ import {SKILLS} from '../../obsidian-v2/shared/contract.mjs';
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { VaultState, Metric } from "@/lib/vault";
-import { voice } from "@/lib/voiceClient";
+import { voice, voicePrefs } from "@/lib/voiceClient";
+import {initialLive,type LiveSnapshot} from '../../obsidian-v2/shared/live-session';
+import {liveLabel,liveToggleLabel} from '../../obsidian-v2/shared/live-controls';
+import {LiveCallBar,LiveVoiceSettings} from './LiveVoiceControls';
+import {scheduleNote} from '@/lib/schedule-note';
+import type {ScheduleNote} from '../../obsidian-v2/shared/schedule-note';
+import {voiceGroups,VOICE_RATES,rateLabel,type VoicePrefs,type VoicePrefsSnapshot} from '../../obsidian-v2/shared/voice-prefs';
 import {useAgentWork} from '@/lib/useAgentWork';
+import {localTaskSpeech} from '../../obsidian-v2/shared/task-activity';
 import {getWorkSelection,openWork,setWorkProvider,type WorkTask} from '@/lib/work';
 import {dashboardEntries,dashboardSkillsStore,launchInstalledSkill,skillUnavailable,type DashboardProvider,type DashboardState} from '@/lib/dashboard-skills';
-import {isPendingCallout,queueWorkflowCallout,reconcileWorkflowCallouts,type WorkflowCallout} from '@/lib/workflow-callouts';
+import {isPendingCallout,liveActivityCallout,queueWorkflowCallout,reconcileWorkflowCallouts,type WorkflowCallout} from '@/lib/workflow-callouts';
 import {shortConversationTitle} from '../../obsidian-v2/shared/work-presentation';
 import { scrubRunSummary, humanizeFailure } from "@/lib/spokenText";
 import { BG_MODES, type BgMode, type CoreMode } from "./GraphCore";
@@ -286,6 +293,9 @@ function CommandDeck({
   const [queueError,setQueueError] = useState("");
   const [browsing,setBrowsing]=useState(false);
   const [customizing,setCustomizing]=useState(false);
+  // What is scheduled to run by itself (read-only here; changed with `node aos.mjs schedule`).
+  const [schedule,setSchedule]=useState<ScheduleNote>(()=>scheduleNote.getSnapshot());
+  useEffect(()=>scheduleNote.subscribe(setSchedule),[]);
   const [preferences,setPreferences]=useState<DashboardState>(dashboardSkillsStore.getSnapshot());
   useEffect(()=>dashboardSkillsStore.subscribe(setPreferences),[]);
   const catalog=preferences.data.catalog;
@@ -310,7 +320,7 @@ function CommandDeck({
         body: JSON.stringify({ skill, args }),
       });
       if(!res.ok) { const result=await res.json();throw new Error(result.error||"Could not queue this workflow."); }
-      const task=await res.json();setQueueError("");onQueued(skill, true,task.id);
+      const task=await res.json();openWork();setQueueError("");onQueued(skill, true,task.id);
       void dashboardStore.refresh();
     } catch (e) {
       setQueueError(e instanceof Error?e.message:"V2 bridge unavailable");setCooldown(c=>({...c,[skill]:false}));if(spec.kind==='builtin')onQueued(skill,false);return;
@@ -359,25 +369,34 @@ function CommandDeck({
       {queueError && <p className="voice-message" role="alert">{queueError}</p>}
       {(preferences.error||preferences.data.error)&&<p className="voice-message" role="alert">Dashboard preferences: {preferences.error||preferences.data.error}{preferences.error&&!preferences.loaded?' · Showing default shortcuts.':preferences.error?' · Showing last loaded shortcuts.':''}</p>}
       <div className="deck-hint">{state?'Bundled skills → reports here · installed skills → terminals':'Workflow runner offline'}</div>
+      {schedule.lines.length>0&&<div className="deck-hint" role="status" title="Change it with: node aos.mjs schedule">Scheduled · {schedule.lines.join(' · ')}</div>}
+      {schedule.error&&<p className="voice-message" role="alert">Schedule: {schedule.error}</p>}
     </section>
   );
 }
 
-const AudioIO = memo(function AudioIO({ mode, voiceMode, message, provider, tasks, target, selectionError, onTarget, onOpen }: { mode: CoreMode; voiceMode: CoreMode; message: string; provider: "codex" | "claude"; tasks:WorkTask[]; target:string|null; selectionError:string; onTarget:(id:string|null)=>Promise<void>; onOpen:()=>void }) {
+const AudioIO = memo(function AudioIO({ mode, voiceMode, call, message, provider, tasks, target, selectionError, onTarget, onOpen }: { mode: CoreMode; voiceMode: CoreMode; call:LiveSnapshot; message: string; provider: "codex" | "claude"; tasks:WorkTask[]; target:string|null; selectionError:string; onTarget:(id:string|null)=>Promise<void>; onOpen:()=>void }) {
   const [text,setText] = useState("");
   const [choosing,setChoosing]=useState(false);
   const live = mode === "speaking" || mode === "listening";
   const providerTasks=tasks.filter(task=>task.provider===provider&&task.execution!=='script'&&task.execution!=='headless'&&!task.background);
   const selectedTask = providerTasks.find(task=>task.id===target);
   const voiceBusy=voiceMode==='listening'||voiceMode==='working'||voiceMode==='speaking';
-  const voiceState=voiceMode==='idle'?'Tap to talk':voiceMode==='working'?'Thinking':voiceMode==='error'?'Try again':voiceMode;
   const choose=async(id:string|null)=>{if(choosing)return;setChoosing(true);try{await onTarget(id)}finally{setChoosing(false)}};
+  // How voice sounds in this vault, shared with the Obsidian plugin.
+  const [sound,setSound]=useState<VoicePrefsSnapshot>(()=>voicePrefs.getSnapshot());
+  const useLive=sound.prefs.voiceMode==='live';
+  const voiceState=useLive?liveLabel(call):voiceMode==='idle'?'Tap to talk':voiceMode==='working'?'Thinking':voiceMode==='error'?'Try again':voiceMode;
+  const textBlocked=!!call.occupied||call.state==='connecting';
+  const [soundError,setSoundError]=useState('');
+  useEffect(()=>voicePrefs.subscribe(setSound),[]);
+  const saveSound=(changes:Partial<VoicePrefs>,sample=false)=>{setSoundError('');void voicePrefs.save(changes).then(()=>{if(sample)voice.sample()}).catch(e=>setSoundError(String(e?.message||e)))};
   return (
     <section className="block boot-stagger" style={{ animationDelay: "0.42s" }}>
       <div className="voice-card-heading">
         <SectionTitle title="Voice" tick={voiceState.toUpperCase()} />
         <details className="voice-conversation-controls" onKeyDown={event=>{if(event.key==='Escape'){event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();event.stopPropagation()}}}>
-          <summary aria-label="Voice conversation controls" title="Conversation controls">···</summary>
+          <summary aria-label="Voice conversation controls" title="Conversation and sound">···</summary>
           <div className="voice-conversation-menu">
             <div className="voice-conversation-heading"><label htmlFor="jarvis-voice-conversation">Conversation</label><button type="button" disabled={choosing||voiceBusy} onClick={()=>void choose(null)}>+ New conversation</button></div>
             <select id="jarvis-voice-conversation" aria-label="Voice conversation" title={selectedTask?.title} disabled={choosing||voiceBusy} value={target||''} onChange={e=>void choose(e.target.value||null)}>
@@ -387,6 +406,14 @@ const AudioIO = memo(function AudioIO({ mode, voiceMode, message, provider, task
             </select>
             {target&&!selectedTask&&<p role="status">Choose a conversation or start a new one.</p>}
             {selectionError&&<p role="alert">{selectionError}</p>}
+            {sound.ready&&!useLive&&<div className="voice-sound">
+              <button type="button" className="voice-mute" aria-pressed={!sound.prefs.spokenReplies} title="Replies are still written here, and hearing you keeps working." onClick={()=>saveSound({spokenReplies:!sound.prefs.spokenReplies})}><span>Spoken replies</span><strong>{sound.prefs.spokenReplies?'On':'Off'}</strong></button>
+              {sound.voices.length>0&&<label>Voice<select aria-label="Voice" disabled={voiceBusy} value={sound.prefs.voice||sound.fallback||''} onChange={e=>saveSound({voice:e.target.value===sound.fallback?null:e.target.value},true)}>{voiceGroups(sound.voices).map(set=><optgroup key={set.group} label={set.group}>{set.voices.map(choice=><option key={choice.id} value={choice.id}>{choice.name}</option>)}</optgroup>)}</select></label>}
+              <label>Speed<select aria-label="Speaking speed" disabled={voiceBusy} value={String(sound.prefs.rate)} onChange={e=>saveSound({rate:Number(e.target.value)},true)}>{(VOICE_RATES.includes(sound.prefs.rate)?VOICE_RATES:[...VOICE_RATES,sound.prefs.rate].sort((a,b)=>a-b)).map(rate=><option key={rate} value={String(rate)}>{rateLabel(rate)}</option>)}</select></label>
+              {soundError&&<p role="alert">{soundError}</p>}
+            </div>}
+            {sound.ready&&<LiveVoiceSettings prefs={sound.prefs} live={call} save={saveSound}/>}
+            {useLive&&soundError&&<p role="alert">{soundError}</p>}
           </div>
         </details>
       </div>
@@ -396,16 +423,17 @@ const AudioIO = memo(function AudioIO({ mode, voiceMode, message, provider, task
         ))}
       </div>
       <div className="audio-meta">
-        <button disabled={choosing} onClick={() => void voice.toggle()}>{voiceMode === "listening" ? "Send recording" : voiceMode === "working" ? "Cancel request" : voiceMode === "speaking" ? "Interrupt & talk" : "Tap to talk"}</button>
-        <span>Whisper / Kokoro · local speech</span>
+        <button disabled={choosing||!!call.occupied||useLive&&!!call.unavailable} onClick={() => void voice.toggle()}>{useLive?liveToggleLabel(call):voiceMode === "listening" ? "Send recording" : voiceMode === "working" ? "Cancel request" : voiceMode === "speaking" ? "Interrupt & talk" : "Tap to talk"}</button>
+        <span>{useLive?'GPT-Live':'Whisper / Kokoro · local speech'}</span>
       </div>
-      <p className="voice-message" role="status">{message || "Tap to talk, then pause to send. Escape cancels."}</p>
-      <form className="voice-text" onSubmit={e=>{e.preventDefault();if(text.trim()){void voice.sendText(text);setText("");}}}>
+      <LiveCallBar live={call}/>
+      <p className="voice-message" role="status">{message || (useLive?call.unavailable||'Start a call to talk. End call hangs up.':"Tap to talk, then pause to send. Escape cancels.")}</p>
+      <form className="voice-text" onSubmit={e=>{e.preventDefault();if(!textBlocked&&text.trim()){void voice.sendText(text);setText("");}}}>
         <input aria-label="Type a voice request" placeholder="Ask or continue…" value={text} maxLength={4000} onChange={e=>setText(e.target.value)}/>
-        <button disabled={choosing||!text.trim()||voiceMode==="working"||voiceMode==="listening"}>Send</button>
+        <button disabled={textBlocked||choosing||!text.trim()||voiceMode==="working"||voiceMode==="listening"}>Send</button>
       </form>
       <button className="agent-open-link" onClick={onOpen}>Open terminals</button>
-      <small className="voice-disclosure">Speech stays local. Transcripts go to the selected provider.</small>
+      <small className="voice-disclosure">{useLive?(sound.prefs.liveShareBrief?'Call audio, a vault snapshot and your whole morning brief go to OpenAI.':'Call audio and a vault snapshot go to OpenAI.'):'Speech stays local. Transcripts go to the selected provider.'}</small>
     </section>
   );
 });
@@ -732,6 +760,7 @@ export default function HUD() {
   const [selecting, setSelecting] = useState(false);
   const [selectionError, setSelectionError] = useState("");
   const [paused, setPaused] = useState(false);
+  const selectedVoiceModel=(state as (VaultState & {preview?:{model?:string}})|null)?.preview?.model;
   useEffect(() => {
     const selected = (state as (VaultState & {preview?: {provider: "claude" | "codex";model?:string}}) | null)?.preview;
     if (selected && !selecting){setWorkProvider(selected.provider,selected.model);setProvider(selected.provider)}
@@ -752,6 +781,11 @@ export default function HUD() {
   const work=useAgentWork();
   const [voiceMessage,setVoiceMessage] = useState("");
   const [voiceMode, setVoiceMode] = useState<CoreMode>("idle");
+  const [liveCall,setLiveCall]=useState(initialLive);
+  const [voiceSettings,setVoiceSettings]=useState(voicePrefs.getSnapshot);
+  useEffect(()=>voicePrefs.subscribe(setVoiceSettings),[]);
+  useEffect(()=>voice.onLive(setLiveCall),[]);
+  useEffect(()=>voice.syncLiveContext(),[work.target,provider,selectedVoiceModel]);
   useEffect(() => voice.onMode(setVoiceMode), []);
   useEffect(() => { voice.stop('provider-change');setWorkProvider(provider); }, [provider]);
   const [ptt, setPtt] = useState(false);
@@ -765,12 +799,12 @@ export default function HUD() {
   const [callouts, setCallouts] = useState<WorkflowCallout[]>([]);
   const calloutSeq = useRef(0);
   const addCallout = useCallback(
-    (target: string, label: string, kind: "doc" | "link" = "doc") => {
+    (target: string, label: string, kind: "doc" | "link" = "doc",liveReport=false) => {
       setCallouts((cur) => {
-        if (cur.some((c) => c.target === target)) return cur; // already on screen
+        if (cur.some((c) => c.target === target&&!!c.liveReport===liveReport)) return cur; // already on screen
         const used = new Set(cur.map((c) => c.slot));
         const free = [0, 1, 2, 3].find((s) => !used.has(s));
-        const entry = { id: ++calloutSeq.current, kind, target, label };
+        const entry = { id: ++calloutSeq.current, kind, target, label,...(liveReport?{liveReport}: {}) };
         // all four slots taken → oldest card yields its slot, but never a
         // live task (its run is still going — evicting it hides real work)
         if (free === undefined) {
@@ -799,12 +833,14 @@ export default function HUD() {
   }, []);
 
   const openReport = useCallback(
-    async (path: string) => {
+    async (path: string,liveReport=false) => {
       const request=++reportRequest.current;artifactPresenter.current?.close();
       try {
-        const res = await fetch(`/api/report?path=${encodeURIComponent(path)}`);
-        if (!res.ok) throw new Error(String(res.status));
-        const j = (await res.json()) as { path: string; content: string };
+        const j = liveReport?await voice.readLiveReport(path):await (async()=>{
+          const res=await fetch(`/api/report?path=${encodeURIComponent(path)}`);
+          if(!res.ok)throw new Error(String(res.status));
+          return await res.json() as {path:string;content:string};
+        })();
         if(request===reportRequest.current)setReport(j);
       } catch {
         if(request===reportRequest.current)pushLine("err", `couldn't open ${path}`);
@@ -812,6 +848,8 @@ export default function HUD() {
     },
     [pushLine]
   );
+  useEffect(()=>{if(liveCall.state==='idle')setCallouts(current=>current.some(card=>card.liveReport)?current.filter(card=>!card.liveReport):current)},[liveCall.state]);
+  useEffect(()=>{if(liveCall.state==='idle')setCallouts(current=>current.some(card=>card.target.startsWith('live:'))?current.filter(card=>!card.target.startsWith('live:')):current)},[liveCall.state]);
 
   // bottom-left TRANSCRIPT button — the voice conversation so far, rendered
   // in the same overlay as reports (memory.jsonl survives reloads, so this
@@ -863,6 +901,19 @@ export default function HUD() {
     const timers = seeds.map(([p, l], i) => setTimeout(() => addCallout(p, l), 800 + i * 1400));
     return () => timers.forEach(clearTimeout);
   }, [addCallout]);
+
+  // ?demo=livehandoff — the Live hand-off cards without a call (filming + layout checks):
+  // one hand-off that starts a workflow, then one that V2 answers from the brief.
+  useEffect(() => {
+    if (!window.location.search.includes("demo=livehandoff")) return;
+    const show = (key: string, phase: string, label = "") => setCallouts((cur) => liveActivityCallout(cur, { key, phase, label }, () => ++calloutSeq.current));
+    const steps: [number, string, string, string?][] = [
+      [800, "demo-1", "handoff"], [3000, "demo-1", "starting", "Start Inbox Brief"], [6500, "demo-1", "started", "Start Inbox Brief"],
+      [9000, "demo-2", "handoff"], [11500, "demo-2", "answered", "the morning brief"],
+    ];
+    const timers = steps.map(([at, key, phase, label]) => setTimeout(() => show(key, phase, label), at));
+    return () => timers.forEach(clearTimeout);
+  }, []);
 
   // ?demo=taskwork — full task-callout lifecycle without queueing real runs:
   // two tasks spawn (one with eta, one indeterminate). First fills toward its
@@ -919,25 +970,28 @@ export default function HUD() {
     voice.init();
     voice.onLog((kind,text)=>{pushLine(kind,text);setVoiceMessage(text);});
     voice.onPanels(setHotPanels);
-    voice.onDeliverable((path, label) => addCallout(path, label));
-    voice.onReveal((r) => addCallout(r.target, r.label, r.kind)); // sequenced to speech
-    voice.onOpenDoc((path) => void openReport(path)); // "bring up the html" → overlay now
+    voice.onDeliverable((path, label,liveReport) => addCallout(path, label,'doc',liveReport));
+    voice.onReveal((r,liveReport) => addCallout(r.target, r.label, r.kind,liveReport)); // sequenced to speech
+    voice.onOpenDoc((path,liveReport) => void openReport(path,liveReport)); // "bring up the html" → overlay now
     voice.onListening(setWakeListening); // P4: hands-free wake window
     const off = voice.onSpeaking(setVoiceSpeaking);
-    return () => { offArtifact();presenter.destroy();if(artifactPresenter.current===presenter)artifactPresenter.current=null;off(); voice.destroy(); };
+    // A Live hand-off branches off the core like a skill run: handing off, then what V2 answered from or started.
+    const offActivity = voice.onLiveActivity(item => setCallouts(cur => liveActivityCallout(cur, item, () => ++calloutSeq.current)));
+    return () => { offArtifact();offActivity();presenter.destroy();if(artifactPresenter.current===presenter)artifactPresenter.current=null;off(); voice.destroy(); };
   }, [pushLine, openReport, addCallout,openArtifact]);
 
   // P3 choreography — highlights arrive with the reply and live for the
   // duration of speech; the grace window covers the response→playback gap
   // (and ends the glow if TTS never starts)
   useEffect(() => {
-    if (voiceSpeaking || hotPanels.length === 0) return;
+    if (voiceSpeaking || liveCall.state==='speaking' || hotPanels.length === 0) return;
     const id = setTimeout(() => setHotPanels([]), 2000);
     return () => clearTimeout(id);
-  }, [voiceSpeaking, hotPanels]);
+  }, [voiceSpeaking,liveCall.state, hotPanels]);
 
   // demo mode keys: 1 idle / 2 working / 3 listening / 4 speaking / 5 error, 0|Esc auto
   useEffect(() => {
+    // Escape never ends a Live call; only End call does (Chase, 2026-11-22). It still stops Local voice.
     const onKey = (e: KeyboardEvent) => {
       if (e.key!=='Escape'&&e.target instanceof HTMLElement && (e.target.matches("input, textarea, select, button, a") || e.target.isContentEditable)) return;
       if (e.key in MODE_KEYS) {
@@ -950,7 +1004,8 @@ export default function HUD() {
           setReport(null);
           return;
         }
-        if (voice.stop()) pushLine("sys", "voice — stopped");
+        // Live has its own Escape rule above (never while typing in a terminal or field); here only Local voice stops.
+        if (voice.stop('local-only')) pushLine("sys", "voice — stopped");
         setModeOverride(null);
       } else if (e.key === "0") {
         setModeOverride(null);
@@ -964,7 +1019,7 @@ export default function HUD() {
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {window.removeEventListener("keydown", onKey)};
   }, [pushLine]);
 
   // real runs flow into the feed
@@ -1030,7 +1085,7 @@ export default function HUD() {
     }
     done.forEach((r) => {
       spokenRunsRef.current.add(r.id);
-      void voice.announce(`run:${r.id}`,runAnnouncement(r.skill, r.status, r.summary ?? "", r.label)).catch(()=>spokenRunsRef.current.delete(r.id));
+      if(localTaskSpeech(voiceSettings.prefs.voiceMode))void voice.announce(`run:${r.id}`,runAnnouncement(r.skill, r.status, r.summary ?? "", r.label)).catch(()=>spokenRunsRef.current.delete(r.id));
       // finished run left a document → offer it via the reveal chip. When
       // the run's REAL output lives at a URL (Gmail draft, video), the
       // callout sends you THERE — the md stays in the Documents trail.
@@ -1042,7 +1097,7 @@ export default function HUD() {
         );
       }
     });
-  }, [state]);
+  }, [state,voiceSettings.prefs.voiceMode]);
 
   const onQueued = useCallback(
     (skill: string, ok: boolean, id?:string) => {
@@ -1069,10 +1124,11 @@ export default function HUD() {
         : voiceMode === "error" ? "error" : voiceMode === "working" || state?.runner?.busy
           ? "working"
           : "idle";
-  const mode = modeOverride ?? autoMode;
+  const liveMode=voiceSettings.prefs.voiceMode==='live';
+  const mode = modeOverride ?? (liveCall.state==='speaking'?'speaking':liveCall.state==='listening'?'listening':liveCall.state==='connecting'?'working':autoMode);
 
   return (
-    <main className={`stage v2-stage provider-${provider}`} data-provider={provider} data-mode={mode} data-motion={paused?'paused':'running'}>
+    <main className={`stage v2-stage provider-${provider}`} data-provider={provider} data-mode={mode} data-motion={paused?'paused':'running'} data-live-state={liveMode?liveCall.state:undefined}>
       <div hidden={provider!=='codex'} className="provider-stars"><StarField /></div>
       <div hidden={provider!=='codex'} className="core-transition provider-art">{visited.codex&&<GalaxyCore mode={mode} getLevel={voice.getLevel} paused={paused||provider!=='codex'} variant="tight" />}</div>
       <div hidden={provider!=='claude'} className="core-transition provider-art">{(visited.claude||provider==='claude')&&<GraphCore mode={mode} bgMode={bgMode} getLevel={voice.getLevel} paused={paused||provider!=='claude'} />}</div>
@@ -1126,11 +1182,11 @@ export default function HUD() {
                   {...(!isTask && {
                     role: "button",
                     tabIndex: 0,
-                    onKeyDown: (event: React.KeyboardEvent) => {if(event.target===event.currentTarget&&(event.key==="Enter"||event.key===" ")){event.preventDefault();c.kind==="link"?window.open(c.target,"_blank","noopener"):void openReport(c.target)}},
+                    onKeyDown: (event: React.KeyboardEvent) => {if(event.target===event.currentTarget&&(event.key==="Enter"||event.key===" ")){event.preventDefault();c.kind==="link"?window.open(c.target,"_blank","noopener"):void openReport(c.target,c.liveReport)}},
                     onClick: () =>
                       c.kind === "link"
                         ? window.open(c.target, "_blank", "noopener")
-                        : void openReport(c.target),
+                        : void openReport(c.target,c.liveReport),
                   })}
                 >
                   <span className="callout-dot" />
@@ -1151,10 +1207,10 @@ export default function HUD() {
                         </span>
                         <span className="task-time">
                           {c.phase === "queued" ? "queued" : c.phase === "working"
-                            ? `${fmtClock(elapsed)} · working`
+                            ? `${fmtClock(elapsed)} · ${c.note ?? "working"}`
                             : c.phase === "failed"
                               ? `failed · ${fmtClock(elapsed)}`
-                              : `complete · ${fmtClock(elapsed)}`}
+                              : c.note ?? `complete · ${fmtClock(elapsed)}`}
                         </span>
                       </span>
                     ) : (
@@ -1193,7 +1249,7 @@ export default function HUD() {
             hot={hotPanels.includes("pipeline") || hotPanels.includes("diagnostics")}
             onQueued={onQueued}
           />
-          <AudioIO mode={mode} voiceMode={voiceMode} message={voiceMessage} provider={provider} tasks={work.tasks} target={work.target} selectionError={work.selectionError} onTarget={async id=>{setVoiceMessage('');await work.selectVoice(id)}} onOpen={()=>work.setOpen(true)} />
+          <AudioIO mode={mode} voiceMode={voiceMode} call={liveCall} message={voiceMessage} provider={provider} tasks={work.tasks} target={work.target} selectionError={work.selectionError} onTarget={async id=>{setVoiceMessage('');await work.selectVoice(id);voice.syncLiveContext()}} onOpen={()=>work.setOpen(true)} />
           {state && <details className="dashboard-details"><summary>Schedule <span>{state.daily?.date||'Today'}</span></summary><Schedule state={state} hot={hotPanels.includes("schedule")} /></details>}
           {state && <Wire state={state} onOpen={openReport} />}
         </div>
@@ -1213,7 +1269,7 @@ export default function HUD() {
         </button>
       </div>
 
-      <AgentWorkDrawer tasks={work.tasks} tasksLoaded={work.loaded} target={work.viewTarget} voiceTarget={work.target} select={work.select} dismissView={work.dismissView} open={work.open} setOpen={work.setOpen} connectionError={work.error} provider={provider} voiceMode={voiceMode} voiceMessage={voiceMessage} vaultRoot={state?.vault_root||''}/>
+      <AgentWorkDrawer tasks={work.tasks} activityTasks={work.activityTasks} tasksLoaded={work.loaded} target={work.viewTarget} voiceTarget={work.target} select={work.select} dismissView={work.dismissView} open={work.open} setOpen={work.setOpen} connectionError={work.error} provider={provider} voiceMode={voiceMode} voiceMessage={voiceMessage} vaultRoot={state?.vault_root||''}/>
       {report && (
         <ReportOverlay
           report={report}

@@ -1,5 +1,6 @@
 import {spawn} from 'node:child_process';
 import {findCli} from './cli-runtime.mjs';
+import {withoutOpenAIKey} from './child-env.mjs';
 
 // After hours of idle the first launch of codex.exe is slow on Windows (cold file cache, antivirus scan): it blocks
 // whoever spawns it for 250-300 ms, against 12-16 ms warm. That cost used to land on the bridge's event loop when the
@@ -26,7 +27,7 @@ export function warmCli({provider='codex',now=performance.now(),env=process.env,
   // Only a direct native executable is warmed. A wrapper resolution (node + codex.js) starts a grandchild that the
   // helper would not own, so it is skipped rather than half cleaned up.
   if(!cli?.command||cli.prefix?.length)return false;
-  const child=launch(process.execPath,['-e',helperSource(limitMs),JSON.stringify([cli.command])],{detached:true,stdio:'ignore',windowsHide:true,shell:false});
+  const child=launch(process.execPath,['-e',helperSource(limitMs),JSON.stringify([cli.command])],{detached:true,stdio:'ignore',windowsHide:true,shell:false,env:withoutOpenAIKey(process.env)});
   child.on?.('error',()=>{});child.unref?.();return true;
  }catch{return false}
 }

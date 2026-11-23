@@ -5,7 +5,7 @@ import {VoiceHub} from '../runner/voice-hub.mjs';
 const built=await build({entryPoints:['shared/voice-session.ts','shared/voice-surface.ts'],bundle:true,platform:'node',format:'esm',outdir:'unused',write:false});
 const modules=await Promise.all(built.outputFiles.map(file=>import('data:text/javascript;base64,'+Buffer.from(file.text).toString('base64'))));
 const {VoiceSession}=modules.find(m=>m.VoiceSession),{VoiceSurface}=modules.find(m=>m.VoiceSurface);
-const selection={provider:'codex',model:'gpt-5.6-luna'},uuid='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const selection={provider:'codex',model:'luna'},uuid='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 function replace(t,key,value){const old=Object.getOwnPropertyDescriptor(globalThis,key);Object.defineProperty(globalThis,key,{configurable:true,writable:true,value});t.after(()=>old?Object.defineProperty(globalThis,key,old):delete globalThis[key])}
 
 test('streamed audio configures CORS, source, and graph before play, and traces only stages for the latest request',async t=>{

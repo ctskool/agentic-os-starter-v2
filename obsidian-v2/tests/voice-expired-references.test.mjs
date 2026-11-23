@@ -13,7 +13,7 @@ function fixture(t,provider,appScope){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'voice-expired-reference-'));
  let now=Date.now();t.mock.method(Date,'now',()=>now);
  t.after(()=>{invalidateVoiceSnapshot(root);fs.rmSync(root,{recursive:true,force:true})});
- const chosen={provider,model:provider==='codex'?'gpt-6-astra':'sonnet'};
+ const chosen={provider,model:provider==='codex'?'astra':'sonnet'};
  const tasks=[],calls=[];
  const terminals={list:()=>tasks,get:id=>{const task=tasks.find(item=>item.id===id);if(!task)throw Error('Missing task');return task}};
  const add=(extra={})=>{const task={id:crypto.randomUUID(),...chosen,execution:appScope==='native'?'native':'terminal',state:'ready',title:'OLD_WORK_TITLE',prompt:'OLD_WORK_REQUEST',created:now-86400000,turns:[{ts:now-1000,text:'OLD_WORK_ANSWER'}],...extra};tasks.push(task);return task};

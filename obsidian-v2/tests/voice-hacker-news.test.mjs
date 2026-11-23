@@ -35,7 +35,7 @@ function fixture(t){
  t.after(()=>{invalidateVoiceSnapshot(root);fs.rmSync(root,{recursive:true,force:true})});
  const starts=[];
  const terminals={list:()=>[],get:()=>assert.fail('Quick lookup cannot open or retarget a terminal'),start:task=>{starts.push(task);return {id:task.id}},send:()=>assert.fail('No follow-up task'),startWorkflow:()=>assert.fail('No workflow')};
- const speak=(provider,transcript,execute=()=>assert.fail('No model needed'),extra={})=>routeVoice(root,{id:crypto.randomUUID(),selection:{provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},transcript,terminalMode:true,...extra},undefined,execute,terminals,{resolveCli:()=>({command:'unused-test-cli',prefix:[]})});
+ const speak=(provider,transcript,execute=()=>assert.fail('No model needed'),extra={})=>routeVoice(root,{id:crypto.randomUUID(),selection:{provider,model:provider==='codex'?'astra':'sonnet'},transcript,terminalMode:true,...extra},undefined,execute,terminals,{resolveCli:()=>({command:'unused-test-cli',prefix:[]})});
  return {root,write,speak,starts};
 }
 
@@ -106,7 +106,7 @@ for(const provider of ['codex','claude']){
   await f.speak(provider,'What was the top HN story today?');
   let called=0;
   const answer=await f.speak(provider,'Tell me more about that mathematics item',async(_root,job,_prompt,options)=>{
-   called++;assert.equal(job.model,provider==='codex'?'gpt-5.6-luna':'haiku');
+   called++;assert.equal(job.model,provider==='codex'?'luna':'haiku');
    assert.match(options.system,/not a live ranking/);assert.match(options.system,/"points":1050,"comments":1003/);
    assert.match(options.system,/https:\/\/example.test\/mathematics/);
    // Bounded source facts include both supported rankings, without loading
@@ -122,7 +122,7 @@ for(const provider of ['codex','claude']){
   for(const text of ['What is the top HN story right now?','Could you help me research the top Hacker News story today?','What is the top HN story in my morning brief, then draft an outline?','What was the top Hacker News story today and why?','What was the biggest AI story on HN today?','What was the top Show HN today?']){
    let called=0;
    const result=await f.speak(provider,text,async()=>{called++;return {text:JSON.stringify({tier:2,reply:'That request needs more than the saved ranking.'})}});
-   assert.equal(called,1,text);assert.equal(result.model,provider==='codex'?'gpt-5.6-luna':'haiku');assert.deepEqual(result.workIds,[]);
+   assert.equal(called,1,text);assert.equal(result.model,provider==='codex'?'luna':'haiku');assert.deepEqual(result.workIds,[]);
   }
  });
 }

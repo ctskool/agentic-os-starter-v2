@@ -1,18 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {build} from 'esbuild';
-const built=await build({entryPoints:['src/lib/queue.ts'],bundle:true,platform:'node',format:'esm',write:false,plugins:[{name:'isolated-obsidian-client',setup(builder){
- builder.onResolve({filter:/^(obsidian|\.\/provider|\.\/work|\.\/v2-voice)$/},args=>({path:args.path,namespace:'fixture'}));
- builder.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:{
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {createJiti} from 'jiti';
+const stubs={
   obsidian:'export class Notice{constructor(message){globalThis.skillQueueFixture.notices.push(message)}}',
   './provider':'export async function assertTestVault(){};export async function readSelection(){return globalThis.skillQueueFixture.selection}',
   './work':'export async function workRequest(path,body){return globalThis.skillQueueFixture.request(path,body)};export function openWork(){throw new Error("A skill opened a terminal")}',
   './v2-voice':'export async function assertVoiceVault(){}',
- }[args.path],loader:'js'}));
-}}]});
-const {writeIntent,registerSkillReports}=await import('data:text/javascript;base64,'+Buffer.from(built.outputFiles[0].text).toString('base64'));
+  './work-notices':'export function showWorkNotice(message,open){globalThis.skillQueueFixture.resultNotices.push({message,open})}',
+};
+const {writeIntent,registerSkillReports}=(()=>{
+ const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'aos-skill-queue-')));
+ try{
+  const alias=Object.fromEntries(Object.entries(stubs).map(([key,source],index)=>{
+   const file=path.join(root,index+'.mjs');fs.writeFileSync(file,source);return [key,file];
+  }));
+  return createJiti(import.meta.url,{alias,fsCache:false})('../src/lib/queue.ts');
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
+})();
 function fixture(){
- const files=new Map(),events=new Map(),cleanups=[],opens=[],reveals=[],leaves=[],calls=[],notices=[];
+ const files=new Map(),events=new Map(),cleanups=[],opens=[],reveals=[],leaves=[],calls=[],notices=[],resultNotices=[];
  const app={
   vault:{
    adapter:{exists:async path=>files.has(path),read:async path=>files.get(path)},
@@ -25,22 +34,24 @@ function fixture(){
   },
  };
  const plugin={app,register:fn=>cleanups.push(fn),registerEvent:ref=>cleanups.push(()=>events.get(ref.name)?.delete(ref.handler))};
- const state={selection:{provider:'codex',model:'gpt-6-astra'},notices,async request(path,body){calls.push({path,body});return {...body,execution:body.skill==='metrics-pull'?'script':'headless'}}};
+ const state={selection:{provider:'codex',model:'astra'},notices,resultNotices,async request(path,body){calls.push({path,body});return {...body,execution:body.skill==='metrics-pull'?'script':'headless'}}};
  globalThis.skillQueueFixture=state;
  const emit=path=>{for(const handler of events.get('modify')||[])handler({path})};
  const settle=()=>new Promise(resolve=>setImmediate(resolve));
  const complete=(id,skill='morning-intel',path='inbox/report.md')=>{files.set(path,'A completed report');files.set('system/v2/runs/'+id+'.json',JSON.stringify({id,skill,status:'ok',deliverable_path:path}));emit('system/v2/runs/'+id+'.json')};
- return {app,plugin,state,files,events,opens,reveals,leaves,calls,notices,complete,settle,dispose:()=>{for(const cleanup of cleanups.splice(0).reverse())cleanup()}};
+ return {app,plugin,state,files,events,opens,reveals,leaves,calls,notices,resultNotices,complete,settle,dispose:()=>{for(const cleanup of cleanups.splice(0).reverse())cleanup()}};
 }
-for(const provider of ['codex','claude'])test(`${provider} skill dispatch requests background execution and opens the referenced native report once`,async t=>{
- const f=fixture();t.after(f.dispose);f.state.selection=provider==='codex'?{provider,model:'gpt-6-astra'}:{provider,model:'sonnet'};registerSkillReports(f.plugin);
+for(const provider of ['codex','claude'])test(`${provider} skill dispatch requests background execution and offers to open its report once`,async t=>{
+ const f=fixture();t.after(f.dispose);f.state.selection=provider==='codex'?{provider,model:'astra'}:{provider,model:'sonnet'};registerSkillReports(f.plugin);
  const id=await writeIntent(f.app,'morning-intel');assert.equal(f.calls.length,1);assert.equal(f.calls[0].path,'/skill');assert.equal(f.calls[0].body.execution,'headless');assert.deepEqual(f.calls[0].body.selection,f.state.selection);assert.equal(f.opens.length,0);assert.match(f.notices[0],/background/);
- f.complete(id);f.complete(id);await f.settle();assert.deepEqual(f.opens,['inbox/report.md']);
+ f.complete(id);f.complete(id);await f.settle();assert.deepEqual(f.opens,[]);assert.equal(f.resultNotices.length,1);
+ f.resultNotices[0].open();assert.deepEqual(f.opens,['inbox/report.md']);
  f.complete(id);await f.settle();assert.equal(f.opens.length,1);
 });
 test('multiple skill surfaces reuse an existing report tab and a plugin reload never enrolls history',async t=>{
  const f=fixture();t.after(f.dispose);registerSkillReports(f.plugin);
- const id=await writeIntent(f.app,'morning-intel');f.leaves.push({view:{file:{path:'inbox/report.md'}}});f.complete(id);await f.settle();assert.equal(f.opens.length,0);assert.equal(f.reveals.length,1);
+ const id=await writeIntent(f.app,'morning-intel');f.leaves.push({view:{file:{path:'inbox/report.md'}}});f.complete(id);await f.settle();assert.equal(f.opens.length,0);assert.equal(f.reveals.length,0);
+ f.resultNotices[0].open();assert.equal(f.reveals.length,1);
  f.dispose();registerSkillReports(f.plugin);f.complete(id);await f.settle();assert.equal(f.reveals.length,1);assert.equal(f.opens.length,0);
 });
 test('plugin unload removes listeners and prevents a request accepted afterward from opening a report',async t=>{

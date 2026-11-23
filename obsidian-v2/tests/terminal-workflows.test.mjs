@@ -3,13 +3,13 @@ import {TerminalManager} from '../runner/terminals.mjs';
 import {SKILLS} from '../shared/contract.mjs';
 import {replaceDaily} from '../runner/note-edits.mjs';
 import {runCommand} from '../runner/workflows.mjs';
-const selection={provider:'codex',model:'gpt-6-astra'};
+const selection={provider:'codex',model:'astra'};
 function fixture(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'aos-workflow-test-')),processes=[];const spawn=(command,args)=>{const proc={pid:123+processes.length,command,args,writes:[],onData(fn){this.data=fn},onExit(){},write(text){this.writes.push(text)},kill(){}};processes.push(proc);return proc};const manager=new TerminalManager(root,{directory:path.join(root,'sessions'),spawn});t.after(()=>{manager.close();fs.rmSync(root,{recursive:true,force:true})});return {root,manager,processes,spawn}}
 
 for(const chosen of [selection,{provider:'claude',model:'sonnet'}])test(`${chosen.provider} named workflow continues the ready CLI with its actual model and a separate run identity`,t=>{
  const {root,manager,processes}=fixture(t),task=manager.start({selection:chosen,prompt:'An existing conversation'}),sessionId=crypto.randomUUID();
  manager.accept(task.id,{type:chosen.provider==='codex'?'complete':'Stop',sessionId,turnId:'initial',text:'The original answer'});
- const id=crypto.randomUUID(),requested={provider:chosen.provider,model:chosen.provider==='codex'?'gpt-5.6-luna':'opus'};
+ const id=crypto.randomUUID(),requested={provider:chosen.provider,model:chosen.provider==='codex'?'luna':'opus'};
  const continued=manager.continueWorkflow(task.id,{id,selection:requested,skill:'weekly-review'});
  assert.equal(continued,task);assert.equal(processes.length,1);assert.equal(task.model,chosen.model);assert.equal(task.sessionId,sessionId);
  assert.equal(task.workflow.job.id,id);assert.equal(task.workflow.job.model,chosen.model);assert.equal(task.prompt,'An existing conversation');

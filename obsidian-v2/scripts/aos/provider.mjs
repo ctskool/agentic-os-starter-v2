@@ -4,9 +4,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {resolveCli} from '../../runner/cli-runtime.mjs';
-import {MODELS} from '../../shared/contract.mjs';
+import {MODELS, modelFamily} from '../../shared/contract.mjs';
 
-export const DEFAULT_MODEL = Object.freeze({codex: 'gpt-6-astra', claude: 'opus'});
+export const DEFAULT_MODEL = Object.freeze({codex: 'astra', claude: 'opus'});
 const NAME = {claude: 'Claude Code', codex: 'Codex'};
 const other = provider => provider === 'claude' ? 'codex' : 'claude';
 export const providerFile = vault => path.join(vault, 'system', 'v2', 'provider.json');
@@ -25,7 +25,8 @@ export function readStoredSelection(vault) {
   if (!fs.existsSync(file)) return {state: 'absent'};
   try {
     const value = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^﻿/, ''));
-    return Object.hasOwn(MODELS, value?.provider) && MODELS[value.provider].includes(value.model) ? {state: 'valid', selection: {provider: value.provider, model: value.model}} : {state: 'invalid'};
+    const model = Object.hasOwn(MODELS, value?.provider) ? modelFamily(value.provider, value.model) : null;
+    return model && MODELS[value.provider].includes(model) ? {state: 'valid', selection: {provider: value.provider, model}} : {state: 'invalid'};
   } catch { return {state: 'invalid'}; }
 }
 

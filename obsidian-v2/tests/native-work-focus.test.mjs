@@ -7,7 +7,7 @@ const stubs={
  preact:`export const h=(type,props)=>({type,props});export function render(value,element){element.rendered=value}`,
  'preact/jsx-runtime':`export const jsx=(type,props)=>({type,props}),jsxs=jsx;`,
  './components/WorkPane':`export function WorkPane(){}`,
- './lib/provider':`export async function readSelection(){return {provider:'codex',model:'gpt-6-astra'}}`,
+ './lib/provider':`export async function readSelection(){return {provider:'codex',model:'astra'}}`,
  './lib/v2-voice':`export async function assertVoiceVault(){}`,
  './lib/work':`let snapshot={tasks:[]};const listeners=new Set();export const choices=[];export function chooseWork(id){choices.push(id)}export const workFeed={getSnapshot:()=>snapshot,subscribe(fn){listeners.add(fn);fn(snapshot);return()=>listeners.delete(fn)}};export function publish(tasks){snapshot={tasks};for(const fn of listeners)fn(snapshot)}export function reset(){snapshot={tasks:[]};listeners.clear();choices.length=0}export const subscriberCount=()=>listeners.size;`,
 };

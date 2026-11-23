@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import {TerminalManager} from '../runner/terminals.mjs';
 import {TASK_RETENTION_MS,TASK_SWEEP_MS} from '../runner/task-retention.mjs';
 import {taskSummary} from '../shared/work-feed.mjs';
-const selection={provider:'codex',model:'gpt-6-astra'};
+const selection={provider:'codex',model:'astra'};
 function fixture(t){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'aos-retention-')),directory=path.join(root,'sessions');
  let clock=Date.UTC(2026,8,12);const timers=[],managers=[],processes=[];

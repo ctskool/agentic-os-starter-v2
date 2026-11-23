@@ -9,7 +9,7 @@ const built=await build({entryPoints:['src/lib/work.ts'],bundle:true,platform:'n
 }}]});
 let generation=0;
 async function load(t){
- const calls=[],current={codex:'saved-codex',claude:'saved-claude'},tasks=[{id:current.codex,provider:'codex',model:'gpt-6-astra'},{id:current.claude,provider:'claude',model:'sonnet'}];
+ const calls=[],current={codex:'saved-codex',claude:'saved-claude'},tasks=[{id:current.codex,provider:'codex',model:'astra'},{id:current.claude,provider:'claude',model:'sonnet'}];
  const previousWindow=globalThis.window,previousTransport=globalThis.__workSessionTransport;globalThis.window=new EventTarget();
  globalThis.__workSessionTransport=async(path,options={})=>{calls.push({path,...options});return {status:200,json:path==='/work?summary=1'?{tasks,current,currentRevision:5}:{...current,revision:5}}};
  t.after(()=>{if(previousWindow===undefined)delete globalThis.window;else globalThis.window=previousWindow;if(previousTransport===undefined)delete globalThis.__workSessionTransport;else globalThis.__workSessionTransport=previousTransport});
@@ -21,7 +21,7 @@ test('the component preview loads and follows existing web conversations without
  const {module,calls,current}=await load(t);module.configureWorkSession('preview');
  await module.workFeed.refresh();
  assert.deepEqual(module.workConversations.current(),current);
- assert.equal((await module.workConversations.getSelection({provider:'codex',model:'gpt-6-astra'})).targetId,current.codex);
+ assert.equal((await module.workConversations.getSelection({provider:'codex',model:'astra'})).targetId,current.codex);
  module.setWorkProvider('claude');assert.equal((await module.workConversations.getSelection({provider:'claude',model:'sonnet'})).targetId,current.claude);
  assert.equal(calls[0].path,'/work/current');assert.ok(calls.every(call=>!call.method||call.method==='GET'));
  assert.ok(calls.every(call=>call.path!=='/work/session'));

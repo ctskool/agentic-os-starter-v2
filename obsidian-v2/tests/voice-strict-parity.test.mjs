@@ -24,7 +24,7 @@ function fixture(t){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'voice-strict-parity-'));
  t.after(()=>{invalidateStrictIndex(root);invalidateTargetIndex(root);fs.rmSync(root,{recursive:true,force:true})});
  for(const relative of FILES){const file=path.join(root,relative);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,'# fixture\n')}
- const selection={provider:'codex',model:'gpt-6-astra'},calls=[],tasks=[],records=[];
+ const selection={provider:'codex',model:'astra'},calls=[],tasks=[],records=[];
  const get=id=>{const task=tasks.find(item=>item.id===id);if(!task)throw new Error('Task not found');return task};
  const terminals={live:new Map(),list:()=>tasks,get,
   send(id,text){calls.push({kind:'send',to:get(id).title,text});return get(id)},

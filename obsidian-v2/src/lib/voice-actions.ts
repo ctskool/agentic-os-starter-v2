@@ -38,7 +38,7 @@ export async function openVoiceArtifact(app:App,artifact:VoiceArtifact,signal?:A
  if(leaf.view?.getViewType?.()==='empty')throw new Error('Obsidian could not display the saved file.');
 }
 
-export async function applyVoiceAction(app:App,reply:VoiceReply,activate:()=>Promise<unknown>,openWork:()=>void):Promise<string|null>{
+export async function applyVoiceAction(app:App,reply:Partial<VoiceReply>,activate:()=>Promise<unknown>,openWork:()=>void):Promise<string|null>{
  const leafFor=(where?:ObsidianWhere)=>{
   if(where==='right-sidebar')return app.workspace.getRightLeaf(false);
   if(where==='left-sidebar')return app.workspace.getLeftLeaf(false);

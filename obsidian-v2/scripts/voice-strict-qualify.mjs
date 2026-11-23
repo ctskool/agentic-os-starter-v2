@@ -77,7 +77,7 @@ const SENTINEL={tier:2,reply:'__LUNA__'};
 const JEV_QUIET=async()=>({route:'tier2',tier:2,skill:null,p:0.5,kind:'written',kp:0.5,revision:JEV_REVISION,pinned:true,ms:1,socketReused:true});
 // A conversation is one vault-state: its own settings, receipts, selected task and queue.
 function conversation(item){
- const selection={provider:item.provider||'codex',model:item.provider==='claude'?'sonnet':'gpt-6-astra'},tasks=[],calls=[];
+ const selection={provider:item.provider||'codex',model:item.provider==='claude'?'sonnet':'astra'},tasks=[],calls=[];
  const get=id=>{const task=tasks.find(entry=>entry.id===id);if(!task)throw new Error('Task not found');return task};
  const terminals={live:new Map(),list:()=>tasks,get,send(id){calls.push('send');return get(id)},start(options){calls.push('start');const task={id:options.id,...options.selection,title:options.title,state:'working',turns:[]};tasks.push(task);return task},
   startWorkflow(options){calls.push(`workflow:${options.skill}`);return {id:options.id}},continueWorkflow(id,options){calls.push(`continue:${options.skill}`);return get(id)}};

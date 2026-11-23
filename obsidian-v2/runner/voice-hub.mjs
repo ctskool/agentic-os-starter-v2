@@ -25,8 +25,9 @@ function sanitizedTrace(value){
  return {requestId:value.requestId,startedAt:Math.round(value.startedAt),points};
 }
 export class VoiceHub {
- constructor({load=()=>[],save=()=>{},now=Date.now,emit=()=>{},leaseMs=180000,nativeLivenessMs=90000,announcementMs=300000}={}){
-  this.now=now;this.save=save;this.emit=emit;this.items=load();this.clients=new Map();this.owner=null;this.captureOwner=null;this.captureEvents=[];this.leaseMs=leaseMs;this.nativeLivenessMs=nativeLivenessMs;this.announcementMs=announcementMs;
+ constructor({load=()=>[],save=()=>{},now=Date.now,emit=()=>{},onPublish=()=>{},canSpeak=()=>true,leaseMs=180000,nativeLivenessMs=90000,announcementMs=300000}={}){
+  this.canSpeak=canSpeak;this.now=now;this.save=save;this.emit=emit;this.items=load();this.clients=new Map();this.owner=null;this.captureOwner=null;this.captureEvents=[];this.leaseMs=leaseMs;this.nativeLivenessMs=nativeLivenessMs;this.announcementMs=announcementMs;
+  this.onPublish=onPublish;
  }
  finish(item,reason){
   item.delivered=this.now()||1;if(reason)item.retiredReason=reason;
@@ -40,11 +41,27 @@ export class VoiceHub {
   return true;
  }
  expire(){
+  if(this.livePausedAt!==undefined)return false;
   let changed=false;
   const expired=item=>!priority(item)&&Number.isFinite(item.ts)&&this.now()-item.ts>=this.announcementMs;
   for(const item of this.items)if(!item.delivered&&!item.lease&&item.members?.some(id=>{const member=this.items.find(value=>value.id===id);return member&&expired(member)}))changed=this.dissolve(item)||changed;
   for(const item of this.items)if(!item.delivered&&!item.lease&&!item.groupedInto&&expired(item)){this.finish(item,'expired');changed=true}
   return changed;
+ }
+ holdLiveAudio(){if(this.livePausedAt===undefined){this.livePausedAt=this.now();this.emit({type:'stop-audio'})}}
+ hasPlaybackLease(){return this.items.some(item=>!item.delivered&&item.lease)}
+ settlePlayback(){
+  let changed=false;
+  for(const item of this.items)if(!item.delivered&&item.lease){if(item.started)this.finish(item,'attempted');else{delete item.lease;delete item.leasedAt}changed=true}
+  if(changed)this.save(this.items);
+ }
+ releaseLiveAudio(){
+  if(this.livePausedAt===undefined)return;
+  const now=this.now(),since=this.livePausedAt;delete this.livePausedAt;
+  let changed=false;
+  for(const item of this.items)if(!item.delivered&&Number.isFinite(item.ts)){item.ts+=Math.max(0,now-Math.max(item.ts,since));changed=true}
+  if(changed)this.save(this.items);
+  this.emit({type:'pending'});
  }
  resolveTaskAttention(taskId){
   let changed=false;for(const item of this.items)if(!item.delivered&&!item.lease&&item.taskId===taskId&&['attention','error'].includes(item.kind)){this.finish(item,'resolved');changed=true}
@@ -60,10 +77,10 @@ export class VoiceHub {
  live(){return [...this.clients.values()].filter(c=>this.now()-c.ts<(c.kind==='native'?this.nativeLivenessMs:15000))}
  preferred(hotkey=false){const live=this.live().filter(c=>hotkey||(c.mode==='idle'&&c.canPlay));return live.find(c=>c.id===this.owner&&(c.visible||c.kind==='native'))||
   (hotkey?live.find(c=>c.kind==='native'):null)||live.filter(c=>c.visible).sort((a,b)=>b.focus-a.focus)[0]||null}
- presence({id,kind,visible,mode,focus=false,version,canPlay=true,claim=true,playbackId,playbackStarted=false,timingTrace}){
+ presence({id,kind,visible,mode,liveState,focus=false,version,canPlay=true,claim=true,playbackId,playbackStarted=false,timingTrace}){
   if(typeof id!=='string'||id.length>80||!['web','native'].includes(kind))throw new Error('Invalid voice surface');
   const old=this.clients.get(id),loadedVersion=typeof version==='string'&&version.length<=64&&/^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(version)?version:null;
-  const c={id,kind,version:loadedVersion,visible:!!visible,mode,canPlay:!!canPlay,timingTrace:sanitizedTrace(timingTrace),ts:this.now(),modeSince:!focus&&old?.mode===mode?old.modeSince:this.now(),focus:focus?this.now():old?.focus||0};this.clients.set(id,c);
+  const c={id,kind,version:loadedVersion,visible:!!visible,mode,...(mode==='live'&&['connecting','listening','speaking','standby','muted'].includes(liveState)?{liveState}:{}),canPlay:!!canPlay,timingTrace:sanitizedTrace(timingTrace),ts:this.now(),modeSince:!focus&&old?.mode===mode?old.modeSince:this.now(),focus:focus?this.now():old?.focus||0};this.clients.set(id,c);
   for(const [key,value] of this.clients)if(this.now()-value.ts>Math.max(60000,value.kind==='native'?this.nativeLivenessMs:0))this.leave(key);
   if(focus){this.owner=id;this.emit({type:'owner',id})}
   let changed=false;const live=this.live();
@@ -79,7 +96,7 @@ export class VoiceHub {
   }
   changed=this.expire()||changed;if(changed)this.save(this.items);
   const preferred=this.preferred();
-  if(!claim||preferred?.id!==id||mode!=='idle'||!canPlay||live.some(c=>['working','listening','speaking'].includes(c.mode)&&this.now()-c.modeSince<this.leaseMs))return null;
+  if(this.livePausedAt!==undefined||!claim||preferred?.id!==id||mode!=='idle'||!canPlay||!this.canSpeak()||live.some(c=>['working','listening','speaking'].includes(c.mode)&&this.now()-c.modeSince<this.leaseMs))return null;
   if(this.items.some(i=>!i.delivered&&i.lease&&this.live().some(c=>c.id===i.lease)))return null;
   const regroupScopes=new Set(this.items.filter(i=>!i.delivered&&!i.lease&&!i.groupedInto&&i.kind==='completion'&&i.taskId&&visibleTo(i,kind)).map(itemScope));
   for(const group of this.items)if(group.members&&regroupScopes.has(itemScope(group)))this.dissolve(group);
@@ -117,14 +134,15 @@ export class VoiceHub {
   if(kind==='completion'&&taskId){
    for(const group of this.items)if(group.members&&itemScope(group)===appScope)this.dissolve(group);
   }
-  this.items.push({id,text,ts:this.now(),...(kind?{kind}:{}),...(taskId?{taskId}:{}),...(label?{label}:{}),...(appScope?{appScope}:{})});
+  const item={id,text,ts:this.now(),...(kind?{kind}:{}),...(taskId?{taskId}:{}),...(label?{label}:{}),...(appScope?{appScope}:{})};
+  this.items.push(item);
   if(kind==='completion'&&taskId)this.coalesce();
   // Audio expiry never touches a task's written result. Retain receipts so a
   // repeated hook cannot recreate retired audio; bound receipt storage as before.
   const done=this.items.filter(i=>i.delivered).slice(-500);this.items=[...done,...this.items.filter(i=>!i.delivered)];
-  this.save(this.items);this.emit({type:'pending'});
+  this.save(this.items);this.onPublish({...item,liveCallId:metadata.liveCallId,taskLabel:metadata.taskLabel,summary:metadata.summary,deliverable:metadata.deliverable});this.emit({type:'pending'});
  }
- ack(id,client,ok){const item=this.items.find(i=>i.id===id);if(item?.lease!==client)return;
+ ack(id,client,ok){const item=this.items.find(i=>i.id===id);if(!item||typeof client!=='string'||!client||item.lease!==client)return;
   delete item.lease;delete item.leasedAt;if(ok||item.started)this.finish(item,ok?'acknowledged':'attempted');this.save(this.items);
  }
  captureDiagnostics(){return this.captureEvents.map(event=>({...event}))}

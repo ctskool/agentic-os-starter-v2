@@ -16,7 +16,7 @@ const workflow=skill=>({...tier3(0.96),route:`workflow:${skill}`,tier:1,skill});
 
 function fixture(t,provider='codex'){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'voice-jev-parity-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
- const selection={provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},calls=[],tasks=[],shadow=[];
+ const selection={provider,model:provider==='codex'?'astra':'sonnet'},calls=[],tasks=[],shadow=[];
  const get=id=>{const task=tasks.find(task=>task.id===id);if(!task)throw new Error('Task not found');return task};
  const terminals={live:new Map(),list:()=>tasks,get,
   send(id,text){const task=get(id);task.state='working';calls.push({kind:'send',to:task.title,text});return task},
@@ -91,7 +91,7 @@ test('T2b new general work dispatches identically and is attributed to Jev',asyn
  assert.equal(off.receipt.decision.source,'model');assert.equal(off.receipt.decision.rule,'model.general');assert.equal(off.seen.aborted,undefined);
  assert.equal(fast.receipt.decision.source,'jev');assert.equal(fast.receipt.decision.rule,'jev.earlyExit');assert.equal(fast.seen.aborted,true);
  assert.deepEqual(fast.receipt.decision.rawIntent,{tier:3});assert.deepEqual(fast.receipt.decision.guarded,{tier:3});assert.deepEqual(fast.receipt.decision.effects,['start']);
- assert.equal(fast.receipt.decision.jev.route,'tier3');assert.equal(fast.receipt.decision.fallbackModel,null);assert.equal(off.receipt.decision.fallbackModel,'gpt-5.6-luna');
+ assert.equal(fast.receipt.decision.jev.route,'tier3');assert.equal(fast.receipt.decision.fallbackModel,null);assert.equal(off.receipt.decision.fallbackModel,'luna');
  assert.ok(fast.receipt.reply.trim());assert.notEqual(fast.receipt.reply,'Working on that.');
  assert.match(fast.seen.artifactId,/\.cls\.general\.1$/);assert.equal(detachedClassifiers(),0);
 });
@@ -156,7 +156,7 @@ test('the loser\'s cleanup outcome reaches the saved receipt',async t=>{
 test('a model-written lookup answer is attributed to the model, not to rules',async t=>{
  const fx=fixture(t);
  const receipt=await speak(fx,'Here it is: https://example.com/story',{execute:model({tier:2,reply:'The saved brief has no story at that address.'}),jev:offConfig});
- assert.equal(receipt.decision.boundary,'lookup-explain');assert.equal(receipt.decision.source,'model');assert.equal(receipt.decision.rule,'lookup.explain');assert.equal(receipt.decision.fallbackModel,'gpt-5.6-luna');
+ assert.equal(receipt.decision.boundary,'lookup-explain');assert.equal(receipt.decision.source,'model');assert.equal(receipt.decision.rule,'lookup.explain');assert.equal(receipt.decision.fallbackModel,'luna');
 });
 test('more adversarial follow-ups stay identical with Jev confidently wrong',async t=>{
  // "Never mind" after a workflow clarification; a stale affirmation with no offer to accept.

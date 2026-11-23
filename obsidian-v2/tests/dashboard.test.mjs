@@ -9,7 +9,7 @@ import {DEFAULT_COCKPIT_SKILLS,DEFAULT_HUD_SKILLS,MAX_DASHBOARD_SKILLS,dashboard
 // Every filesystem operation is confined to a generated temporary directory.
 // Every catalog/launch call injects CLI availability, never reading provider pins.
 const online = {cliAvailable:() => true},offline = {cliAvailable:() => false};
-const selection = {provider:'codex',model:'gpt-6-astra'};
+const selection = {provider:'codex',model:'astra'};
 function fixture(t) {
   const folder = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'aos-dashboard-test-')));
   t.after(() => fs.rmSync(folder,{recursive:true,force:true}));
@@ -207,7 +207,7 @@ test('installed-skill retries require the same model, provider, prompt and app s
   const prepared = {prompt:'Use the registered skill.',selection},existing = {provider:selection.provider,model:selection.model,prompt:prepared.prompt};
   assert.doesNotThrow(() => assertDashboardReplay(undefined,prepared,'web'));
   assert.doesNotThrow(() => assertDashboardReplay(existing,prepared,'web'));
-  assert.throws(() => assertDashboardReplay(existing,{...prepared,selection:{...selection,model:'gpt-5.6-luna'}},'web'),/different model/);
+  assert.throws(() => assertDashboardReplay(existing,{...prepared,selection:{...selection,model:'luna'}},'web'),/different model/);
   assert.throws(() => assertDashboardReplay({...existing,provider:'claude'},prepared,'web'),/different request/);
   assert.throws(() => assertDashboardReplay(existing,{...prepared,prompt:'Different task'},'web'),/different request/);
   assert.throws(() => assertDashboardReplay(existing,prepared,'native'),/different request or app/);

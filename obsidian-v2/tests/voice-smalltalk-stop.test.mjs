@@ -61,8 +61,8 @@ function fixture(t){
  const terminals={live:new Map(),list:()=>sessions,get:id=>{const s=sessions.find(s=>s.id===id);if(!s)throw new Error('Task not found');return s},start:task=>{calls.push({kind:'start',...task});return {id:task.id}},send:(id,text)=>{calls.push({kind:'send',id,text})},stop:id=>{calls.push({kind:'stop',id});const s=sessions.find(s=>s.id===id);if(s)s.state='stopping';return s},startWorkflow:task=>{calls.push({kind:'workflow',...task});return {id:task.id}}};
  const model=async()=>({text:JSON.stringify({tier:3,reply:'Working on it.'})});
  const noModel=async(_r,_e,prompt)=>assert.fail(`No model call expected: ${prompt.slice(-200)}`);
- const speak=(transcript,{provider='codex',appScope='native',workTarget=null,execute=model}={})=>routeVoice(root,{id:crypto.randomUUID(),selection:{provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},appScope,transcript,terminalMode:true,workTarget},undefined,execute,terminals,{resolveCli:()=>({command:'unused',prefix:[]}),reopenArtifact:()=>{}});
- const task=(state='working',title='Jev explainer',extra={})=>{const s={id:crypto.randomUUID(),provider:'codex',model:'gpt-6-astra',title,state,execution:'native',created:Date.now(),turns:[{id:'t1',ts:Date.now(),text:'Working.'}],...extra};sessions.push(s);return s};
+ const speak=(transcript,{provider='codex',appScope='native',workTarget=null,execute=model}={})=>routeVoice(root,{id:crypto.randomUUID(),selection:{provider,model:provider==='codex'?'astra':'sonnet'},appScope,transcript,terminalMode:true,workTarget},undefined,execute,terminals,{resolveCli:()=>({command:'unused',prefix:[]}),reopenArtifact:()=>{}});
+ const task=(state='working',title='Jev explainer',extra={})=>{const s={id:crypto.randomUUID(),provider:'codex',model:'astra',title,state,execution:'native',created:Date.now(),turns:[{id:'t1',ts:Date.now(),text:'Working.'}],...extra};sessions.push(s);return s};
  return {root,speak,calls,sessions,task,model,noModel};
 }
 
@@ -162,7 +162,7 @@ test('queued voice work retains literal content removed for routing',async t=>{
  const f=fixture(t),id=crypto.randomUUID();
  const file=path.join(f.root,'system/v2/runner-status.json');fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,JSON.stringify({ts:new Date().toISOString(),busy:false}));
  const transcript='Nice! Create a poster using that word as its only text.';
- await routeVoice(f.root,{id,transcript,selection:{provider:'codex',model:'gpt-6-astra'},terminalMode:false,appScope:'native'},undefined,f.noModel,f.terminals,{resolveCli:()=>({command:'unused',prefix:[]})});
+ await routeVoice(f.root,{id,transcript,selection:{provider:'codex',model:'astra'},terminalMode:false,appScope:'native'},undefined,f.noModel,f.terminals,{resolveCli:()=>({command:'unused',prefix:[]})});
  const job=JSON.parse(fs.readFileSync(path.join(f.root,'system/v2/queue',id+'.json'),'utf8'));
  assert.equal(job.args.prompt,transcript);assert.equal(f.calls.length,0);
 });

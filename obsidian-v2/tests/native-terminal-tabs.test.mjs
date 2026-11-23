@@ -21,12 +21,13 @@ const stubs={
  export function isLiveTerminal(task){return task.execution!=='script'&&(task.pid?true:!['stopped','error'].includes(task.state))}
  export async function refreshWorkConversations(){refreshes++;if(refreshFailure)throw new Error('Fixture bridge offline');current={...stored};return {tasks:structuredClone(tasks),current:{...current},currentRevision:refreshes}}
  export function workRequest(path,data){apiCalls.push({path,data});if(data!==undefined||path!=='?summary=1')throw new Error('Activation must not mutate a work API');return Promise.resolve({vault:'C:\\\\fixture vault',attachmentProtocol:1,tasks:structuredClone(tasks)})}`,
- 'lib/provider':"let provider='codex';export function setFixtureProvider(value){provider=value}export async function assertTestVault(){};export async function readSelection(){return {provider,model:provider==='codex'?'gpt-6-astra':'sonnet'}}",
+ 'lib/provider':"let provider='codex';export function setFixtureProvider(value){provider=value}export async function assertTestVault(){};export async function readSelection(){return {provider,model:provider==='codex'?'astra':'sonnet'}}",
  'lib/v2-voice':'export function configureVoiceTransport(){};export async function v2VoiceTransport(){return {status:200,json:{}}}',
  'lib/native-direct-host':`export class NativeDirectHost{constructor(options){this.options=options;this.opens=[];this.result=null}async sync(){}async open(id){this.opens.push(id);return this.result}dispose(){}async simulateLaunch(state,ready=Promise.resolve()){let leaf;await this.options.withLayout(async()=>{leaf=this.options.createLeaf();await leaf.setViewState(state)});await ready;await this.options.withLayout(async()=>this.options.reveal(leaf));return leaf}}`,
  'lib/native-voice-heartbeat':'export function nativeVoiceHeartbeat(){}',
  'lib/retire-legacy-launchers':'export function retireEmptyLaunchers(){}',
  'lib/queue':'export function registerSkillReports(){}',
+ 'lib/work-notices':'export function subscribeWorkNotices(){return ()=>{}}',
  'components/OrbFloat':'export const OrbFloat=()=>null;',
  'components/WorkflowModal':'export function openWorkflowPicker(){}',
 };

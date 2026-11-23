@@ -230,7 +230,7 @@ test('each classifier attempt owns its artifacts; a worker reusing the request I
  const vault=fs.mkdtempSync(path.join(os.tmpdir(),'voice-jev-artifacts-'));t.after(()=>fs.rmSync(vault,{recursive:true,force:true}));
  const cli={command:'fake-cli',prefix:[]};
  for(const provider of ['codex','claude']){
-  const model=provider==='codex'?'gpt-5.6-luna':'haiku';
+  const model=provider==='codex'?'luna':'haiku';
   const attempt=commandFor(vault,{id:'req-1',artifactId:'req-1.cls.general.1',provider,model},cli);
   const worker=commandFor(vault,{id:'req-1',provider,model,skill:'voice-ask'},cli);
   assert.match(attempt.final,/req-1\.cls\.general\.1\.final\.md$/);assert.match(worker.final,/req-1\.final\.md$/);assert.notEqual(attempt.final,worker.final);

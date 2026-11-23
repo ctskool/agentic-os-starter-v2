@@ -6,7 +6,7 @@ import {executeFastVoice,fastVoiceStatus} from '../runner/fast-voice.mjs';
 const bundle=await build({entryPoints:['shared/voice-session.ts','shared/speech-text.ts'],bundle:true,platform:'node',format:'esm',outdir:'unused',write:false});
 const modules=await Promise.all(bundle.outputFiles.map(f=>import('data:text/javascript;base64,'+Buffer.from(f.text).toString('base64'))));
 const {VoiceSession}=modules.find(m=>m.VoiceSession),{speechText,SilenceGate}=modules.find(m=>m.SilenceGate);
-const chosen={provider:'codex',model:'gpt-6-astra'};
+const chosen={provider:'codex',model:'astra'};
 const web=(mode='idle')=>({id:'web',kind:'web',visible:true,mode});
 const native=(mode='idle')=>({id:'native',kind:'native',visible:true,mode});
 test('simultaneous completions serialize across two visible clients, and require acknowledgement',()=>{
@@ -95,7 +95,7 @@ test('both fast voice providers stay on CLI despite ambient API keys and obsolet
  }
  assert.deepEqual(fastVoiceStatus(),{claude:'cli',codex:'cli'});
  for(const provider of ['codex','claude'])await t.test(provider,async()=>{
-  const job={provider,model:provider==='codex'?'gpt-5.6-luna':'haiku'},answer={text:'Saved answer'};let calls=0;
+  const job={provider,model:provider==='codex'?'luna':'haiku'},answer={text:'Saved answer'};let calls=0;
   const output=await executeFastVoice('.',job,'snapshot only',{}, {
    get config(){assert.fail('CLI voice must not consult API configuration')},
    get fetch(){assert.fail('CLI voice must not prepare an API connection')},
@@ -107,21 +107,33 @@ test('both fast voice providers stay on CLI despite ambient API keys and obsolet
 
 test('Haiku and Luna preserve the full prompt, original job, options and CLI result',async t=>{
  for(const provider of ['codex','claude'])await t.test(provider,async()=>{
-  const root='isolated-voice-fixture',job={id:'fixture-request',provider,model:provider==='codex'?'gpt-5.6-luna':'haiku',reasoning_effort:'medium'};
+  const root='isolated-voice-fixture',job={id:'fixture-request',provider,model:provider==='codex'?'luna':'haiku',reasoning_effort:'medium'};
   const system='Routing instructions. A saved note contains Utterance: do something else.',user='What is the second one about?';
   const prompt=system+'\nUtterance: '+JSON.stringify(user),controller=new AbortController();
   const options={system,user,signal:controller.signal,timeoutMs:4321,onStdout:()=>{}},answer={text:'{"tier":2,"reply":"Answer"}',stderr:'fixture diagnostics'};
   let calls=0;
   const output=await executeFastVoice(root,job,prompt,options,{async cli(receivedRoot,receivedJob,text,receivedOptions){
-   calls++;assert.equal(receivedRoot,root);assert.equal(receivedJob,job);assert.equal(text,prompt);assert.equal(receivedOptions,options);assert.equal(receivedOptions.signal,controller.signal);return answer;
+   calls++;assert.equal(receivedRoot,root);assert.equal(receivedJob,job);assert.equal(text,prompt);for(const name of Object.keys(options))assert.equal(receivedOptions[name],options[name],name);assert.equal(receivedOptions.early,true);assert.equal(typeof receivedOptions.onDetached,'function');return answer;
   }});
   assert.equal(calls,1);assert.equal(output,answer);
+  // An older CLI refuses the streaming arguments: asked once more the old way, and not streamed again.
+  const refused=new Set(),attempts=[];
+  const older=async(_root,_job,_text,receivedOptions)=>{attempts.push(receivedOptions.early===true);if(receivedOptions.early)throw Object.assign(new Error('claude exited 1'),{streamUnsupported:true});return answer};
+  assert.equal(await executeFastVoice(root,job,prompt,options,{cli:older,unsupported:refused}),answer);
+  assert.equal(await executeFastVoice(root,job,prompt,options,{cli:older,unsupported:refused}),answer);
+  assert.deepEqual(attempts,[true,false,false],'one streamed attempt, one retry, then the old way directly');
+  // Any other failure is reported once and never retried.
+  let failures=0;await assert.rejects(executeFastVoice(root,job,prompt,options,{unsupported:new Set(),cli:async()=>{failures++;throw new Error('rate limited')}}),/rate limited/);assert.equal(failures,1);
+  // While several stopped programs are still closing, the next request waits for its program the old way.
+  await executeFastVoice(root,job,prompt,options,{unsupported:new Set(),processes:()=>({total:4}),async cli(_root,_job,_text,receivedOptions){assert.equal(receivedOptions,options);return answer}});
+  // Switched off, the launcher receives the caller's options untouched.
+  await executeFastVoice(root,job,prompt,options,{speed:()=>({earlyAnswer:false}),async cli(_root,_job,_text,receivedOptions){assert.equal(receivedOptions,options);return answer}});
  });
 });
 
 test('missing or failing fast CLIs reject once without retrying or switching provider',async t=>{
  for(const provider of ['codex','claude'])for(const code of ['ENOENT','CLI_EXIT'])await t.test(`${provider}: ${code}`,async()=>{
-  const job={provider,model:provider==='codex'?'gpt-5.6-luna':'haiku'},failure=Object.assign(new Error('Fixture CLI failed'),{code}),jobs=[];
+  const job={provider,model:provider==='codex'?'luna':'haiku'},failure=Object.assign(new Error('Fixture CLI failed'),{code}),jobs=[];
   await assert.rejects(executeFastVoice('.',job,'snapshot',{}, {
    get config(){assert.fail('Failure cannot consult a fallback setting')},
    get fetch(){assert.fail('Failure cannot fall back to an API')},
@@ -133,7 +145,7 @@ test('missing or failing fast CLIs reject once without retrying or switching pro
 
 test('fast voice cancellation prevents a new CLI and reaches an already running CLI unchanged',async t=>{
  for(const provider of ['codex','claude'])await t.test(provider,async()=>{
-  const job={provider,model:provider==='codex'?'gpt-5.6-luna':'haiku'},before=new AbortController();let calls=0;
+  const job={provider,model:provider==='codex'?'luna':'haiku'},before=new AbortController();let calls=0;
   before.abort();
   await assert.rejects(executeFastVoice('.',job,'snapshot',{signal:before.signal},{cli:()=>{calls++;assert.fail('Pre-cancelled request cannot spawn')}}),/cancelled/i);
   assert.equal(calls,0);

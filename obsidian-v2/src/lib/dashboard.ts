@@ -164,5 +164,7 @@ export async function launchDashboardSkill(app: App, skill: DashboardSkill, inpu
   throw new Error('The bridge did not return a workflow. Update the starter and try again.');
  }
  publishWorkTask(task);
+ // A personal skill is an interactive conversation the user just started by clicking and typing a request;
+ // its questions and approvals appear in the terminal, so it opens. Voice-started work stays in the background.
  openWork([task.id]);
 }

@@ -19,7 +19,7 @@ for(const provider of ['codex','claude'])for(const kind of ['native','web'])for(
    requests.push(path);
    if(path==='/voice/text')return {status:200,json:response};
    assert.equal(path,'/voice/speak');heard.push(JSON.parse(options.body).text);return {status:200,audio:new ArrayBuffer(8)};
-  },async()=>({provider,model:provider==='codex'?'gpt-6-astra':'claude-opus-4-6'}),kind);
+  },async()=>({provider,model:provider==='codex'?'astra':'claude-opus-4-6'}),kind);
   t.after(()=>session.destroy());session.onMessage=text=>displayed.push(text);session.onReply=value=>replies.push(value);
   await session.sendText('Explain the report');
   assert.deepEqual(heard,[spoken]);assert.deepEqual(displayed,[written]);assert.deepEqual(replies,[response]);
@@ -28,6 +28,6 @@ for(const provider of ['codex','claude'])for(const kind of ['native','web'])for(
 }
 for(const prepared of [undefined,'   ',123])test(`old or invalid spoken reply ${JSON.stringify(prepared)} falls back to the written answer`,async t=>{
  const heard=[];playback(t,true,heard);
- const session=new VoiceSession(async()=>({status:200,json:{reply:'The saved answer is ready.',spokenReply:prepared}}),async()=>({provider:'codex',model:'gpt-6-astra'}));
+ const session=new VoiceSession(async()=>({status:200,json:{reply:'The saved answer is ready.',spokenReply:prepared}}),async()=>({provider:'codex',model:'astra'}));
  t.after(()=>session.destroy());await session.sendText('Read the answer');assert.deepEqual(heard,['The saved answer is ready.']);
 });

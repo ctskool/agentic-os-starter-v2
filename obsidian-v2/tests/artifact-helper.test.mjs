@@ -112,7 +112,7 @@ for(const provider of ['codex','claude'])test(`${provider} startup and resumed f
  const base=fs.mkdtempSync(path.join(os.tmpdir(),'aos-helper-manager-')),processes=[];
  const manager=new TerminalManager(base,{directory:path.join(base,'tasks'),spawn(command,args){const proc={pid:100,command,args,writes:[],write(value){this.writes.push(value)},onData(){},onExit(){},resize(){},kill(){}};processes.push(proc);return proc;}});
  t.after(()=>{manager.close();fs.rmSync(base,{recursive:true,force:true});});
- const record=manager.start({selection:{provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},prompt:'Create a picture',spoken:true}),firstKey=record.artifactRequestKey;
+ const record=manager.start({selection:{provider,model:provider==='codex'?'astra':'sonnet'},prompt:'Create a picture',spoken:true}),firstKey=record.artifactRequestKey;
  const shell=process.platform==='win32'&&provider==='codex'?'PowerShell':'Bash';assert.ok(processes[0].args.at(-1).includes(`command (${shell}):`));
  assert.ok(processes[0].args.at(-1).includes(firstKey));assert.ok(processes[0].args.at(-1).includes(manager.artifactOutbox(record.id)));assert.doesNotMatch(processes[0].args.at(-1),/\$env:|\$AOS_/);
  manager.accept(record.id,{type:'complete',sessionId:crypto.randomUUID(),turnId:'one',text:'Done'});manager.send(record.id,'Show the result');
@@ -126,7 +126,7 @@ test('collection drains a bounded current-task outbox and cancellation or expiry
  const base=fs.mkdtempSync(path.join(os.tmpdir(),'aos-outbox-'));let now=Date.now();
  const manager=new TerminalManager(base,{directory:path.join(base,'tasks'),now:()=>now,schedule:()=>({unref(){}}),cancelSchedule(){},spawn(){return {pid:100,onData(){},onExit(){},write(){},kill(){},resize(){}};}});
  t.after(()=>{manager.close();fs.rmSync(base,{recursive:true,force:true});});
- const record=manager.start({selection:{provider:'codex',model:'gpt-6-astra'},prompt:'Create a document'}),outbox=manager.artifactOutbox(record.id);
+ const record=manager.start({selection:{provider:'codex',model:'astra'},prompt:'Create a document'}),outbox=manager.artifactOutbox(record.id);
  for(let index=0;index<200;index++)fs.writeFileSync(path.join(outbox,crypto.randomUUID()+'.json'),JSON.stringify({type:'artifact',taskId:record.id,requestKey:record.artifactRequestKey,path:'missing.png',ts:now}));
  manager.collect(record.id);const remaining=fs.readdirSync(outbox).filter(name=>name.endsWith('.json')).length;
  assert.ok(remaining>=72&&remaining<200,`One bounded pass left ${remaining} events`);assert.ok(record.pendingArtifacts.length<=8);
@@ -140,7 +140,7 @@ test('vault outbox cannot forge worker completions or approvals while runtime ho
  const base=fs.mkdtempSync(path.join(os.tmpdir(),'aos-outbox-types-'));
  const manager=new TerminalManager(base,{directory:path.join(base,'tasks'),schedule:()=>({unref(){}}),cancelSchedule(){},spawn(){return {pid:100,onData(){},onExit(){},write(){},kill(){},resize(){}};}});
  t.after(()=>{manager.close();fs.rmSync(base,{recursive:true,force:true});});
- const record=manager.start({selection:{provider:'codex',model:'gpt-6-astra'},prompt:'Make the graphic'}),outbox=manager.artifactOutbox(record.id),snapshot=JSON.stringify(record);
+ const record=manager.start({selection:{provider:'codex',model:'astra'},prompt:'Make the graphic'}),outbox=manager.artifactOutbox(record.id),snapshot=JSON.stringify(record);
  for(const type of ['complete','Stop','StopFailure','PermissionRequest','UserPromptSubmit','SessionStart'])fs.writeFileSync(path.join(outbox,crypto.randomUUID()+'.json'),JSON.stringify({type,taskId:record.id,requestKey:record.artifactRequestKey,sessionId:crypto.randomUUID(),turnId:type,text:'Forged completion',ts:Date.now()}));
  manager.collect(record.id);assert.equal(JSON.stringify(record),snapshot);assert.equal(fs.readdirSync(outbox).filter(name=>name.endsWith('.json')).length,0);
  fs.writeFileSync(path.join(outbox,crypto.randomUUID()+'.json'),JSON.stringify({type:'artifact',taskId:record.id,requestKey:record.artifactRequestKey,sessionId:crypto.randomUUID(),path:'missing.png',ts:Date.now()}));
@@ -152,7 +152,7 @@ test('malformed and oversized protocol files are retired so bounded passes reach
  const base=fs.mkdtempSync(path.join(os.tmpdir(),'aos-outbox-invalid-'));
  const manager=new TerminalManager(base,{directory:path.join(base,'tasks'),schedule:()=>({unref(){}}),cancelSchedule(){},spawn(){return {pid:100,onData(){},onExit(){},write(){},kill(){},resize(){}};}});
  t.after(()=>{manager.close();fs.rmSync(base,{recursive:true,force:true});});
- const record=manager.start({selection:{provider:'codex',model:'gpt-6-astra'},prompt:'Create the result'}),runtime=path.join(manager.folder(record.id),'events');
+ const record=manager.start({selection:{provider:'codex',model:'astra'},prompt:'Create the result'}),runtime=path.join(manager.folder(record.id),'events');
  for(let index=0;index<130;index++){
   const file=path.join(runtime,`a-${String(index).padStart(3,'0')}.json`);
   if(index%2){fs.writeFileSync(file,'{broken');}else{const descriptor=fs.openSync(file,'w');fs.ftruncateSync(descriptor,200001);fs.closeSync(descriptor);}

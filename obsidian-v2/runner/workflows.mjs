@@ -6,6 +6,7 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {SKILLS,ROOT} from '../shared/contract.mjs';
 import {deliverablePathFor,originalPrompt} from './original-workflows.mjs';
+import {withoutOpenAIKey} from './child-env.mjs';
 import {DEFAULT_DRIVERS,dailyDrivers,rubricWithDrivers} from './profile.mjs';
 const base=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 export const dailySkills=new Set(['plan-today','plan-tomorrow','refresh-schedule']);
@@ -18,7 +19,7 @@ export function destinationFor(job){
 export function runCommand(command,args,{cwd,env={},timeout=120000,signal}={}){
  if(signal?.aborted)return Promise.reject(new Error('Task stopped'));
  return new Promise((resolve,reject)=>{
-  const child=spawn(command,args,{cwd,env:{...process.env,...env},shell:false,windowsHide:true,detached:process.platform!=='win32',stdio:['ignore','pipe','pipe']});
+ const child=spawn(command,args,{cwd,env:withoutOpenAIKey({...process.env,...env}),shell:false,windowsHide:true,detached:process.platform!=='win32',stdio:['ignore','pipe','pipe']});
   let out='',err='',failure='',stopping=false;
   const stopChild=()=>{
    if(stopping||!child.pid||child.exitCode!==null||child.signalCode!==null)return;stopping=true;
@@ -38,11 +39,11 @@ export function runCommand(command,args,{cwd,env={},timeout=120000,signal}={}){
   child.on('close',code=>{cleanup();failure||code!==0?reject(new Error(failure||`${path.basename(command)} failed (${code}): ${(err||out).trim().split(/\r?\n/).slice(-1)[0]?.slice(0,400)}`)):resolve(out)});
  });
 }
-export function workerEnv(root){
+export function workerEnv(root,{home=os.homedir()}={}){
  const env={};
  // Import only required integration values, never serialize credentials into prompts or reports.
  const allowed=/^(YOUTUBE_API_KEY|YOUTUBE_CHANNEL_ID|INSTAGRAM_HANDLE|TIKTOK_HANDLE|GITHUB_TOKEN)$/;
- const file=path.join(os.homedir(),'.claude/.env');
+ const file=path.join(home,'.claude/.env');
  if(fs.existsSync(file))for(const line of fs.readFileSync(file,'utf8').split(/\r?\n/)){const m=line.match(/^([A-Z_]+)=(.*)$/);if(m&&allowed.test(m[1]))env[m[1]]=m[2].trim().replace(/^['"]|['"]$/g,'')}
  return {...env,AGENTIC_OS_VAULT:root,AOS_V2_VAULT:root};
 }

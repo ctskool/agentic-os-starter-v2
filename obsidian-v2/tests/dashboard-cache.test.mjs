@@ -12,7 +12,7 @@ const built=await build({
   builder.onLoad({filter:/.*/,namespace:'fixture'},args=>({loader:'js',contents:{
    obsidian:'export class Notice{}',
    './provider':'export async function assertTestVault(){};export async function readSelection(){}',
-   './work':'export async function workRequest(){}',
+   './work':"export async function workRequest(){}export const workFeed={subscribe(){return ()=>{}},getSnapshot(){return {vault:'',tasks:[]}}};",
    './v2-voice':'export async function assertVoiceVault(){}',
   }[args.path]}));
  }}],

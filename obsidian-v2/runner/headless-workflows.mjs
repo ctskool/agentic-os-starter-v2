@@ -32,7 +32,7 @@ export function startHeadlessWorkflow(manager,workflow,appScope){
   if(result?.status==='blocked'){
    saveWorkflowResult(manager.root,record,`BLOCKED: ${String(result.summary||text).slice(0,1000)}\n\n${text}`);record.state='error';return;
   }
-  saveWorkflowResult(manager.root,record,text);
+  saveWorkflowResult(manager.root,record,text,{summary:result.summary});
   record.state=record.workflowStatus==='ok'?'stopped':'error';
  }).catch(error=>{
   if(manager.live.get(job.id)!==live)return;

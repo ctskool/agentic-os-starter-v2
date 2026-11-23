@@ -24,7 +24,7 @@ function fixture(t){
  const write=(relative,text='# Saved report\n')=>{const file=path.join(root,relative);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,text);return relative};
  let scans=0;
  const terminals={list:()=>{scans++;return []},get:()=>assert.fail('Named report navigation needs no worker conversation'),start:()=>assert.fail('No task'),send:()=>assert.fail('No continuation'),startWorkflow:()=>assert.fail('No workflow')};
- const speak=(provider,appScope,transcript,execute=()=>assert.fail('Named report navigation must not call a model'),extra={})=>routeVoice(root,{id:crypto.randomUUID(),selection:{provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},appScope,transcript,terminalMode:true,...extra},undefined,execute,terminals,{resolveCli:()=>assert.fail('No CLI required'),updateCurrent:()=>assert.fail('Quick navigation must preserve the selected conversation')});
+ const speak=(provider,appScope,transcript,execute=()=>assert.fail('Named report navigation must not call a model'),extra={})=>routeVoice(root,{id:crypto.randomUUID(),selection:{provider,model:provider==='codex'?'astra':'sonnet'},appScope,transcript,terminalMode:true,...extra},undefined,execute,terminals,{resolveCli:()=>assert.fail('No CLI required'),updateCurrent:()=>assert.fail('Quick navigation must preserve the selected conversation')});
  return {root,write,speak,terminals,scans:()=>scans};
 }
 

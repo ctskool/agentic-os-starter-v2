@@ -11,7 +11,7 @@ import {routeVoice} from '../runner/bridge-core.mjs';
 // start passing when the lookup boundary is hedged (integration plan, D4).
 function fixture(t){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'voice-known-interceptions-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
- const calls=[],tasks=[],selection={provider:'codex',model:'gpt-6-astra'};
+ const calls=[],tasks=[],selection={provider:'codex',model:'astra'};
  const terminals={live:new Map(),list:()=>tasks,get:id=>tasks.find(task=>task.id===id),
   start(options){calls.push({kind:'start'});return {id:options.id}},
   startWorkflow(options){calls.push({kind:'workflow',skill:options.skill,args:options.args});return {id:options.id}}};

@@ -3,12 +3,15 @@ import {useEffect,useRef,useState} from 'react';
 import {Terminal} from '@xterm/xterm';
 import {FitAddon} from '@xterm/addon-fit';
 import {workRequest,setWorkKeep,fullAnswer,getWorkSelection,openWork,type WorkTask} from '@/lib/work';
-import {voice} from '@/lib/voiceClient';
+import {voice,voicePrefs} from '@/lib/voiceClient';
+import {liveToggleLabel} from '../../obsidian-v2/shared/live-controls';
+import type {LiveSnapshot} from '../../obsidian-v2/shared/live-session';
 import {replayTerminal} from '../../obsidian-v2/shared/terminal-playback';
 import {draftKey,readDraft,saveDraft} from '../../obsidian-v2/shared/drafts';
 import {readRecoveredDraft,stageRecoveredDraft,stageExpiredTaskDraft,clearRecoveredDraft,updateRecoveryText,type RecoveredDraft,type SavedRequest} from '@/lib/work-recovery';
 import {isOpenWork,taskStatus,shortConversationTitle} from '../../obsidian-v2/shared/work-presentation';
 import {visibleTerminalTabs,rememberOpenTerminals,tabCloseAction} from '@/lib/terminal-tabs';
+import {TaskActivityBar} from './TaskActivityBar';
 import {TerminalTabs} from './TerminalTabs';
 import {dashboardStore} from '@/lib/dashboard-store';
 
@@ -45,8 +48,8 @@ function LiveTerminal({id,onError,readOnly=false}:{id:string;onError:(message:st
 // bridge judges "idle" with everything the user typed already applied.
 const pendingInput=new Map<string,Promise<unknown>>();
 
-interface Props {tasks:WorkTask[];tasksLoaded:boolean;target:string|null;voiceTarget:string|null;select:(id:string|null)=>Promise<void>;dismissView?:(id:string)=>void;open:boolean;setOpen:(value:boolean)=>void;connectionError:string;provider:'codex'|'claude';voiceMode:string;voiceMessage:string;vaultRoot:string}
-export default function AgentWorkDrawer({tasks,tasksLoaded,target,voiceTarget,select,dismissView,open,setOpen,connectionError,provider,voiceMode,voiceMessage,vaultRoot}:Props){
+interface Props {tasks:WorkTask[];activityTasks:WorkTask[];tasksLoaded:boolean;target:string|null;voiceTarget:string|null;select:(id:string|null)=>Promise<void>;dismissView?:(id:string)=>void;open:boolean;setOpen:(value:boolean)=>void;connectionError:string;provider:'codex'|'claude';voiceMode:string;voiceMessage:string;vaultRoot:string}
+export default function AgentWorkDrawer({tasks,activityTasks,tasksLoaded,target,voiceTarget,select,dismissView,open,setOpen,connectionError,provider,voiceMode,voiceMessage,vaultRoot}:Props){
   const [hidden,setHidden]=useState<string[]>([]),[drafts,setDrafts]=useState<Record<string,string>>({});
   const [opened,setOpened]=useState<string[]>([]),[historyOpen,setHistoryOpen]=useState(false);
   const [messageTarget,setMessageTarget]=useState<string|null>(null),[answerTarget,setAnswerTarget]=useState<string|null>(null);
@@ -56,14 +59,15 @@ export default function AgentWorkDrawer({tasks,tasksLoaded,target,voiceTarget,se
   const end=()=>{sendingRef.current=false;setSending(false)};
   const [services,setServices]=useState<any>(null);
   const [recovered,setRecovered]=useState<RecoveredDraft|null>(null);
-  const current=tasks.find(t=>t.id===target),key=target||'new',prompt=drafts[key]||'';
+  const current=tasks.find(t=>t.id===target)||activityTasks.find(t=>t.id===target),key=target||'new',prompt=drafts[key]||'';
   const voiceTask=tasks.find(task=>task.id===voiceTarget&&task.provider===provider);
   const lastKnown=useRef<WorkTask|null>(null);
   useEffect(()=>{if(current)lastKnown.current=current},[current]);
   const former=lastKnown.current?.id===target?lastKnown.current:null;
   const unavailable=!!target&&!current&&tasksLoaded&&!connectionError;
-  const terminalLive=!!current&&current.execution!=='script'&&isOpenWork(current);
-  const scriptActive=!!current&&current.execution==='script'&&isOpenWork(current);
+  const receipt=current?.execution==='headless'||current?.execution==='script';
+  const terminalLive=!!current&&!receipt&&isOpenWork(current);
+  const scriptActive=!!current&&receipt&&isOpenWork(current);
   const showComposer=!target||!current||messageTarget===target;
   const tabs=visibleTerminalTabs(tasks,opened,hidden,target);
   useEffect(()=>setOpened(value=>rememberOpenTerminals(value,tasks,target)),[tasks,target]);
@@ -154,7 +158,7 @@ export default function AgentWorkDrawer({tasks,tasksLoaded,target,voiceTarget,se
           window.dispatchEvent(new CustomEvent('jarvis-workflow-queued',{detail:{id:run.id,skill:recovery.skill}}));
           void dashboardStore.refresh();setOpen(false);
         }else{
-          const task=await workRequest('/start',{id:crypto.randomUUID(),selection:recovery?selection:selection.provider==='codex'?{provider:'codex',model:'gpt-6-astra'}:selection,prompt});openWork([task.id]);
+          const task=await workRequest('/start',{id:crypto.randomUUID(),selection:recovery?selection:selection.provider==='codex'?{provider:'codex',model:'astra'}:selection,prompt});openWork([task.id],true);
         }
         if(clearRecoveredDraft(localStorage,newStorageKey))setRecovered(null);
       }
@@ -162,11 +166,16 @@ export default function AgentWorkDrawer({tasks,tasksLoaded,target,voiceTarget,se
     }catch(e){setError(e instanceof Error?e.message:String(e))}finally{end()}
   };
   const alert=connectionError||error||(current?.state!=='needs input'?current?.error:'');
+  // In Live mode this button is the same action as the voice panel's, so it carries the same label.
+  const [call,setCall]=useState<LiveSnapshot|null>(null);
+  const [liveMode,setLiveMode]=useState(false);
+  useEffect(()=>voice.onLive(setCall),[]);
+  useEffect(()=>{const read=()=>setLiveMode(voicePrefs.getSnapshot().prefs.voiceMode==='live');read();return voicePrefs.subscribe(read)},[]);
   return <section className={`agent-drawer ${open?'is-open':''}`} aria-label="Terminals">
     <header className="agent-drawer-bar">
       <button className="agent-drawer-toggle" aria-expanded={open} aria-controls="agent-work-content" onClick={()=>setOpen(!open)}><span aria-hidden="true">⌘</span> Terminals <small>{connectionError?'Bridge offline':`${active} open`}</small><span aria-hidden="true">{open?'⌄':'⌃'}</span></button>
-      <span className="agent-shared">Shared with Obsidian</span>
-      <button onClick={()=>void voice.toggle()} title={voiceTask?`Conversation: ${shortConversationTitle(voiceTask)}`:voiceTarget?'Selected conversation unavailable':'New voice conversation'}>{voiceMode==='listening'?'Send recording':voiceMode==='working'?'Cancel voice':voiceMode==='speaking'?'Interrupt & talk':'Tap to talk'}</button>
+      <TaskActivityBar tasks={activityTasks} ready={tasksLoaded} viewing={open?target:null}/>
+      <button onClick={()=>void voice.toggle()} title={voiceTask?`Conversation: ${shortConversationTitle(voiceTask)}`:voiceTarget?'Selected conversation unavailable':'New voice conversation'}>{liveMode&&call?liveToggleLabel(call):voiceMode==='listening'?'Send recording':voiceMode==='working'?'Cancel voice':voiceMode==='speaking'?'Interrupt & talk':'Tap to talk'}</button>
       <button onClick={()=>{void select(null);setHistoryOpen(false);setOpen(true)}}>+ New terminal</button>
     </header>
     {voiceMessage&&<p className="agent-voice-status" role="status">{voiceMessage}</p>}
@@ -176,11 +185,11 @@ export default function AgentWorkDrawer({tasks,tasksLoaded,target,voiceTarget,se
       {current&&<div className="agent-work-meta">
         <span title={current.execution==='script'?'Direct source refresh; no model':current.model}>{current.execution==='script'?'Source refresh':current.provider==='codex'?'Codex':'Claude Code'} · {taskStatus(current)}</span>
         <div>
-          {current.execution!=='script'&&<button aria-expanded={showComposer} aria-controls="terminal-message-box" disabled={sending} onClick={()=>setMessageTarget(showComposer?null:current.id)}>Message box{prompt.trim()?' · draft':''}</button>}
+          {!receipt&&<button aria-expanded={showComposer} aria-controls="terminal-message-box" disabled={sending} onClick={()=>setMessageTarget(showComposer?null:current.id)}>Message box{prompt.trim()?' · draft':''}</button>}
           {current.turns.length>0&&<button aria-expanded={answerTarget===current.id} aria-controls="terminal-saved-answer" onClick={()=>setAnswerTarget(answerTarget===current.id?null:current.id)}>Saved answer</button>}
           <button className="agent-keep" aria-pressed={!!current.keep} disabled={sending||!!connectionError} title={current.keep?'Allow this task to clear after 7 stopped days':'Keep this task in history'} onClick={()=>void toggleKeep()}>{current.keep?'✓ Kept':'Keep'}</button>
-          {!terminalLive&&current.execution!=='script'&&current.sessionId&&<button disabled={sending} onClick={()=>void action('resume')}>Resume</button>}
-          {!terminalLive&&current.recoveryAvailable&&current.execution!=='script'&&<button disabled={sending||!vaultRoot} onClick={()=>void recover()}>{current.workflow?'Review retry':'Recover request'}</button>}
+          {!terminalLive&&!receipt&&current.sessionId&&<button disabled={sending} onClick={()=>void action('resume')}>Resume</button>}
+          {!terminalLive&&current.recoveryAvailable&&!receipt&&<button disabled={sending||!vaultRoot} onClick={()=>void recover()}>{current.workflow?'Review retry':'Recover request'}</button>}
           {(terminalLive||scriptActive)&&<button disabled={sending||current.state==='stopping'} onClick={()=>void action('stop')}>{current.state==='stopping'?'Stopping…':'Stop'}</button>}
         </div>
       </div>}
@@ -188,7 +197,8 @@ export default function AgentWorkDrawer({tasks,tasksLoaded,target,voiceTarget,se
       {current?.state==='needs input'&&<p className="agent-input-needed" role="status">Needs your input: {current.inputReason||current.error||'Review the prompt in the terminal below.'}</p>}
       {current?<>
         {terminalLive?<LiveTerminal id={current.id} onError={setError} readOnly={current.state==='stopping'}/>:<div className="agent-stopped" role="status">
-          {current.execution==='script'?(scriptActive?'Running the source refresh…':current.error||current.state==='error'?'The source refresh needs attention.':'This source refresh is closed.'):
+          {current.execution==='headless'?(scriptActive?'Running the workflow…':current.error?'The workflow failed.':'The workflow finished. See its result on the dashboard.'):
+            current.execution==='script'?(scriptActive?'Running the source refresh…':current.error||current.state==='error'?'The source refresh needs attention.':'This source refresh is closed.'):
             current.sessionId?'This terminal is closed. Resume when you want to continue.':current.recoveryAvailable?'This terminal closed before its conversation was saved. Recover the request to review it.':'This terminal is closed.'}
         </div>}
         {answerTarget===current.id&&current.turns.length>0&&<section className="agent-answer" id="terminal-saved-answer" aria-label="Saved answer"><pre>{answer||current.turns.at(-1)?.text}</pre></section>}
@@ -198,7 +208,7 @@ export default function AgentWorkDrawer({tasks,tasksLoaded,target,voiceTarget,se
         {unavailable&&former&&prompt.trim()&&<button type="button" disabled={sending||!vaultRoot} onClick={copyExpiredDraft}>Use draft in new terminal</button>}
       </div>}
       {!target&&recovered&&<p className="agent-recovered" role="status">Recovered: {recovered.title} · {recovered.selection.provider} / {recovered.selection.model}. Review before starting. <button type="button" disabled={sending} onClick={()=>edit('')}>Clear recovery</button></p>}
-      {showComposer&&current?.execution!=='script'&&<div id="terminal-message-box" className="agent-message-box">
+      {showComposer&&!receipt&&<div id="terminal-message-box" className="agent-message-box">
         {terminalLive&&!['ready','stopping'].includes(current!.state)&&<div className="agent-message-guard">
           <p>Use the CLI directly, or wait until it is idle with an empty input box. This does not answer approval prompts.</p>
           <button disabled={sending} onClick={()=>setReadyCheck(!readyCheck)}>I want to use the message box</button>

@@ -11,7 +11,7 @@ import {setCurrent} from '../runner/current-conversations.mjs';
 
 function fixture(t,provider){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'voice-continuation-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
- const selection={provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},calls=[],updates=[],tasks=[];
+ const selection={provider,model:provider==='codex'?'astra':'sonnet'},calls=[],updates=[],tasks=[];
  const get=id=>{const task=tasks.find(task=>task.id===id);if(!task)throw new Error('Task not found');return task};
  const available=id=>{const task=get(id);if(task.state==='stopped')throw new Error('Resume this terminal before sending a follow-up.');if(task.state!=='ready')throw new Error('This task is working or needs terminal input. Wait for its answer, or type directly in its terminal.');return task};
  const terminals={live:new Map(),list:()=>tasks,get,
@@ -22,7 +22,7 @@ function fixture(t,provider){
  };
  const add=(fields={})=>{const task={id:crypto.randomUUID(),...selection,title:'Existing conversation',state:'ready',created:Date.now(),turns:[],...fields};tasks.push(task);if(task.provider===provider)setCurrent(root,terminals,{provider,id:task.id});return task};
  const speak=(transcript,workTarget=null,execute=()=>assert.fail('Expected model-free request'),extra={},options={})=>routeVoice(root,{id:crypto.randomUUID(),transcript,selection,terminalMode:true,workTarget,...extra},undefined,execute,terminals,{resolveCli:()=>({command:'unused-test-cli',prefix:[]}),updateCurrent:value=>updates.push(value),...options});
- const output=(tier=3,tasks)=>async(_root,job,_prompt,options)=>{assert.equal(job.model,provider==='codex'?'gpt-5.6-luna':'haiku');return{text:JSON.stringify({tier,reply:tier===3?'Working on the request.':'Here is a quick answer.',...(tasks?{tasks}:{})})}};
+ const output=(tier=3,tasks)=>async(_root,job,_prompt,options)=>{assert.equal(job.model,provider==='codex'?'luna':'haiku');return{text:JSON.stringify({tier,reply:tier===3?'Working on the request.':'Here is a quick answer.',...(tasks?{tasks}:{})})}};
  return {root,selection,calls,updates,tasks,terminals,add,speak,output};
 }
 
@@ -80,7 +80,7 @@ for(const provider of ['codex','claude']){
  });
  test(`${provider}: an explicit clear new-task payload skips the classifier and ignores the former destination`,async t=>{
   const f=fixture(t,provider),old=f.add(),id=crypto.randomUUID(),transcript='Start a new task: create a visual document about RubyGems';let classifications=0;
-  const result=await f.speak(transcript,old.id,async(_root,job,_prompt,options)=>{classifications++;assert.equal(job.model,provider==='codex'?'gpt-5.6-luna':'haiku');assert.equal(options.user,'create a visual document about RubyGems');return{text:'{"tier":3,"reply":"Creating the document."}'}},{id});
+  const result=await f.speak(transcript,old.id,async(_root,job,_prompt,options)=>{classifications++;assert.equal(job.model,provider==='codex'?'luna':'haiku');assert.equal(options.user,'create a visual document about RubyGems');return{text:'{"tier":3,"reply":"Creating the document."}'}},{id});
   assert.equal(classifications,0);assert.equal(result.model,null);assert.equal(f.calls.length,1);assert.equal(f.calls[0].kind,'start');assert.equal(f.calls[0].id,id);assert.ok(f.calls[0].prompt.includes('create a visual document about RubyGems'));
   assert.equal(old.state,'ready');assert.equal(result.transcript,transcript);assert.equal(result.workTarget,null);assert.deepEqual(f.updates,[{scope:'web',provider,id,resetContext:true}]);
  });
@@ -119,7 +119,7 @@ for(const provider of ['codex','claude']){
   assert.equal(f.calls.length,0);assert.equal(f.updates.length,0);
  });
  test(`${provider}: workflow continuation uses the guarded workflow method and current model`,async t=>{
-  const f=fixture(t,provider),task=f.add({model:provider==='codex'?'gpt-5.6-luna':'opus'}),id=crypto.randomUUID();
+  const f=fixture(t,provider),task=f.add({model:provider==='codex'?'luna':'opus'}),id=crypto.randomUUID();
   const result=await f.speak('Run the weekly review',task.id,undefined,{id});
   assert.deepEqual(f.calls,[{kind:'continue-workflow',id:task.id,options:{id,selection:{provider,model:task.model},skill:'weekly-review',args:{}}}]);
   assert.equal(result.workerModel,task.model);assert.deepEqual(result.workIds,[task.id]);assert.deepEqual(f.updates,[{scope:'web',provider,id:task.id}]);

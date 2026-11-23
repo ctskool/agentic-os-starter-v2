@@ -79,7 +79,7 @@ EditorialAurora: a public benchmark release.
 `;
 const inboxMarkers=['UrgentInvoice','UrgentAccess','ReplyCalendar','ReplyLaunch','SponsorBeacon','InboxArchive'];
 const outsideMarkers=['EditorialAurora','PublicHNBeacon','UnrelatedDailyData','UnrelatedMetricData'];
-const choice=provider=>({provider,model:provider==='codex'?'gpt-6-astra':'sonnet'});
+const choice=provider=>({provider,model:provider==='codex'?'astra':'sonnet'});
 function fixture(t){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'aos-section-acceptance-')),today=localDate();
  const write=(relative,text)=>{const file=path.join(root,relative);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,text)};
@@ -171,7 +171,7 @@ for(const provider of ['codex','claude']){
  test(`${provider}: an interpretive section question sends only that section to the fast model`,async t=>{
   const f=fixture(t),utterance="Why were the GitHub projects in today's radar worth watching?";let calls=0;
   const {result,reads}=await traceReads(f.root,()=>f.classify(provider,utterance,async(_root,job,_prompt,options)=>{
-   calls++;assert.equal(job.provider,provider);assert.equal(job.model,provider==='codex'?'gpt-5.6-luna':'haiku');assert.equal(options.user,utterance);assert.ok(options.system.length<12000);
+   calls++;assert.equal(job.provider,provider);assert.equal(job.model,provider==='codex'?'luna':'haiku');assert.equal(options.user,utterance);assert.ok(options.system.length<12000);
    assert.ok(options.system.includes('RepoLantern'));absent(options.system,[...inboxMarkers,...outsideMarkers,'RadarAstrolabe','OutlierKite','OpenKernel','LinkedInChecklist'],'scoped section interpretation');
    return {text:JSON.stringify({tier:2,reply:'The saved GitHub descriptions explain local evaluation and indexing use cases.'})};
   }));

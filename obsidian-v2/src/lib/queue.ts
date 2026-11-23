@@ -3,6 +3,7 @@ import { Notice, type App, type Plugin } from "obsidian";
 import { assertTestVault, readSelection } from './provider';
 import { SKILLS, validateIntent } from '../../shared/contract.mjs';
 import {workRequest} from './work';
+import {showWorkNotice} from './work-notices';
 import {assertVoiceVault} from './v2-voice';
 import {SkillReportTracker} from './skill-reports';
 import type {VoiceSelection} from '../../shared/voice-session';
@@ -23,12 +24,14 @@ export function registerSkillReports(plugin:Plugin){
  const tracker=new SkillReportTracker({
   read:id=>readRun(app,id),
   ready:async path=>!!app.vault.getFileByPath(path),
-  open:async path=>{
+  open:async(path,label)=>{
    const file=app.vault.getFileByPath(path);
    if(!file)throw new Error('The report is no longer available.');
-   const existing=app.workspace.getLeavesOfType('markdown').find(leaf=>(leaf.view as unknown as {file?:{path:string}}).file?.path===path);
-   if(existing){await app.workspace.revealLeaf(existing);return}
-   await app.workspace.getLeaf('tab').openFile(file);
+   showWorkNotice(`${label} is done.`,()=>{
+    const existing=app.workspace.getLeavesOfType('markdown').find(leaf=>(leaf.view as unknown as {file?:{path:string}}).file?.path===path);
+    const opening=existing?app.workspace.revealLeaf(existing):app.workspace.getLeaf('tab').openFile(file);
+    void opening.catch(()=>{new Notice(`${label} was saved. Open it from the Activity Feed.`)});
+   });
   },
   notice:message=>{new Notice(message)},
   changed:pending=>{

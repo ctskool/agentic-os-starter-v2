@@ -21,8 +21,12 @@ import {fileURLToPath} from 'node:url';
 import {ROOT,VOICE_MODELS,validateSelection} from '../shared/contract.mjs';
 import {assertVault,vaultPath,writeJson} from './core.mjs';
 import {cliStatus} from './cli-runtime.mjs';
-import {readJson,selection,health,enqueue,routeVoice} from './bridge-core.mjs';
-import {preconnectJev,prepareJev,dropPreparedJev,drainDetachedClassifiers,classifierProcesses} from './jev.mjs';
+import {readJson,selection,health} from './bridge-core.mjs';
+import {handleVoiceHttp,voiceJson,voiceRequestId as uuid} from './voice-request.mjs';
+import {voiceReceiptTransport} from './voice-receipts.mjs';
+import {createLiveBridge} from './live/routes.mjs';
+import {liveSpeechMode} from './live/speech-mode.mjs';
+import {preconnectJev,dropPreparedJev,drainDetachedClassifiers,classifierProcesses} from './jev.mjs';
 import {warmOnWake} from './cli-warmup.mjs';
 import {NativeTerminalManager} from './native-terminals.mjs';
 import {readCurrentState,readConversationEpoch,setCurrent,taskInScope,reconcileCurrent} from './current-conversations.mjs';
@@ -33,6 +37,11 @@ import {createBridgeAuth} from './bridge-auth.mjs';
 import {startLifecycle} from './lifecycle.mjs';
 import {waitForResponseDrain} from './stream-backpressure.mjs';
 import {selectSpokenAnswer} from './spoken-answer.mjs';
+import {speakStreamQuery} from './voice-speed.mjs';
+import {readVoicePrefs,saveVoicePrefs,speakPrefsQuery,voiceChoices} from './voice-prefs.mjs';
+import {writeVoiceWords,saveVoiceWords} from './voice-words.mjs';
+import {scheduleTick,scheduleView,editSchedule} from './schedule.mjs';
+import {taskLabel} from './task-updates.mjs';
 import {completionLabel} from './voice-conversation-cues.mjs';
 const base=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const root=assertVault(configuredVault());
@@ -49,7 +58,20 @@ let bridgeAuth=null;
 let lifecycle=null;
 const {workAttentionSpeech,speechText}=await createJiti(import.meta.url).import('../shared/speech-text.ts');
 const listeners=new Map();
-const hub=new VoiceHub({load:()=>readJson(root,`${ROOT}/voice-announcements.json`,[]),save:items=>writeJson(root,`${ROOT}/voice-announcements.json`,items),emit:e=>{for(const res of listeners.values())res.write(`data: ${JSON.stringify(e)}\n\n`)}});
+const localPlaybacks=new Set();
+const hub=new VoiceHub({load:()=>readJson(root,`${ROOT}/voice-announcements.json`,[]),save:items=>writeJson(root,`${ROOT}/voice-announcements.json`,items),emit:e=>{for(const res of listeners.values())res.write(`data: ${JSON.stringify(e)}\n\n`);if(e.type==='owner')liveBridge.sweep()},
+ canSpeak:()=>readVoicePrefs(root).voiceMode!=='live',onPublish:item=>liveBridge.calls.completion(item)});
+const liveBridge=createLiveBridge({root,runtimeDir:path.join(base,'.runtime'),hub,listeners,active,prefs:()=>readVoicePrefs(root),provider:()=>selection(root).provider,
+ tasks:scope=>terminals.list().filter(task=>taskInScope(task,scope)&&!task.background),
+ readEpoch:(provider,scope)=>readConversationEpoch(root,provider,scope),
+ readContext:call=>{
+  const chosen=selection(root),current=readCurrentState(root,call.appScope);
+  return {selection:chosen,workTarget:current[chosen.provider],appScope:call.appScope,conversationEpoch:readConversationEpoch(root,chosen.provider,call.appScope),revision:current.revision};
+ },
+ requestContext:()=>({root,terminals,hub,artifacts,artifactTarget,active,speech,liveView:(reply,scope)=>voiceJson(root,scope,(value,status)=>status===400?{reply:value.error}:value,reply)}),
+ speechMode:liveSpeechMode({speech,authFile:path.join(base,'.runtime','speech-auth.json')}),
+ stopLocalAudio:()=>{for(const playback of localPlaybacks)playback.abort()}});
+const liveTimer=setInterval(()=>liveBridge.sweep(),1000);liveTimer.unref();
 const artifacts=new ArtifactHandoff({load:()=>readJson(root,`${ROOT}/artifact-handoffs.json`,{}),save:state=>writeJson(root,`${ROOT}/artifact-handoffs.json`,state),onExpired:item=>{
  const replaced=hub.retireCompletion(item.completionId),outcome=replaced&&item.completionText?artifactOutcomeSpeech({}, {text:item.completionText})+' ':'';
  hub.publish(`artifact:${item.id}`,outcome+artifactSpeech([item.artifact],'failed',item.target.kind),{appScope:item.target.kind,kind:'completion-error',taskId:item.artifact.taskId});
@@ -60,32 +82,64 @@ function artifactTarget(client,provider,epoch,appScope='web'){
  const surface=hub.live().find(item=>item.id===client);
  return surface&&surface.kind===appScope&&listeners.has(client)?{client,kind:surface.kind,provider,epoch}:null;
 }
-const knownTurns=new Set(terminals.list().flatMap(t=>t.turns.map(turn=>`${t.id}:${turn.id}`)));
+const knownTurns=new Set([...terminals.records.values()].flatMap(t=>[
+ ...t.turns.map(turn=>`${t.id}:${turn.id}`),...(t.workflowCompleted&&t.workflow?.job?[`${t.id}:workflow:${t.workflow.job.id}`]:[])
+]));
 const attentionEpisodes=new WorkAttentionEpisodes(terminals.list());
 terminals.onRemove=r=>{for(const key of knownTurns)if(key.startsWith(r.id+':'))knownTurns.delete(key);attentionEpisodes.remove(r.id);artifacts.remove(r.id)};
 terminals.onChange=r=>{
- if(r.execution==='headless'||r.background)return;
+ const dashboardOnly=r.execution==='headless'||r.background;
+ if(dashboardOnly&&readVoicePrefs(root).voiceMode!=='live')return;
+ const appScope=r.appScope||(r.execution==='native'?'native':'web');
+ const runId=r.workflowCompleted&&r.workflow?.job?.id;
+ const runKey=runId&&`${r.id}:workflow:${runId}`;
+ const run=runKey&&!knownTurns.has(runKey)?readJson(root,`${ROOT}/runs/${runId}.json`,null):null;
+ if(run)knownTurns.add(runKey);
+ const liveInfo={liveCallId:r.activeLiveCallId,taskLabel:taskLabel(r),summary:run?.summary,deliverable:run?.deliverable_path||r.resultPath};
  if(!['needs input','error'].includes(r.state))hub.resolveTaskAttention(r.id);
  for(const turn of r.turns){const key=`${r.id}:${turn.id}`;if(!knownTurns.has(key)){
   knownTurns.add(key);
-  const outcome=artifactOutcomeSpeech(r,turn);artifacts.publish(r,turn,outcome);
+  const outcome=artifactOutcomeSpeech(r,turn);if(!dashboardOnly)artifacts.publish(r,turn,outcome);
   // Only the viewer can confirm that the worker's output was displayed.
   const artifactFailure=turn.artifactErrors?.length>0;
   const spoken=outcome;
-  hub.publish(key,spoken,{appScope:r.appScope||(r.execution==='native'?'native':'web'),kind:artifactFailure||r.workflowCompleted&&r.workflowStatus==='error'&&r.error?'completion-error':'completion',taskId:r.id,label:completionLabel(r,turn)});
+  const blocked=/^\s*BLOCKED:/i.test(turn.text);
+  hub.publish(key,spoken||run?.summary||turn.text,{appScope,kind:artifactFailure||run?.status==='error'||blocked?'completion-error':'completion',taskId:r.id,label:completionLabel(r,turn),...liveInfo,liveCallId:turn.liveCallId||liveInfo.liveCallId,summary:r.error||liveInfo.summary||(blocked?turn.text:undefined)||spoken});
  }}
+ if(dashboardOnly&&run&&!r.turns.length){
+  hub.publish(runKey,run.summary,{appScope,kind:run.status==='error'?'completion-error':'completion',taskId:r.id,...liveInfo});
+ }
  const attention=attentionEpisodes.next(r);
- if(attention)hub.publish(attention.id,workAttentionSpeech(r.provider,attention.state,attention.reason),{appScope:r.appScope||(r.execution==='native'?'native':'web'),kind:attention.state==='error'?'error':'attention',taskId:r.id,label:completionLabel(r)});
+ if(attention&&!(attention.state==='error'&&run?.status==='error'&&(dashboardOnly||r.turns.length)))hub.publish(attention.id,workAttentionSpeech(r.provider,attention.state,attention.reason),{appScope,kind:attention.state==='error'?'error':'attention',taskId:r.id,label:completionLabel(r),...liveInfo,summary:r.error||attention.reason});
 };
 // A real capture start (wake) also warms the Codex binary, off this event loop; see cli-warmup.mjs.
 // Connecting, failing and retrying live in speech-events.mjs: a speech service that is not accepting
 // sockets must never be able to take the bridge down.
-const speechLink=speechEvents(speech.replace(/^http/,'ws')+'/events',e=>{try{preconnectJev()}catch{}let message;try{message=JSON.parse(String(e.data))}catch{return}try{warmOnWake(message)}catch{}try{hub.capture(message)}catch{}});
+const speechLink=speechEvents(speech.replace(/^http/,'ws')+'/events',e=>{let message;try{message=JSON.parse(String(e.data))}catch{return}
+ if(liveBridge.calls.audioHeld){
+  if(message.type==='hello')liveBridge.calls.speechBoot(message.bootId);
+  if(message.type==='hotkey'||message.type==='capture-request')liveBridge.calls.hotkey();
+  return;
+ }
+ try{preconnectJev()}catch{}try{warmOnWake(message)}catch{}try{hub.capture(message)}catch{}
+});
 
 const origins=new Set(['http://127.0.0.1:3217','http://localhost:3217','http://127.0.0.1:3218','app://obsidian.md']);
-const uuid=id=>typeof id==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id);
 async function body(req,max=20000){let size=0;const chunks=[];for await(const b of req){size+=b.length;if(size>max)throw new Error('Request too large');chunks.push(b)}return Buffer.concat(chunks)}
 const list=dir=>{const p=vaultPath(root,`${ROOT}/${dir}`);return fs.existsSync(p)?fs.readdirSync(p).filter(n=>n.endsWith('.json')).map(n=>readJson(root,`${ROOT}/${dir}/${n}`,null)).filter(Boolean):[]};
+// Kept up to date for the local voice service: at start, every ten minutes, and whenever the member teaches
+// or forgets a word. A failure here never touches a voice request.
+let voiceWordsNow=null;
+const refreshVoiceWords=()=>{const list=writeVoiceWords(root);return voiceWordsNow={words:list.words,yours:list.yours,learned:list.learned,ignored:list.ignored,learn:list.learn}};
+setTimeout(()=>{try{refreshVoiceWords()}catch{}},3000).unref();
+setInterval(()=>{try{refreshVoiceWords()}catch{}},600000).unref();
+// Scheduled workflows (schedule.mjs): the same background run a dashboard button starts, started by the clock.
+// Nothing is scheduled unless the member added it. A look every half minute; a fault here never reaches a request.
+const scheduleLook=()=>{scheduleTick(root,(job,id)=>terminals.startWorkflow({id,skill:job.skill,args:{},selection:selection(root),execution:'headless',appScope:'web'}))};
+const scheduleTimer=setInterval(scheduleLook,30000);scheduleTimer.unref();
+// And once as soon as the bridge has finished starting, so one that comes up in the last seconds before
+// midnight still catches that day's last job.
+setImmediate(scheduleLook);
 async function speechHealth(){try{const r=await fetch(`${speech}/health`,{signal:AbortSignal.timeout(1500)});return r.ok?await r.json():null}catch{return null}}
 function providerHealth(){return Object.fromEntries(['codex','claude'].map(provider=>[provider,cliStatus(provider)]))}
 function bridgeStatus(){const providers=providerHealth();return {selection:selection(root),health:{ts:new Date().toISOString(),pid:process.pid,busy:[...terminals.live.keys()].some(id=>['working','starting'].includes(terminals.get(id).state)),active:terminals.live.size,pending:0,providers},providers,vault:root}}
@@ -95,21 +149,17 @@ server.on('request',async(req,res)=>{
  if(req.headers.host!=='127.0.0.1:3219'||(origin&&!origins.has(origin))){res.writeHead(403);res.end();return}
  if(origin)res.setHeader('Access-Control-Allow-Origin',origin);
  res.setHeader('Vary','Origin');res.setHeader('Cache-Control','no-store');
- res.setHeader('Access-Control-Allow-Headers','Content-Type,X-V2-Request,X-V2-Selection,X-V2-Work,X-V2-Token,X-V2-Surface,X-V2-App');
+ res.setHeader('Access-Control-Allow-Headers','Content-Type,X-V2-Request,X-V2-Selection,X-V2-Work,X-V2-Token,X-V2-Surface,X-V2-App,X-V2-Surface-Secret,X-V2-Call');
  res.setHeader('Access-Control-Allow-Methods','GET,POST,DELETE,OPTIONS');res.setHeader('Access-Control-Max-Age','600');
  if(req.method==='OPTIONS'){res.writeHead(204);res.end();return}
  const json=(value,status=200)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(value))};
  const appScope=req.headers['x-v2-app']==='native'?'native':'web';
  const scopedTask=id=>{const task=terminals.get(id);if(!taskInScope(task,appScope))throw new Error('This terminal belongs to the other app.');return task};
- const voiceJson=(full,cached=false)=>{
-  const {decision:_decision,origin:_origin,...value}=full;
-  if(value.conversationResetError)return json({error:value.conversationResetError},400);
-  try{const {revision,...current}=readCurrentState(root,appScope);const conversationSuperseded=value.conversationSuperseded||(value.conversationEpoch??0)!==readConversationEpoch(root,value.provider,appScope);return json({...value,...(conversationSuperseded?{conversationSuperseded:true}:{}),current,currentRevision:revision})}
-  catch(error){if(cached)return json(value);throw error}
- };
  if((req.headers['x-v2-app']&&!['native','web'].includes(req.headers['x-v2-app']))||!bridgeAuth?.accepts(appScope==='native'?'POST':req.method,req.headers))return json({error:'Bridge authentication required'},401);
  try{
   const url=new URL(req.url,'http://127.0.0.1:3219');
+  if(url.pathname==='/voice/surface/register'||url.pathname.startsWith('/voice/live/'))return await liveBridge.handle({url,req,res,appScope,body,json,uuid,acceptsToken:()=>bridgeAuth.accepts('POST',req.headers)});
+  const verifySurface=id=>liveBridge?.verifySurface(id,appScope,req.headers['x-v2-surface-secret']);
   // Dashboard configuration is shared between surfaces. These routes retain the
   // bridge's existing origin, authentication and native/web ownership guards.
   if(url.pathname==='/dashboard'&&req.method==='GET')return json(readDashboard(root));
@@ -124,7 +174,7 @@ server.on('request',async(req,res)=>{
    const prepared=prepareDashboardSkill(root,{skill:b.skill,request:b.request,selection:b.selection||selection(root)});
    assertDashboardReplay(previous,prepared,appScope);
    readCurrentState(root,appScope);
-   const task=terminals.start({id:b.id,...prepared,...(appScope==='native'?{execution:'native'}:{})});
+   const task=terminals.start({id:b.id,...prepared,reveal:false,...(appScope==='native'?{execution:'native'}:{})});
    if(!previous)setCurrent(root,terminals,{provider:task.provider,id:task.id,scope:appScope});
    return json(task);
   }
@@ -140,8 +190,9 @@ server.on('request',async(req,res)=>{
    return json({error:'Native action not found'},404);
   }
   if(url.pathname==='/voice/events'&&req.method==='GET'){
-   const client=url.searchParams.get('client');if(!uuid(client))throw new Error('Invalid voice surface');
-   attachVoiceEvents(client,res,listeners,hub);return;
+   const client=url.searchParams.get('client');if(!uuid(client)&&!liveBridge?.surfaces.registered(client))throw new Error('Invalid voice surface');
+   liveBridge?.surfaces.connect(client,appScope,req.headers['x-v2-surface-secret']);
+   attachVoiceEvents(client,res,listeners,hub,id=>liveBridge?.surfaceGone(id));return;
   }
   if(url.pathname==='/artifacts/file'&&req.method==='GET'){
    let result;try{result=readArtifact(root,url.searchParams.get('id'))}catch{return json({error:'This saved artifact is unavailable.'},404)}
@@ -150,17 +201,18 @@ server.on('request',async(req,res)=>{
    res.end(bytes);return;
   }
   if(url.pathname==='/artifacts/claim'&&req.method==='POST'){
-   const b=JSON.parse((await body(req)).toString()),client=hub.live().find(item=>item.id===b.client);
+   const b=JSON.parse((await body(req)).toString());verifySurface(b.client);
+   const client=hub.live().find(item=>item.id===b.client);
    if(!client||client.kind!==appScope||!listeners.has(b.client)||b.visible!==true||b.mode!=='idle')return json({action:null});
    // Refresh an existing connection without taking an audio playback lease.
-   hub.presence({...client,id:b.client,visible:true,mode:'idle',focus:false,claim:false});
+   hub.presence({...client,id:b.client,visible:true,mode:client.mode==='live'?'live':'idle',focus:false,claim:false});
    if(hub.owner&&hub.owner!==b.client)return json({action:null});
    const current=readCurrentState(root,appScope),provider=selection(root).provider;
    const action=artifacts.claim(b.client,(target,artifact)=>target.provider===provider&&target.epoch===readConversationEpoch(root,provider,appScope)&&current[provider]===artifact.taskId);
    return json({action});
   }
   if(url.pathname==='/artifacts/ack'&&req.method==='POST'){
-   const b=JSON.parse((await body(req)).toString());if(typeof b.ok!=='boolean')throw new Error('Invalid artifact confirmation');
+   const b=JSON.parse((await body(req)).toString());verifySurface(b.client);if(typeof b.ok!=='boolean')throw new Error('Invalid artifact confirmation');
    const {item,fresh}=artifacts.ack(b.id,b.client,b.ok,b.error);
    if(fresh){
     const replaced=hub.retireCompletion(item.completionId);
@@ -172,13 +224,16 @@ server.on('request',async(req,res)=>{
   if(['/voice/surface','/voice/ack','/voice/leave','/voice/announce'].includes(url.pathname)&&req.method==='POST'){
    const b=JSON.parse((await body(req)).toString());
    // A late heartbeat must not revive a surface that cannot receive events.
-   if(url.pathname==='/voice/surface'){if(b.kind!==appScope)throw new Error('Voice surface belongs to a different app.');if(!listeners.has(b.id)){hub.leave(b.id);return b.focus?json({error:'Voice connection is reconnecting. Try again.'},503):json(null)}return json(hub.presence(b))}
-   if(url.pathname==='/voice/ack'){hub.ack(b.id,b.client,!!b.ok);return json({ok:true})}
-   if(url.pathname==='/voice/leave'){hub.leave(b.id);return json({ok:true})}
+   if(url.pathname==='/voice/surface'){verifySurface(b.id);if(b.kind!==appScope)throw new Error('Voice surface belongs to a different app.');if(!listeners.has(b.id)){hub.leave(b.id);return b.focus?json({error:'Voice connection is reconnecting. Try again.'},503):json(null)}return json(hub.presence(b))}
+   if(url.pathname==='/voice/ack'){verifySurface(b.client);hub.ack(b.id,b.client,!!b.ok);return json({ok:true})}
+   if(url.pathname==='/voice/leave'){verifySurface(b.id);hub.leave(b.id);liveBridge?.surfaceGone(b.id);return json({ok:true})}
    if(typeof b.id!=='string'||b.id.length>400||typeof b.text!=='string'||b.text.length>2000)throw new Error('Invalid announcement');
    // The terminal publisher already announces these runs with full answer text.
-   if(b.id.startsWith('run:')&&terminals.records.has(b.id.slice(4)))return json({ok:true});
-   hub.publish(b.id,speechText(b.text,700),{appScope});return json({ok:true});
+   const runId=b.id.startsWith('run:')?b.id.slice(4):null;
+   const record=runId?terminals.records.get(runId):null;
+   const liveCompletion=liveBridge?.calls.audioHeld&&uuid(runId);
+   if(record&&(!liveCompletion||!(record.execution==='headless'||record.background)))return json({ok:true});
+   hub.publish(b.id,speechText(b.text,700),{appScope,...(liveCompletion?{kind:'completion',taskId:runId}:{})});return json({ok:true});
   }
   if(url.pathname==='/usage'&&req.method==='GET'){const provider=url.searchParams.get('provider')||'codex';if(!['codex','claude'].includes(provider))return json({error:'Unknown provider'},400);const gone=new AbortController();res.on('close',()=>gone.abort());if(provider==='codex')return json(await getCodexUsage());return json(await claudeUsageReading({signal:gone.signal,getUsage:getClaudeUsage}))}
   if(url.pathname==='/notes/replace'&&req.method==='POST')return json(replaceDaily(root,JSON.parse((await body(req,1100000)).toString())));
@@ -213,13 +268,26 @@ server.on('request',async(req,res)=>{
    if([...terminals.live.keys()].some(id=>terminals.get(id).execution!=='native')||active.size||classifierProcesses().total)return json({error:'Stop active terminal tasks and voice requests first. Saved conversations and message-box drafts are retained.'},409);
    // Persist intent before releasing the port so recovery cannot undo an explicit Stop.
    fs.writeFileSync(path.join(base,'.runtime/services-paused.json'),JSON.stringify({ts:new Date().toISOString(),reason:'idle shutdown request'}));
-   json({ok:true});lifecycle?.stop('idle shutdown request');dropPreparedJev();closeClaudeSignIn();terminals.close();clearInterval(artifactTimer);speechLink.stop();for(const response of listeners.values())response.end();server.close();setTimeout(()=>server.closeAllConnections(),500).unref();return;
+   json({ok:true});lifecycle?.stop('idle shutdown request');dropPreparedJev();closeClaudeSignIn();void liveBridge?.calls.shutdown();terminals.close();clearInterval(artifactTimer);clearInterval(scheduleTimer);clearInterval(liveTimer);speechLink.stop();for(const response of listeners.values())response.end();server.close();setTimeout(()=>server.closeAllConnections(),500).unref();return;
   }
   if(url.pathname==='/status'&&req.method==='GET')return json(bridgeStatus());
   if(url.pathname==='/state'&&req.method==='GET')return json({...bridgeStatus(),runs:list('runs').sort((a,b)=>(b.ts_started||'').localeCompare(a.ts_started||'')).slice(0,20),queue:[]});
-  if(url.pathname==='/selection'&&req.method==='POST'){const chosen=validateSelection(JSON.parse((await body(req)).toString()));writeJson(root,`${ROOT}/provider.json`,chosen);return json(chosen)}
+  if(url.pathname==='/selection'&&req.method==='POST'){const chosen=validateSelection(JSON.parse((await body(req)).toString()));writeJson(root,`${ROOT}/provider.json`,chosen);liveBridge?.sweep();return json(chosen)}
   if(url.pathname==='/queue'&&req.method==='POST'){const b=JSON.parse((await body(req)).toString());return json(terminals.startWorkflow({id:b.id,skill:b.skill,args:b.args||{},selection:b.selection||selection(root),execution:'headless',appScope}))}
   if(url.pathname==='/report'&&req.method==='GET')return json(readVoiceReport(root,url.searchParams.get('path')||'',list('runs'),list('voice-results')));
+  // How voice sounds in this vault: spoken replies on or off, which voice, how fast. Both screens read and
+  // write it here, so a change on one shows on the other.
+  if(url.pathname==='/voice/prefs'&&req.method==='GET')return json(readVoicePrefs(root));
+  if(url.pathname==='/voice/prefs'&&req.method==='POST'){const prefs=saveVoicePrefs(root,JSON.parse((await body(req)).toString()));liveBridge?.sweep();return json(prefs)}
+  // The words voice listens for: learned from the names of this vault's notes, plus the member's own.
+  if(url.pathname==='/schedule'&&req.method==='GET')return json(scheduleView(root));
+  // A save must name the revision it was made from, so a screen holding an old copy cannot undo a pause.
+  // The schedule is sent in its stored shape: {paused, jobs: [{id, skill, at, days, enabled}]}.
+  if(url.pathname==='/schedule'&&req.method==='POST'){const b=JSON.parse((await body(req)).toString());if(typeof b?.revision!=='string'||!b.schedule)throw new Error('Send {revision, schedule}; the revision comes from the last read.');editSchedule(root,()=>b.schedule,{revision:b.revision});return json(scheduleView(root))}
+  // Reading shows the list as last built (at start, every ten minutes, and after a change): it never scans the vault.
+  if(url.pathname==='/voice/words'&&req.method==='GET')return json(voiceWordsNow||refreshVoiceWords());
+  if(url.pathname==='/voice/words'&&req.method==='POST'){saveVoiceWords(root,JSON.parse((await body(req)).toString()));return json(refreshVoiceWords())}
+  if(url.pathname==='/voice/voices'&&req.method==='GET'){let service=null;try{const answer=await fetch(`${speech}/voices`,{signal:AbortSignal.timeout(3000)});if(answer.ok)service=await answer.json()}catch{}return json(voiceChoices(service))}
   if(url.pathname==='/voice/config'){
    if(req.method==='GET')return json(VOICE_MODELS);
    if(req.method==='POST')return json({error:'Voice routing is fixed: Luna for Codex, Haiku for Claude.'},405);
@@ -228,68 +296,30 @@ server.on('request',async(req,res)=>{
   if(url.pathname==='/voice/cancel'&&req.method==='POST'){const b=JSON.parse((await body(req)).toString());if(!uuid(b.id))throw new Error('Invalid request ID');writeJson(root,`${ROOT}/voice-cancelled/${b.id}.json`,{ts:Date.now()});active.get(b.id)?.abort();return json({ok:true})}
   if(url.pathname==='/voice/transcript'){
    const since=readJson(root,`${ROOT}/voice-clear.json`,{ts:0}).ts;
-   const records=list('voice-results').filter(r=>r.ts>since).sort((a,b)=>a.ts-b.ts).slice(-30);if(req.method==='GET')return json({path:'system/voice/transcript',content:records.map(r=>`**You (${r.provider}):** ${r.transcript}\n\n**Agent (${r.model||'direct command'}):** ${r.reply}`).join('\n\n---\n\n')||'No voice requests yet.'});
+   const records=list('voice-results').filter(r=>r.ts>since&&voiceReceiptTransport(r)==='local').sort((a,b)=>a.ts-b.ts).slice(-30);if(req.method==='GET')return json({path:'system/voice/transcript',content:records.map(r=>`**You (${r.provider}):** ${r.transcript}\n\n**Agent (${r.model||'direct command'}):** ${r.reply}`).join('\n\n---\n\n')||'No voice requests yet.'});
    // Transcript records double as durable duplicate protection; clear the display without deleting receipts.
    if(req.method==='DELETE'){writeJson(root,`${ROOT}/voice-clear.json`,{ts:Date.now()});return json({ok:true})}
   }
   if(url.pathname==='/voice/speak'&&['POST','GET'].includes(req.method)){
    const b=req.method==='GET'?{text:url.searchParams.get('text')}:JSON.parse((await body(req)).toString());if(typeof b.text!=='string'||!b.text.trim()||b.text.length>2000)throw new Error('Invalid speech text');
-   const stop=new AbortController();res.on('close',()=>stop.abort());const out=await fetch(`${speech}/speak?text=${encodeURIComponent(speechText(spokenFlow(selectSpokenAnswer(b.text,{mode:'reply'}))))}`,{signal:AbortSignal.any([stop.signal,AbortSignal.timeout(60000)])});if(!out.ok)throw new Error('Local speech playback is unavailable');
-   res.writeHead(200,{'Content-Type':'audio/wav'});for await(const chunk of out.body){if(res.destroyed)break;if(!res.write(chunk)&&!await waitForResponseDrain(res))break}if(!res.destroyed)res.end();return;
+   // Spoken replies switched off for this vault: no audio is ever sent, whatever a screen believed. The
+   // screens treat this answer as "said, silently".
+   if(liveBridge?.calls.audioHeld||!readVoicePrefs(root).spokenReplies)return json({muted:true});
+   const stop=new AbortController();res.on('close',()=>stop.abort());localPlaybacks?.add(stop);
+   try{// A GET is the player that plays audio as it arrives: it is sent sentence by sentence (voice-speed.mjs).
+   // A POST is the buffered fallback, which decodes one complete file and keeps getting exactly that.
+   const out=await fetch(`${speech}/speak?text=${encodeURIComponent(speechText(spokenFlow(selectSpokenAnswer(b.text,{mode:'reply'}))))}${speakStreamQuery(req.method)}${speakPrefsQuery(readVoicePrefs(root))}`,{signal:AbortSignal.any([stop.signal,AbortSignal.timeout(60000)])});if(!out.ok)throw new Error('Local speech playback is unavailable');
+   res.writeHead(200,{'Content-Type':'audio/wav'});
+   // A reply that broke off while being spoken is cut, not ended: the player then reports an interruption
+   // instead of treating half a reply as the whole one.
+   try{for await(const chunk of out.body){if(res.destroyed)break;if(!res.write(chunk)&&!await waitForResponseDrain(res))break}}catch{res.destroy();return}
+   if(!res.destroyed)res.end();return;
+   }finally{localPlaybacks?.delete(stop)}
   }
   if(['/voice/audio','/voice/text'].includes(url.pathname)&&req.method==='POST'){
-   const id=req.headers['x-v2-request'];if(!uuid(id))throw new Error('Invalid request ID');
-   const chosen=validateSelection(JSON.parse(req.headers['x-v2-selection']||'null'));
-   if(fs.existsSync(vaultPath(root,`${ROOT}/voice-cancelled/${id}.json`)))throw new Error('Voice request cancelled');
-   const receipt=readJson(root,`${ROOT}/voice-results/${id}.json`,null);if(receipt){if((receipt.appScope||'web')!==appScope||receipt.provider!==chosen.provider||(receipt.requestedWorkerModel??receipt.workerModel)!==chosen.model)throw new Error('Request ID already belongs to a different selection');return voiceJson(receipt,true)}
-   // Corrupt current settings must be detected before claiming, transcribing,
-   // classifying or dispatching work. Durable receipts remain readable above.
-   reconcileCurrent(root,terminals,{scope:appScope});
-   const conversationEpoch=readConversationEpoch(root,chosen.provider,appScope);
-   if(active.size)throw new Error('Another voice request is being processed. Wait or cancel it first.');
-   const controller=new AbortController();active.set(id,controller);
-   const disconnected=()=>{if(!res.writableEnded)controller.abort()};
-   res.on('close',disconnected);if(res.destroyed)disconnected();
-   // Persist intent before calling a provider; interrupted requests cannot silently replay after restart.
-   const claim=`${ROOT}/voice-requests/${id}.json`;
-   let claimed=false,stage='receiving',diagnostic={id,...chosen,ts:new Date().toISOString(),appScope,source:url.pathname==='/voice/audio'?'audio':'text'};
-   // Keep failure evidence with the existing duplicate guard, never in successful
-   // voice memory. Diagnostics must not prevent a response or mask its error.
-   const recordDiagnostic=fields=>{if(claimed){diagnostic={...diagnostic,stage,...fields,updatedAt:new Date().toISOString()};try{writeJson(root,claim,diagnostic)}catch{}}};
-   try{
-    if(fs.existsSync(vaultPath(root,claim)))throw new Error('This voice request was already submitted. Start a new request to retry.');
-    writeJson(root,claim,{...diagnostic,stage});claimed=true;
-    let transcript;
-    if(url.pathname==='/voice/text')transcript=JSON.parse((await body(req)).toString()).transcript;
-    else{
-     const audio=await body(req,8*1024*1024);if(audio.length<1000)throw new Error('Recording was too short.');
-     stage='transcribing';preconnectJev();try{prepareJev({provider:chosen.provider})}catch{}
-     const stt=await fetch(`${speech}/stt`,{method:'POST',headers:{'Content-Type':req.headers['content-type']||'audio/webm'},body:audio,signal:AbortSignal.any([controller.signal,AbortSignal.timeout(30000)])});
-     if(!stt.ok)throw new Error('Local transcription failed. Check the V2 speech service.');transcript=(await stt.json()).text;
-    }
-    stage='validating';if(typeof transcript==='string')diagnostic.transcript=transcript.slice(0,4000);
-    if(controller.signal.aborted)throw new Error('Voice request cancelled');
-    const work=JSON.parse(req.headers['x-v2-work']||'null');
-    if(uuid(work?.targetId))diagnostic.workTarget=work.targetId;
-    const supplied=typeof req.headers['x-v2-surface']==='string'?req.headers['x-v2-surface']:null;
-    const surface=supplied?hub.live().find(item=>item.id===supplied):null;
-    if(supplied&&(!surface||surface.kind!==appScope))throw new Error('Voice surface belongs to another app or is disconnected.');
-    const client=supplied||hub.live().find(item=>item.id===hub.owner&&item.kind===appScope)?.id;
-    const target=artifactTarget(client,chosen.provider,conversationEpoch,appScope);
-    stage='routing';recordDiagnostic({});
-    const result=await routeVoice(root,{id,transcript,selection:chosen,terminalMode:!!work,workTarget:work?.targetId||null,conversationEpoch,appScope,origin:req.headers['x-v2-origin']==='test'?'test':'live'},controller.signal,undefined,terminals,{updateCurrent:change=>setCurrent(root,terminals,{...change,scope:appScope}),onDispatch:(taskId,epoch)=>artifacts.bind(taskId,target?{...target,epoch}:null),
-     // Reopen a registered file on the surface that asked. Bind the task to
-     // this surface first: the claim path only serves the current conversation.
-     reopenArtifact:({id:requestId,taskId,artifact})=>{
-      if(!target)throw new Error('No connected dashboard can display that file right now.');
-      const task=terminals.get(taskId);
-      artifacts.bind(taskId,{...target,epoch:conversationEpoch});
-      if(!artifacts.publish(task,{id:`reopen:${requestId}`,artifacts:[{...artifact,open:true,isFinal:true}]},''))throw new Error('That file was already queued to open.');
-      hub.emit({type:'pending'});
-     }});
-    stage='responding';const response=voiceJson(result);stage='completed';recordDiagnostic({completedAt:new Date().toISOString()});return response;
-   }catch(error){recordDiagnostic({error:String(error.message||error).slice(0,1000),failedAt:new Date().toISOString(),cancelled:controller.signal.aborted});throw error}
-   finally{res.off('close',disconnected);active.delete(id)}
+   const surface=req.headers['x-v2-surface'];verifySurface(surface);
+   if(liveBridge?.calls.audioHeld&&(url.pathname==='/voice/audio'||liveBridge.calls.call.ownerSurface!==surface||liveBridge.calls.call.appScope!==appScope))throw new Error('Live call in progress.');
+   return await handleVoiceHttp({root,terminals,hub,artifacts,artifactTarget,active,speech},req,res,{body,json,appScope,source:url.pathname==='/voice/audio'?'audio':'text'});
   }
   json({error:'Not found'},404);
  }catch(e){if(!res.headersSent)json({error:String(e.message||e),...(typeof e?.code==='string'&&/^TERMINAL_[A-Z_]+$/.test(e.code)?{code:e.code}:{})},400);else res.end()}
@@ -300,6 +330,7 @@ server.on('request',async(req,res)=>{
  const installedProviders=providerHealth();
  lifecycle=startLifecycle(path.join(base,'.runtime'),{service:'v2-bridge',version:JSON.parse(fs.readFileSync(path.join(base,'package.json'),'utf8')).version,providers:installedProviders});
  lifecycle.mark('listening',{port:3219});
+ liveBridge.sweep();
  const plugin=vaultPath(root,'.obsidian/plugins/agentic-os-v2');
  if(fs.existsSync(plugin))fs.copyFileSync(bridgeAuth.file,vaultPath(root,'.obsidian/plugins/agentic-os-v2/bridge-auth.json'));
  console.log(`V2 bridge :3219 · ${root} · speech ${speech}`);
@@ -307,4 +338,4 @@ server.on('request',async(req,res)=>{
 }
 process.on('uncaughtExceptionMonitor',error=>lifecycle?.mark('uncaught-exception',{code:error.code||error.name}));
 process.on('exit',code=>{if(code===0)lifecycle?.stop('process exit');else lifecycle?.mark('exit',{exitCode:code})});
-for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{{const open=classifierProcesses();if(open.total)lifecycle?.mark('classifiers-open-at-shutdown',{reason:`running=${open.running} detached=${open.detached}`})}lifecycle?.stop(signal);closeClaudeSignIn();for(const c of active.values())c.abort();drainDetachedClassifiers({timeoutMs:12000}).then(drained=>{if(drained.remaining)console.error(`[shutdown] ${drained.remaining} classifier process(es) did not confirm closure.`)});terminals.close();clearInterval(artifactTimer);speechLink.stop();for(const response of listeners.values())response.end();server.close()});
+for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{{const open=classifierProcesses();if(open.total)lifecycle?.mark('classifiers-open-at-shutdown',{reason:`running=${open.running} detached=${open.detached}`})}lifecycle?.stop(signal);closeClaudeSignIn();void liveBridge.calls.shutdown();for(const c of active.values())c.abort();drainDetachedClassifiers({timeoutMs:12000}).then(drained=>{if(drained.remaining)console.error(`[shutdown] ${drained.remaining} classifier process(es) did not confirm closure.`)});terminals.close();clearInterval(artifactTimer);clearInterval(scheduleTimer);clearInterval(liveTimer);speechLink.stop();for(const response of listeners.values())response.end();server.close()});

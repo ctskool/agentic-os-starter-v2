@@ -33,7 +33,7 @@ const built=await build({stdin:{contents:`export * from './src/lib/work';export 
 }}]});
 let moduleId=0;
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
-const task=(id,provider,execution)=>({id,provider,execution,model:provider==='codex'?'gpt-6-astra':'sonnet',title:id,state:'working',sessionId:null,error:null,turns:[]});
+const task=(id,provider,execution)=>({id,provider,execution,model:provider==='codex'?'astra':'sonnet',title:id,state:'working',sessionId:null,error:null,turns:[]});
 async function fixture(t){
  const prior=globalThis.window;globalThis.window=new EventTarget();t.after(()=>{if(prior===undefined)delete globalThis.window;else globalThis.window=prior});
  return import('data:text/javascript;base64,'+Buffer.from(built.outputFiles[0].text+`\n// fixture ${++moduleId}`).toString('base64'));

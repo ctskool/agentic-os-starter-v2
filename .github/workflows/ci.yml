@@ -2,6 +2,13 @@ name: ci
 on:
   push:
   workflow_dispatch:
+  # Every Monday, with nothing changed here. The install below downloads today's versions of everything
+  # a member's fresh install would get, so a dependency that breaks the starter (as PyAV 19 broke
+  # speech-to-text for a month) shows up here within a week instead of in a member's report.
+  # GitHub switches scheduled runs off after 60 days without activity in the repository. A push does not
+  # switch them back on: re-enable the workflow on the Actions page (or with `gh workflow enable ci.yml`).
+  schedule:
+    - cron: '17 9 * * 1'
 
 jobs:
   tests:
@@ -23,7 +30,7 @@ jobs:
       - name: Voice shortcut unit tests (no microphone or OS hooks)
         run: python obsidian-v2/tests/mac-hotkey.test.py
       - name: Speech service test dependencies
-        run: python -m pip install --disable-pip-version-check fastapi httpx
+        run: python -m pip install --disable-pip-version-check fastapi httpx numpy soundfile
       - name: Speech service unit tests (mocked audio and models)
         run: python obsidian-v2/tests/speech-runtime.test.py
       - name: Bridge and plugin packages
@@ -155,6 +162,16 @@ jobs:
           node aos.mjs doctor --ci | tee ci-logs/doctor-own.log
           grep -q "PASS Voice service healthy - .*this installation's own service on 3220" ci-logs/doctor-own.log
           grep -q "PASS Speech to text hears it back" ci-logs/doctor-own.log
+      # A vault that asks for another language: setup fetches that language's speech model, voice starts
+      # in it, and the doctor speaks and listens in it. English words heard back would fail this.
+      - name: Voice in another language (Portuguese)
+        run: |
+          node aos.mjs stop
+          node -e "const fs=require('fs'),f=process.env.RUNNER_TEMP+'/vault/system/v2/profile.json';const p=JSON.parse(fs.readFileSync(f,'utf8'));p.speechLanguage='pt';fs.writeFileSync(f,JSON.stringify(p,null,1))"
+          node aos.mjs setup --vault "$RUNNER_TEMP/vault" --voice yes --autostart no --ci | tee ci-logs/setup-language.log
+          node aos.mjs doctor --ci | tee ci-logs/doctor-language.log
+          grep -q "PASS Voice service healthy - .*hearing and speaking Portuguese (Brazil)" ci-logs/doctor-language.log
+          grep -q "PASS Speech to text hears it back" ci-logs/doctor-language.log
       - name: Status
         if: always()
         run: node aos.mjs status || true

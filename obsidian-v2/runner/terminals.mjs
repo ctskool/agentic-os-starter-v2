@@ -5,12 +5,14 @@ import {createRequire} from 'node:module';
 import {projectRoot} from './runtime.mjs';
 import {findCli,executeCli} from './adapters.mjs';
 import {startHeadlessWorkflow} from './headless-workflows.mjs';
-import {validateSelection,validateIntent,SKILLS} from '../shared/contract.mjs';
+import {validateSelection,validateIntent,SKILLS,modelFamily} from '../shared/contract.mjs';
+import {resolveCodexModel} from './codex-models.mjs';
 import {atomicRename,writeJson,vaultPath} from './core.mjs';
 import {prepareWorkflow,saveWorkflowResult} from './terminal-workflows.mjs';
 import {destinationFor,directWorkflow} from './workflows.mjs';
 import {windowsArguments,TerminalPromptDetector,TerminalInputBoundary,stopOwnedPtyTree,releaseStoppedWindowsPty} from './terminal-transport.mjs';
 import {TaskRetention,migrateTaskRetention,TASK_SWEEP_MS} from './task-retention.mjs';
+import {withoutOpenAIKey} from './child-env.mjs';
 // Idle close: default 30 minutes; AOS_V2_TERMINAL_IDLE_MINUTES overrides, 0 or "off" disables it.
 export const IDLE_STOP_MS=30*60*1000,IDLE_SWEEP_MS=60*1000;
 // A one-click close is refused while the CLI's screen changed this recently: a working CLI keeps redrawing, also
@@ -49,19 +51,19 @@ export function terminalSpec(root,record,cli=findCli(record.provider),{resumePro
   // Native Codex reviews permission requests itself while keeping its workspace
   // sandbox. This invocation-level preset also overrides unrestricted user defaults.
   const permissions=record.execution==='native'?['--approve-for-me']:['-s','workspace-write','-a','on-request'];
-  args=[...(record.sessionId?['resume',record.sessionId]:[]),'-C',root,'-m',record.model,...permissions,'--no-alt-screen',
+  args=[...(record.sessionId?['resume',record.sessionId]:[]),'-C',root,'-m',resolveCodexModel(record.model),...permissions,'--no-alt-screen',
    '-c','model_reasoning_effort="medium"','-c',`notify=${JSON.stringify([process.execPath,hook])}`,
    '-c','tui.notifications=false','-c','project_root_markers=[".agentic-os-v2.json",".agentic-os-v2-test-vault",".git"]'];
  }else{
   const command=`"${process.execPath.replaceAll('\\','/')}" "${hook.replaceAll('\\','/')}"`;
   const hooks=Object.fromEntries(['SessionStart','UserPromptSubmit','Stop','StopFailure','PermissionRequest'].map(event=>[event,[{hooks:[{type:'command',command,timeout:5}]}]]));
-  args=['--model',record.model,'--settings',JSON.stringify({hooks}),...(record.sessionId?['--resume',record.sessionId]:['--session-id',record.id])];
+  args=['--model',modelFamily('claude',record.model),'--settings',JSON.stringify({hooks}),...(record.sessionId?['--resume',record.sessionId]:['--session-id',record.id])];
  }
  // New sessions receive their initial prompt as a process argument, not shell code.
  const request=record.sessionId?(resumePrompt===undefined?'Resume this conversation without using tools or taking actions. Briefly confirm you are ready for a follow-up.':cleanPrompt(resumePrompt)):record.prompt;
  const explicit=!record.sessionId||resumePrompt!==undefined;
  const handoff=artifactHandoffInstructions({node:process.execPath,helper:path.join(projectRoot,'runner','artifact-result.mjs'),events,taskId:record.id,requestKey:record.artifactRequestKey,provider:record.provider});
- args.push('--',explicit?`${request}${spoken?`\n\n${WORKER_SPOKEN_STYLE}`:''}\n\n${handoff}`:request);
+ args.push('--',explicit&&!(record.slashSkill&&!record.sessionId)?`${request}${spoken?`\n\n${WORKER_SPOKEN_STYLE}`:''}\n\n${handoff}`:request);
  return {command:cli.command,args:[...cli.prefix,...args]};
 }
 export class TerminalManager {
@@ -151,7 +153,8 @@ export class TerminalManager {
    this.cancelSubmit(live);pending.warned=true;r.state='needs input';r.error=DELIVERY_WARNING;this.save(r);
   }
  }
- beginRequest(r){
+ beginRequest(r,liveCallId){
+  r.activeLiveCallId=liveCallId;
   const live=this.live.get(r.id);if(live)live.draftRequestKey=null;
   r.artifactRequestKey=crypto.randomUUID();r.pendingArtifacts=[];
   const file=path.join(this.folder(r.id),'events','active-request.meta');
@@ -161,7 +164,7 @@ export class TerminalManager {
   fs.writeFileSync(metadata+'.tmp',JSON.stringify({taskId:r.id,requestKey:r.artifactRequestKey,outbox,vault:this.root}));atomicRename(metadata+'.tmp',metadata);
  }
  save(r){if(this.records.get(r.id)!==r||this.retention.retired.has(r.id))return;const file=path.join(this.folder(r.id),'session.json');fs.writeFileSync(file+'.tmp',JSON.stringify(r,null,2));atomicRename(file+'.tmp',file);this.onChange?.(r)}
- list(){return [...this.records.values()].sort((a,b)=>b.created-a.created).map(r=>({...r,expiresAt:this.retention.expiresAt(r,this.live.has(r.id)),prompt:undefined,vault:undefined,native:undefined,pendingArtifacts:undefined,artifactRequestKey:undefined,workflowHistory:undefined,completedTurnIds:undefined,workflow:r.workflow?{skill:r.workflow.job.skill,destination:r.workflow.destination}:undefined}))}
+ list(){return [...this.records.values()].sort((a,b)=>b.created-a.created).map(r=>({...r,expiresAt:this.retention.expiresAt(r,this.live.has(r.id)),prompt:undefined,vault:undefined,native:undefined,activeLiveCallId:undefined,pendingArtifacts:undefined,artifactRequestKey:undefined,workflowHistory:undefined,completedTurnIds:undefined,workflow:r.workflow?{skill:r.workflow.job.skill,destination:r.workflow.destination,startedAt:r.workflow.startedAt}:undefined}))}
  setKeep(id,keep){if(typeof keep!=='boolean')throw new Error('Keep must be true or false');const r=this.get(id);if(r.keep!==keep){r.keep=keep;if(!keep)this.touch(r);this.save(r)}return {...r,expiresAt:this.retention.expiresAt(r,this.live.has(id))}}
  prune(){
   if(this.closed)return;
@@ -177,7 +180,7 @@ export class TerminalManager {
   for(const record of this.records.values())for(const workflow of [record.workflow,...(record.workflowHistory||[])])if(workflow?.job.id===id)return {record,workflow};
   return null;
  }
- startWorkflow({id=crypto.randomUUID(),selection,skill,args={},execution,appScope=execution==='native'?'native':'web'}){
+ startWorkflow({id=crypto.randomUUID(),selection,skill,args={},execution,reveal=true,liveCallId,appScope=execution==='native'?'native':'web'}){
   if(!workId(id))throw new Error('Invalid task ID');
   if(![undefined,'native','headless'].includes(execution)||!['native','web'].includes(appScope))throw new Error('Invalid workflow owner');
   const previous=this.workflowRequest(id);
@@ -192,12 +195,12 @@ export class TerminalManager {
   const destination=destinationFor(job);
   if(SKILLS[skill].direct&&[...this.records.values()].some(r=>r.execution==='script'&&r.workflow?.job.skill===skill&&this.live.has(r.id)))throw new Error('This source refresh is already running. Wait for its result; other tasks can still run.');
   if([...this.records.values()].some(r=>r.workflow?.destination===destination&&!r.workflowCompleted&&this.live.has(r.id)))throw new Error('Another task is updating that same note. Continue it or wait for its result; unrelated tasks can still run.');
-  if(SKILLS[skill].direct)return this.startDirect(job,destination,appScope,{background:execution==='headless'});
+  if(SKILLS[skill].direct)return this.startDirect(job,destination,appScope,{background:execution==='headless',liveCallId});
   const workflow=prepareWorkflow(this.root,{id,selection,skill,args,execution});
   if(execution==='headless')return startHeadlessWorkflow(this,workflow,appScope);
-  return this.start({id,selection,prompt:workflow.prompt,title:skill.replaceAll('-',' '),workflow,execution});
+  return this.start({id,selection,prompt:workflow.prompt,title:skill.replaceAll('-',' '),workflow,execution,reveal,liveCallId});
  }
- continueWorkflow(targetId,{id=crypto.randomUUID(),selection,skill,args={}},{resumeStopped=false}={}){
+ continueWorkflow(targetId,{id=crypto.randomUUID(),selection,skill,args={}},{resumeStopped=false,liveCallId}={}){
   if(!workId(id))throw new Error('Invalid task ID');
   const r=this.get(targetId),chosen=validateSelection(selection);
   if(r.provider!==chosen.provider)throw new Error('This conversation belongs to a different provider.');
@@ -221,13 +224,13 @@ export class TerminalManager {
   workflow.startedAt=this.now();workflow.continued=true;
   if(r.workflow){const prior=r.workflow;r.workflowHistory=[...(r.workflowHistory||[]),{job:prior.job,destination:prior.destination,startedAt:prior.startedAt||r.created,completed:true,status:r.workflowStatus,resultPath:r.resultPath}]}
   r.workflow=workflow;r.workflowCompleted=false;r.skipWorkflowCompletion=false;
-  delete r.resultPath;delete r.workflowStatus;r.error=null;
-  return this.send(targetId,workflow.prompt,{resumeStopped});
+  delete r.resultPath;delete r.workflowStatus;delete r.completedAt;delete r.summary;r.error=null;
+  return this.send(targetId,workflow.prompt,{resumeStopped,liveCallId});
  }
- startDirect(job,destination,appScope='web',{background=false}={}){
+ startDirect(job,destination,appScope='web',{background=false,liveCallId}={}){
   this.retention.assertNew(job.id);
   const file=path.join(this.root,destination),before=fs.existsSync(file)?fs.readFileSync(file,'utf8'):null;
-  const r={id:job.id,vault:this.root,provider:job.provider,model:'none',prompt:SKILLS[job.skill].label,title:SKILLS[job.skill].label,created:this.now(),lastActivityAt:this.now(),keep:false,state:'working',sessionId:null,pid:null,turns:[],error:null,execution:'script',appScope,...(background?{background:true}:{}),workflow:{job,destination,before}};
+  const r={id:job.id,vault:this.root,provider:job.provider,model:'none',prompt:SKILLS[job.skill].label,title:SKILLS[job.skill].label,created:this.now(),lastActivityAt:this.now(),keep:false,state:'working',sessionId:null,pid:null,turns:[],error:null,execution:'script',appScope,activeLiveCallId:liveCallId,...(background?{background:true}:{}),workflow:{job,destination,before}};
   fs.mkdirSync(path.join(this.folder(r.id),'events'),{recursive:true});this.records.set(r.id,r);
   const controller=new AbortController();
   const live={controller,proc:{kill:()=>controller.abort(),resize(){}},output:'',start:0,instance:crypto.randomUUID(),sizes:[{at:0,cols:110,rows:30}]};
@@ -245,29 +248,29 @@ export class TerminalManager {
   }).finally(()=>{if(this.live.get(r.id)===live){this.live.delete(r.id);this.touch(r);this.save(r)}});
   return r;
  }
- start({id=crypto.randomUUID(),selection,prompt,title,workflow,spoken=false,execution,openWhenDone=false}){
+ start({id=crypto.randomUUID(),selection,prompt,title,workflow,spoken=false,execution,openWhenDone=false,slashSkill=false,reveal=true,liveCallId}){
   if(execution!==undefined&&execution!=='native')throw new Error('Invalid terminal owner');
   if(!workId(id))throw new Error('Invalid task ID');
   const chosen=validateSelection(selection);prompt=cleanPrompt(prompt);
   if(!this.records.has(id)&&this.workflowRequest(id))throw new Error('Task ID already used');
   if(this.records.has(id)){const r=this.get(id);if(r.provider!==chosen.provider||r.prompt!==prompt||(r.execution==='native')!==(execution==='native'))throw new Error('Task ID already used');return r}
   this.retention.assertNew(id);
-  if(!findCli(chosen.provider)&&!this.spawn)throw new Error(`${chosen.provider} CLI is not installed`);
-  const r={id,vault:this.root,...chosen,prompt,title:String(title||prompt).replace(/\s+/g,' ').slice(0,70),created:this.now(),lastActivityAt:this.now(),keep:false,state:'starting',sessionId:null,pid:null,turns:[],error:null,workflow,...(execution?{execution}:{}),...(spoken?{spoken:true}:{}),...(openWhenDone?{openWhenDone:true}:{})};
+  if(!this.spawn&&!findCli(chosen.provider))throw new Error(`${chosen.provider} CLI is not installed`);
+  const r={id,vault:this.root,...chosen,prompt,title:String(title||prompt).replace(/\s+/g,' ').slice(0,70),created:this.now(),lastActivityAt:this.now(),keep:false,state:'starting',sessionId:null,pid:null,turns:[],error:null,workflow,...(execution?{execution}:{}),...(spoken?{spoken:true}:{}),...(slashSkill?{slashSkill:true}:{}),...(!reveal?{reveal:false}:{}),...(openWhenDone?{openWhenDone:true}:{})};
   fs.mkdirSync(path.join(this.folder(id),'events'),{recursive:true});this.records.set(id,r);this.save(r);
-  try{this.launch(r)}catch(e){r.state='error';r.error=e.message;r.recoveryAvailable=!r.sessionId;this.save(r);throw e}return r;
+  try{this.launch(r,{liveCallId})}catch(e){r.state='error';r.error=e.message;r.recoveryAvailable=!r.sessionId;this.save(r);throw e}return r;
  }
- launch(r,{resumePrompt,spoken=!!r.spoken}={}){
+ launch(r,{resumePrompt,spoken=!!r.spoken,liveCallId}={}){
   if(this.live.has(r.id))return r;
   delete r.idleStoppedAt;
   if(resumePrompt!==undefined)resumePrompt=cleanPrompt(resumePrompt);
   if(r.workflow&&!r.workflowCompleted&&[...this.records.values()].some(other=>other.id!==r.id&&other.workflow?.destination===r.workflow.destination&&!other.workflowCompleted&&this.live.has(other.id)))throw new Error('Another task is updating this note. Resume after it finishes.');
   r.skipWorkflowCompletion=!!r.sessionId&&resumePrompt===undefined;
-  this.beginRequest(r);
+  this.beginRequest(r,liveCallId);
   const events=this.artifactOutbox(r.id);
   const spec=terminalSpec(this.root,r,this.spawn?{command:r.provider,prefix:[]}:undefined,{resumePrompt,spoken,events});
   const spawn=this.spawn||require('node-pty').spawn;
-  const env={...process.env,TERM:'xterm-256color',COLORTERM:'truecolor',AOS_WORK_EVENTS:path.join(this.folder(r.id),'events'),AOS_WORK_SESSION:r.sessionId||'',AOS_WORK_PROMPT:spec.args[spec.args.length-1],AOS_ARTIFACT_NODE:process.execPath,AOS_ARTIFACT_HELPER:path.join(projectRoot,'runner','artifact-result.mjs')};
+  const env=withoutOpenAIKey({...process.env,TERM:'xterm-256color',COLORTERM:'truecolor',AOS_WORK_EVENTS:path.join(this.folder(r.id),'events'),AOS_WORK_SESSION:r.sessionId||'',AOS_WORK_PROMPT:spec.args[spec.args.length-1],AOS_ARTIFACT_NODE:process.execPath,AOS_ARTIFACT_HELPER:path.join(projectRoot,'runner','artifact-result.mjs')});
   // A parent Claude session must not make the new, independent CLI look nested.
   delete env.CLAUDECODE;
   const proc=spawn(spec.command,process.platform==='win32'&&!this.spawn?windowsArguments(spec.args):spec.args,{cwd:this.root,env,cols:110,rows:30,name:'xterm-256color',useConpty:true});
@@ -345,16 +348,16 @@ export class TerminalManager {
   if(live.exitObserved)throw new Error('This terminal is still closing. Wait for it to stop before sending a follow-up.');
   if(r.state!=='ready'||live.inputBoundary?.hasDraft)throw new Error(r.state==='needs input'&&r.error?r.error:'This task is working or needs terminal input. Wait for its answer, or type directly in its terminal.');
  }
- send(id,text,{resumeStopped=false,spoken=false,openWhenDone=false}={}){const r=this.get(id);text=cleanPrompt(text);
+ send(id,text,{resumeStopped=false,spoken=false,openWhenDone=false,liveCallId}={}){const r=this.get(id);text=cleanPrompt(text);
   this.assertFollowup(id,{resumeStopped});this.collect(id);this.assertFollowup(id,{resumeStopped});
   // A promised open stays with the conversation until a turn produces a file.
   if(openWhenDone&&!r.openWhenDone){r.openWhenDone=true;this.save(r)}
   if(!this.live.has(id)){
    // A fresh user request authorizes this resume. Submit it as the CLI's
    // startup argument so it cannot be pasted into a trust/approval screen.
-   try{return this.launch(r,{resumePrompt:text,spoken})}catch(error){r.state='error';r.error=error.message;r.recoveryAvailable=!r.sessionId;this.save(r);throw error}
+   try{return this.launch(r,{resumePrompt:text,spoken,liveCallId})}catch(error){r.state='error';r.error=error.message;r.recoveryAvailable=!r.sessionId;this.save(r);throw error}
   }
-  const live=this.live.get(id);this.beginRequest(r);r.state='working';live.detector?.reset();live.inputBoundary?.reset();this.touch(r,{conversation:true});this.save(r);
+  const live=this.live.get(id);this.beginRequest(r,liveCallId);r.state='working';live.detector?.reset();live.inputBoundary?.reset();this.touch(r,{conversation:true});this.save(r);
   const handoff=artifactHandoffInstructions({node:process.execPath,helper:path.join(projectRoot,'runner','artifact-result.mjs'),events:this.artifactOutbox(r.id),taskId:r.id,requestKey:r.artifactRequestKey,provider:r.provider});
   const submitted=`${text}${spoken?`\n\n${WORKER_SPOKEN_STYLE}`:''}\n\n${handoff}`;
   let watcher;try{if(r.provider==='codex')watcher=this.deliveryWatch(r.sessionId,submitted)}catch{}
@@ -482,11 +485,12 @@ export class TerminalManager {
     output.artifacts=promiseOpen(output.artifacts);
     if(output.artifacts.some(item=>item?.open===true))delete r.openWhenDone;
    }
-   if((text.trim()||output.artifacts.length||output.errors.length)&&!r.turns.some(t=>t.id===event.turnId)){r.turns.push({id:event.turnId,ts:event.ts||Date.now(),text:text.slice(0,100000),...(output.artifacts.length?{artifacts:output.artifacts}:{}),...(output.errors.length?{artifactErrors:output.errors}:{})});r.turns=r.turns.slice(-30)}
+   if((text.trim()||output.artifacts.length||output.errors.length)&&!r.turns.some(t=>t.id===event.turnId)){r.turns.push({id:event.turnId,ts:event.ts||Date.now(),text:text.slice(0,100000),...(r.activeLiveCallId?{liveCallId:r.activeLiveCallId}:{}),...(output.artifacts.length?{artifacts:output.artifacts}:{}),...(output.errors.length?{artifactErrors:output.errors}:{})});r.turns=r.turns.slice(-30)}
    r.state=this.live.get(id)?.inputBoundary?.hasDraft?'editing':'ready';r.error=null;
    this.live.get(id)?.detector?.reset();
    if(text.trim()&&r.workflow&&!r.workflowCompleted&&!r.skipWorkflowCompletion)saveWorkflowResult(this.root,r,text);
    r.skipWorkflowCompletion=false;
+   delete r.activeLiveCallId;
   }
   this.save(r);
  }

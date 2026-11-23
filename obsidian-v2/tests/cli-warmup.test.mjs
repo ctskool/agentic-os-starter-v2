@@ -28,7 +28,9 @@ test('one detached, hidden, unreferenced node helper with fixed source; the CLI 
  assert.equal(command,process.execPath);assert.equal(args[0],'-e');assert.equal(args[1],helperSource());assert.equal(args.length,3);
  assert.deepEqual(JSON.parse(args[2]),[cli.command]);
  assert.ok(!args[1].includes('Codex & Co')&&!args[1].includes('whoami'),'nothing about the CLI is interpolated into the source');
- assert.deepEqual(options,{detached:true,stdio:'ignore',windowsHide:true,shell:false});assert.equal(child.unrefed,true);
+ const {env,...launchOptions}=options;
+ assert.equal(Object.keys(env).some(name=>name.toUpperCase()==='OPENAI_API_KEY'),false);
+ assert.deepEqual(launchOptions,{detached:true,stdio:'ignore',windowsHide:true,shell:false});assert.equal(child.unrefed,true);
  assert.equal(child.listenerCount('error'),1);child.emit('error',new Error('ENOENT'));                 // swallowed
  assert.match(helperSource(),/windowsHide:true/);assert.match(helperSource(),/shell:false/);assert.match(helperSource(),new RegExp(String(WARM_HELPER_LIMIT_MS)));
 });

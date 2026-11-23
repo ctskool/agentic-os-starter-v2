@@ -12,7 +12,7 @@ import {writeJson} from '../runner/core.mjs';
 function fixture(t,provider){
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'app-voice-isolation-'));
  t.after(()=>{invalidateVoiceSnapshot(root);fs.rmSync(root,{recursive:true,force:true})});
- const selection={provider,model:provider==='codex'?'gpt-6-astra':'sonnet'},records=new Map(),calls=[];
+ const selection={provider,model:provider==='codex'?'astra':'sonnet'},records=new Map(),calls=[];
  const add=(scope,title=scope.toUpperCase()+'_TASK_CONTEXT')=>{const task={id:crypto.randomUUID(),...selection,title,state:'ready',execution:scope==='native'?'native':'cli',turns:[]};records.set(task.id,task);return task};
  const manager=scope=>({
   live:new Map(),list:()=>[...records.values()].filter(task=>taskInScope(task,scope)),

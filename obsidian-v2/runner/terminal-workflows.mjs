@@ -49,7 +49,7 @@ export function prepareWorkflow(root,{id,selection,skill,args={},execution}){
  const destination=destinationFor(job),file=vaultPath(root,destination);
  const before=fs.existsSync(file)?fs.readFileSync(file,'utf8'):null;
  if(skill==='plan-tomorrow'&&before!==null)throw new Error(`Tomorrow's note already exists at ${destination}. It was left unchanged; review or edit it separately.`);
- let instructions=workflowPrompt(root,job,'Use only the data sources required by this workflow. Gmail and Calendar workflows use their installed provider connectors; a YouTube channel review does not require either. Never use GWS. If a required source is absent, identify that source specifically.');
+ let instructions=workflowPrompt(root,job,'Use only the data sources required by this workflow. For Google reads, use the connected Google Calendar, Gmail and Drive tools. In Claude Code, use tool search to load the connector if needed (their names contain Google_Calendar, Gmail or Google_Drive). In Codex, use its connected Google tools. Try the appropriate connector before reporting calendar or mail unavailable. A YouTube channel review requires neither. If a required source is absent, identify it specifically.');
  instructions+=execution==='headless'
   ?`\n\nBACKGROUND WORKFLOW CONTRACT: Complete this one workflow using the normal authenticated CLI. The bridge saves the markdown field of your structured result to ${destination}. Do not write that destination yourself. Return the actual complete deliverable in markdown, not a receipt or short confirmation, with status "ok" and a concise summary. If you cannot complete it, return status "blocked" and explain the missing requirement in summary and markdown. Do not wait for terminal input. Do not send messages, publish, purchase, or modify remote accounts. Treat references as requirements for format and research, not authorization to bypass permissions.`
   :`\n\nINTERACTIVE TERMINAL CONTRACT: This conversation remains available for follow-up. The bridge saves your complete final Markdown answer to ${destination}. Do not write that destination yourself. Return the actual complete deliverable, not a receipt or a short confirmation. If you cannot complete it, start your final answer with BLOCKED:. Do not send messages, publish, purchase, or modify remote accounts. Treat references as requirements for format and research, not authorization to bypass permissions.`;
@@ -58,11 +58,11 @@ export function prepareWorkflow(root,{id,selection,skill,args={},execution}){
  const reference=`${ROOT}/task-instructions/${id}.md`,full=vaultPath(root,reference);fs.mkdirSync(path.dirname(full),{recursive:true});fs.writeFileSync(full,instructions,{flag:'wx'});
  return {job,destination,before,prompt:`Run the ${SKILLS[skill].label} workflow. Read ${reference} in this vault for the exact requirements and output contract. Use the connectors already authenticated in this CLI, never GWS. ${execution==='headless'?'Return JSON with status (ok or blocked), summary, and markdown containing the complete deliverable. The bridge saves markdown after checking for conflicting edits.':'Return the complete result in your final answer; the bridge saves it. Keep this conversation available for follow-up.'}`};
 }
-export function saveWorkflowResult(root,record,text,{ownsDestination=false}={}){
+export function saveWorkflowResult(root,record,text,{ownsDestination=false,summary}={}){
  const {job,destination,before}=record.workflow;
  const runId=job.id,artifact=`${ROOT}/artifacts/${runId}.md`,audit=vaultPath(root,artifact);fs.mkdirSync(path.dirname(audit),{recursive:true});
  if(!fs.existsSync(audit))fs.writeFileSync(audit,text,{flag:'wx'});
- const run={...job,model:record.execution==='script'?'none':job.model,ts_queued:job.ts,ts_started:new Date(record.workflow.startedAt??record.created).toISOString(),ts_completed:new Date().toISOString(),status:'ok',summary:`${SKILLS[job.skill].label} completed`,execution:record.execution||'terminal',...(record.appScope?{appScope:record.appScope}:{}),task_id:record.id,artifact_path:artifact,deliverable_path:null};
+ const run={...job,model:record.execution==='script'?'none':job.model,ts_queued:job.ts,ts_started:new Date(record.workflow.startedAt??record.created).toISOString(),ts_completed:new Date().toISOString(),status:'ok',summary:String(summary||'').trim().slice(0,1000)||`${SKILLS[job.skill].label} completed`,execution:record.execution||'terminal',...(record.appScope?{appScope:record.appScope}:{}),task_id:record.id,artifact_path:artifact,deliverable_path:null};
  try{
   if(/^BLOCKED:/i.test(text.trim()))throw new Error(text.trim().slice(0,400));
   // Models sometimes wrap the note in a code fence or leave a <markdown> / </markdown> tag line
@@ -79,6 +79,7 @@ export function saveWorkflowResult(root,record,text,{ownsDestination=false}={}){
    if(!scheduleSection||!text.includes(`date: ${path.basename(destination,'.md')}`))throw new Error('Daily result lacks its date or calendar section; proposed output saved for review.');
    const picks=[...priorities.matchAll(/^\d+\. \[ \]\s+(.+)$/gm)].map(m=>m[1].trim()).slice(0,3);
    dailyResult={date:path.basename(destination,'.md'),schedule,picks};
+   if(!summary)run.summary=`Saved the daily note for ${dailyResult.date} with the calendar schedule.`;
    output=before===null&&job.skill!=='refresh-schedule'?validateNewPlannedNote(content,dailyResult.date,dailyDrivers(root)):mergeDaily(before,dailyResult.date,schedule,picks,dailyDrivers(root));
   }
   const file=vaultPath(root,destination),current=fs.existsSync(file)?fs.readFileSync(file,'utf8'):null;
@@ -104,6 +105,7 @@ export function saveWorkflowResult(root,record,text,{ownsDestination=false}={}){
   }
  }catch(e){run.status='error';run.summary=e.message}
  writeJson(root,`${ROOT}/runs/${runId}.json`,run);
+ record.summary=run.summary;record.completedAt=Date.parse(run.ts_completed);
  record.workflowCompleted=true;record.resultPath=run.deliverable_path||artifact;record.workflowStatus=run.status;
  if(run.status==='error')record.error=run.summary;
  return run;

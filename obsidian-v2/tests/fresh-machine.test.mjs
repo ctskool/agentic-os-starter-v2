@@ -282,15 +282,15 @@ test('a fresh install picks the one coding tool that is installed, or the one ru
   const absent = {state: 'absent'};
   const pick = (p, env = {}) => chooseProvider({stored: absent, presence: p, env}).selection;
   assert.deepEqual(pick(presence('installed', 'missing')), {provider: 'claude', model: 'opus'});
-  assert.deepEqual(pick(presence('missing', 'installed')), {provider: 'codex', model: 'gpt-6-astra'});
+  assert.deepEqual(pick(presence('missing', 'installed')), {provider: 'codex', model: 'astra'});
   assert.deepEqual(pick(presence('installed', 'installed'), {CLAUDECODE: '1'}), {provider: 'claude', model: 'opus'});
-  assert.deepEqual(pick(presence('installed', 'installed')), {provider: 'codex', model: 'gpt-6-astra'});
-  assert.deepEqual(pick(presence('unknown', 'missing')), {provider: 'codex', model: 'gpt-6-astra'}, 'unknown is not installed');
+  assert.deepEqual(pick(presence('installed', 'installed')), {provider: 'codex', model: 'astra'});
+  assert.deepEqual(pick(presence('unknown', 'missing')), {provider: 'codex', model: 'astra'}, 'unknown is not installed');
   assert.match(chooseProvider({stored: absent, presence: presence('missing', 'missing')}).note, /Neither Claude Code nor Codex/);
 });
 
 test('an existing choice is never changed without --provider, only explained', () => {
-  const stored = {state: 'valid', selection: {provider: 'codex', model: 'gpt-6-astra'}};
+  const stored = {state: 'valid', selection: {provider: 'codex', model: 'astra'}};
   const kept = chooseProvider({stored, presence: presence('installed', 'missing')});
   assert.deepEqual([kept.write, kept.selection], [false, stored.selection]);
   assert.match(kept.note, /use Codex, which is not installed here; Claude Code is\. To switch: node aos\.mjs setup --provider claude/);

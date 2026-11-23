@@ -5,7 +5,7 @@ import {VoiceHub} from '../runner/voice-hub.mjs';
 const built=await build({entryPoints:['shared/voice-session.ts','shared/voice-surface.ts'],bundle:true,platform:'node',format:'esm',outdir:'unused',write:false});
 const modules=await Promise.all(built.outputFiles.map(file=>import('data:text/javascript;base64,'+Buffer.from(file.text).toString('base64'))));
 const {VoiceSession}=modules.find(m=>m.VoiceSession),{VoiceSurface}=modules.find(m=>m.VoiceSurface);
-const chosen={provider:'codex',model:'gpt-6-astra'},flush=async()=>{for(let i=0;i<6;i++)await new Promise(resolve=>setImmediate(resolve))};
+const chosen={provider:'codex',model:'astra'},flush=async()=>{for(let i=0;i<6;i++)await new Promise(resolve=>setImmediate(resolve))};
 function fixture(t){
  let now=0,id=0;const timers=new Map();
  const replace=(key,value)=>{const old=Object.getOwnPropertyDescriptor(globalThis,key);Object.defineProperty(globalThis,key,{configurable:true,writable:true,value});t.after(()=>old?Object.defineProperty(globalThis,key,old):delete globalThis[key])};

@@ -126,9 +126,10 @@ function publicFacts(raw){
  const explicit=section(raw,'Headlines').split('\n').filter(line=>/^\s*(?:[-*]|\d+[.)])\s+/.test(line)).map(line=>shorten(spoken(line.replace(/^\s*(?:[-*]|\d+[.)])\s+/,'')),240)).filter(Boolean);
  const headlines=[...new Set([...(headline?[headline]:[]),...explicit])].slice(0,5);
  const hn=parseHackerNews(raw),ranked=[...hn].sort((a,b)=>b.points-a.points).slice(0,5),discussed=[...hn].sort((a,b)=>b.comments-a.comments).slice(0,5);
- return {headline,topStoryDetail,headlines,hackerNews:[...new Set([...ranked,...discussed])],hackerNewsCount:hn.length};
+ const xHighlights=section(raw,'(?:(?:X|Twitter)(?: highlights| radar))').split('\n').filter(line=>/^\s*[-*]\s+/.test(line)).map(line=>shorten(spoken(line.replace(/^\s*[-*]\s+/,'')),160)).filter(Boolean).slice(0,3);
+ return {headline,topStoryDetail,headlines,hackerNews:[...new Set([...ranked,...discussed])],hackerNewsCount:hn.length,xHighlights};
 }
-export function getBriefCatalog(root,now=new Date(),{includeSummary=false,sections=[]}={}){
+export function getBriefCatalog(root,now=new Date(),{includeSummary=false,includeSocial=false,sections=[]}={}){
  if(!Array.isArray(sections)||sections.length>BRIEF_SECTION_IDS.length||sections.some(id=>!BRIEF_SECTION_IDS.includes(id)))throw new Error('Unsupported saved briefing section');
  const today=localDate(now);let cache=catalogs.get(root);
  if(!cache){cache={};catalogs.set(root,cache);if(catalogs.size>MAX_ROOTS)catalogs.delete(catalogs.keys().next().value);}
@@ -149,8 +150,8 @@ export function getBriefCatalog(root,now=new Date(),{includeSummary=false,sectio
    }catch(error){cache.key=null;if(!['ENOENT','ENOTDIR'].includes(error.code))throw error;return {...base,status:'unreadable',reply:"Today's morning brief is unavailable right now."};}
   }
  }
- const {summary,summaryLimited,parsedSections,...publicCatalog}=cache.value;
- return structuredClone({...publicCatalog,...(includeSummary&&summary!==undefined?{summary,summaryLimited,topStoryDetail:[]}: {}),...(sections.length?{sections:Object.fromEntries([...new Set(sections)].map(id=>[id,parsedSections?.[id]]))}:{})});
+ const {summary,summaryLimited,parsedSections,xHighlights,...publicCatalog}=cache.value;
+ return structuredClone({...publicCatalog,...(includeSocial?{xHighlights}:{}),...(includeSummary&&summary!==undefined?{summary,summaryLimited,topStoryDetail:[]}: {}),...(sections.length?{sections:Object.fromEntries([...new Set(sections)].map(id=>[id,parsedSections?.[id]]))}:{})});
 }
 export function readBriefSectionReply(root,request,now=new Date()){
  if(!validBriefSectionRequest(request))throw new Error('Unsupported saved briefing section request');

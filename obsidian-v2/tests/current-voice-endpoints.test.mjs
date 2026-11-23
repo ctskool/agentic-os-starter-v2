@@ -1,4 +1,6 @@
 import test from 'node:test';
+import {handleVoiceHttp} from '../runner/voice-request.mjs';
+import {voiceReceiptTransport} from '../runner/voice-receipts.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -24,8 +26,8 @@ const source=fs.readFileSync(new URL('../runner/bridge.mjs',import.meta.url),'ut
 const marker="server.on('request',async(req,res)=>{";
 const start=source.indexOf(marker),end=source.indexOf('\n});\n{\n // Mint',start);
 assert.ok(start>=0&&end>start,'Bridge request handler must remain available for isolated endpoint checks');
-const createHandler=new Function('deps',`const {preconnectJev=()=>false,closeClaudeSignIn=()=>{},classifierProcesses=()=>({running:0,detached:0,total:0}),root,fs,ROOT,origins,bridgeAuth,uuid,body,terminals,readCurrentState,reconcileCurrent,readConversationEpoch,setCurrent,taskInScope,readJson,vaultPath,writeJson,validateSelection,selection,routeVoice,active,speech,fetch,taskSummary,artifacts,artifactSpeech,artifactOutcomeSpeech,hub,listeners,artifactTarget,readArtifact}=deps;return async(req,res)=>{${source.slice(start+marker.length,end)}\n};`);
-const chosen={provider:'codex',model:'gpt-6-astra'};
+const createHandler=new Function('deps','voiceAdapter','voiceReceiptTransport',`const {liveBridge,localPlaybacks,liveTimer,preconnectJev=()=>false,closeClaudeSignIn=()=>{},classifierProcesses=()=>({running:0,detached:0,total:0}),root,fs,ROOT,origins,bridgeAuth,uuid,body,terminals,readCurrentState,reconcileCurrent,readConversationEpoch,setCurrent,taskInScope,readJson,vaultPath,writeJson,validateSelection,selection,routeVoice,active,speech,fetch,taskSummary,artifacts,artifactSpeech,artifactOutcomeSpeech,hub,listeners,artifactTarget,readArtifact}=deps;return async(req,res)=>{const handleVoiceHttp=(ctx,...args)=>voiceAdapter({...ctx,route:routeVoice,fetchAudio:fetch,write:writeJson},...args);${source.slice(start+marker.length,end)}\n};`);
+const chosen={provider:'codex',model:'astra'};
 const uuid=id=>typeof id==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id);
 
 function fixture(t,{beforeBody=async()=>{},beforeModel=async()=>{},scope='web',accepts=()=>true,speechTranscript=null,classifierProcesses,closeClaudeSignIn}={}){
@@ -34,7 +36,7 @@ function fixture(t,{beforeBody=async()=>{},beforeModel=async()=>{},scope='web',a
  const artifacts=new ArtifactHandoff(),hub=new VoiceHub(),listeners=new Map(),client=crypto.randomUUID();
  listeners.set(client,{});hub.presence({id:client,kind:scope,visible:true,mode:'idle',focus:true,claim:false});
  const artifactTarget=(id,provider,epoch,appScope)=>listeners.has(id)&&hub.live().some(item=>item.id===id&&item.kind===appScope)?{client:id,kind:appScope,provider,epoch}:null;
- const add=(provider='codex',appScope=scope)=>{const task={id:crypto.randomUUID(),provider,model:provider==='codex'?'gpt-6-astra':'sonnet',title:'Fixture '+provider,state:'ready',created:Date.now(),conversationActivityAt:Date.now(),turns:[],execution:appScope==='native'?'native':'cli'};records.set(task.id,task);return task};
+ const add=(provider='codex',appScope=scope)=>{const task={id:crypto.randomUUID(),provider,model:provider==='codex'?'astra':'sonnet',title:'Fixture '+provider,state:'ready',created:Date.now(),conversationActivityAt:Date.now(),turns:[],execution:appScope==='native'?'native':'cli'};records.set(task.id,task);return task};
  const terminals={records,live:new Map(),list:()=>[...records.values()],get(id){const task=records.get(id);if(!task)throw new Error('Task not found');return task},workflowRequest:id=>workflows.get(id)||null,
   start(options){if(records.has(options.id))return this.get(options.id);const task={...options.selection,id:options.id,title:options.title||options.prompt,prompt:options.prompt,state:'working',turns:[],execution:options.execution||'cli'};records.set(task.id,task);calls.push({kind:'start',id:task.id});return task},
   startWorkflow(options){const prior=workflows.get(options.id);if(prior){if(options.execution==='headless'&&!['headless','script'].includes(prior.record.execution))throw new Error('Task ID belongs to a different workflow or app.');return prior.record}const record=this.start({...options,prompt:'Fixture workflow'});record.appScope=options.appScope;if(['metrics-pull','github-trending'].includes(options.skill))record.execution='script';workflows.set(options.id,{record,workflow:{job:options}});return record},
@@ -43,8 +45,8 @@ function fixture(t,{beforeBody=async()=>{},beforeModel=async()=>{},scope='web',a
  };
  const handler=createHandler({...(classifierProcesses?{classifierProcesses}:{}),...(closeClaudeSignIn?{closeClaudeSignIn}:{}),root,fs,ROOT,origins:new Set(),bridgeAuth:{accepts},uuid,terminals,readCurrentState,reconcileCurrent,readConversationEpoch,setCurrent,taskInScope,readJson,vaultPath,writeJson,validateSelection,selection:()=>chosen,active,artifacts,artifactSpeech,artifactOutcomeSpeech,hub,listeners,artifactTarget,readArtifact,
   body:async req=>{bodyReads++;await beforeBody(req);return Buffer.isBuffer(req.payload)?req.payload:Buffer.from(JSON.stringify(req.payload))},speech:'http://fixture-speech',fetch:async(url,options)=>{assert.equal(url,'http://fixture-speech/stt');assert.equal(typeof speechTranscript,'string','Endpoint fixture must not contact speech or a model');assert.equal(options.method,'POST');speechCalls++;return {ok:true,json:async()=>({text:speechTranscript})}},taskSummary:task=>task,
-  routeVoice:(root,request,signal,_execute,manager,options)=>routeVoice(root,request,signal,async(_root,job)=>{models++;await beforeModel();assert.equal(job.model,job.provider==='codex'?'gpt-5.6-luna':'haiku');return{text:'{"tier":3,"reply":"Working on the request."}'}},manager,{...options,resolveCli:()=>({command:'unused-test-cli',prefix:[]})})
- });
+  routeVoice:(root,request,signal,_execute,manager,options)=>routeVoice(root,request,signal,async(_root,job)=>{models++;await beforeModel();assert.equal(job.model,job.provider==='codex'?'luna':'haiku');return{text:'{"tier":3,"reply":"Working on the request."}'}},manager,{...options,resolveCli:()=>({command:'unused-test-cli',prefix:[]})})
+ },handleVoiceHttp,voiceReceiptTransport);
  const request=async(url,payload={},headers={},method='POST')=>{
   const response=Object.assign(new EventEmitter(),{headersSent:false,writableEnded:false,status:null,value:null,setHeader(){},writeHead(status,headers){this.status=status;this.headersSent=true;this.headers=headers},end(text){this.writableEnded=true;this.value=Buffer.isBuffer(text)?text:text?JSON.parse(text):null}});
   await handler({url,method,payload,headers:{host:'127.0.0.1:3219','x-v2-app':scope,...headers}},response);return response;
@@ -162,7 +164,7 @@ test('a new conversation chosen while voice upload is pending cannot be undone b
 for(const scope of ['web','native'])for(const provider of ['codex','claude'])test(`${scope} ${provider} expiry during transcription selects fresh work without reviving the captured task`,async t=>{
  let entered,release;const started=new Promise(resolve=>entered=resolve),wait=new Promise(resolve=>release=resolve);
  const f=fixture(t,{scope,speechTranscript:'Create a visual explainer about solar power',beforeBody:async req=>{if(req.url==='/voice/audio'){entered();await wait}}});
- const task=f.add(provider),selected={provider,model:provider==='codex'?'gpt-6-astra':'sonnet'};
+ const task=f.add(provider),selected={provider,model:provider==='codex'?'astra':'sonnet'};
  setCurrent(f.root,f.terminals,{provider,id:task.id,scope});
  const pending=f.voice('ignored audio',{audio:true,targetId:task.id,selection:selected});await started;
  const expired=Date.now()-CONVERSATION_IDLE_MS-1;task.created=expired;task.conversationActivityAt=expired;
@@ -224,7 +226,7 @@ for(const scope of ['web','native'])for(const provider of ['codex','claude'])tes
  }});
  task=f.add(provider);task.created=now-CONVERSATION_IDLE_MS+10;task.conversationActivityAt=task.created;
  setCurrent(f.root,f.terminals,{provider,id:task.id,scope,now:task.created});
- const response=await f.voice('Why did you choose that approach?',{targetId:task.id,selection:{provider,model:provider==='codex'?'gpt-6-astra':'sonnet'}});
+ const response=await f.voice('Why did you choose that approach?',{targetId:task.id,selection:{provider,model:provider==='codex'?'astra':'sonnet'}});
  assert.equal(response.status,200,JSON.stringify(response.value));assert.equal(f.counts().models,1);
  assert.deepEqual(response.value.workIds,[task.id]);assert.notEqual(response.value.conversationSuperseded,true);
  assert.equal(f.calls.length,1);assert.equal(f.calls[0].kind,'send');assert.equal(readConversationEpoch(f.root,provider,scope),0);

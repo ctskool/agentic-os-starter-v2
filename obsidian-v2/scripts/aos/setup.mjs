@@ -13,6 +13,7 @@ import {setupSpeech, setAsideUnsupportedVoice, removeSetAsideVoice, voiceRebuild
 import {applyProviderChoice} from './provider.mjs';
 import {prepareTerminalPython} from './terminal-python.mjs';
 import {scaffoldVault} from './vault.mjs';
+import {speechLanguage} from '../../shared/speech-language.mjs';
 import {doctor} from './doctor.mjs';
 import {assessCheckout, prepareStockUpdate} from './upgrade-checkout.mjs';
 
@@ -106,7 +107,22 @@ export async function preflight(at, vault, {adopt = false, get = tryJson, find =
 // The recovery monitor and the own voice port must both be down before a voice environment is replaced.
 export const voiceServicesBusy = async ({find = listener} = {}) => find(PORTS.supervisor) !== null || find(PORTS.speech) !== null;
 
-export async function prepareVoice(at, {wantVoice, explicit = false, log = console.log, plan = speechPlan, installVoice = setupSpeech, installed = speechInstalled,
+// The pinned voice packages, as a fingerprint remembered next to the other install stamps. An installation
+// from before the fingerprint existed counts as changed once, which is what repairs it.
+const voiceRequirementsHash = at => { try { return crypto.createHash('sha256').update(fs.readFileSync(path.join(at.root, 'runner', 'speech-requirements.txt'))).digest('hex'); } catch { return null; } };
+export function voiceRequirementsChanged(at) {
+  const now = voiceRequirementsHash(at);
+  return now !== null && readState(at).stamps?.voiceRequirements !== now;
+}
+export function stampVoiceRequirements(at) {
+  const now = voiceRequirementsHash(at);
+  if (now === null) return;
+  const state = readState(at);
+  state.stamps = {...(state.stamps || {}), voiceRequirements: now};
+  writeState(at, state);
+}
+
+export async function prepareVoice(at, {wantVoice, explicit = false, language = 'en', log = console.log, plan = speechPlan, installVoice = setupSpeech, installed = speechInstalled,
   setAside = options => setAsideUnsupportedVoice(at, options), removeAside = removeSetAsideVoice, busy = voiceServicesBusy, inUse = dir => processesUsing(dir)} = {}) {
   if (!wantVoice) return 'off';
   // Before the installed-files shortcut, so an ordinary update repairs a 3.14 environment too.
@@ -119,15 +135,27 @@ export async function prepareVoice(at, {wantVoice, explicit = false, log = conso
   const rebuildPending = fs.existsSync(voiceRebuildMarker(at));
   if (rebuildPending) {
     log('-> Voice: finishing the rebuild of the voice environment');
-    await installVoice(at, {log});
+    await installVoice(at, {log, language});
+    stampVoiceRequirements(at);
     fs.rmSync(voiceRebuildMarker(at), {force: true});
     removeAside(at, {inUse});
     return 'installed';
   }
   if (installed(at)) {
-    if (!explicit) return 'present';
+    // The voice packages are pinned in one file. When an update changes it (a pin that repairs broken
+    // speech-to-text, say), an existing environment is brought up to date without being asked. Never
+    // while the voice service may be running from it, and never at the cost of the rest of setup.
+    const stale = voiceRequirementsChanged(at);
+    if (!explicit && !stale) return 'present';
+    if (!explicit) {
+      if (await busy()) { log('-> Voice: its packages changed in this update, but voice may still be running. Run `node aos.mjs stop`, then `node aos.mjs setup --voice yes` to bring it up to date.'); return 'present'; }
+      log('-> Voice: its packages changed in this update; bringing the voice environment up to date');
+      try { await installVoice(at, {log, language}); stampVoiceRequirements(at); return 'repaired'; }
+      catch (error) { log(`-> Voice: could not update its packages (${String(error.message || error).slice(0, 200)}). Voice keeps the packages it has; run \`node aos.mjs setup --voice yes\` to try again.`); return 'present'; }
+    }
     log('-> Voice: already installed; checking the files and fetching anything that is missing');
-    await installVoice(at, {log});
+    await installVoice(at, {log, language});
+    stampVoiceRequirements(at);
     return 'repaired';
   }
   if (voice.shared && voice.healthy) {
@@ -135,7 +163,8 @@ export async function prepareVoice(at, {wantVoice, explicit = false, log = conso
     return 'shared';
   }
   log('-> Voice: installing (about 1.3 GB the first time: 800 MB of voice models plus the Python packages that run them)');
-  await installVoice(at, {log});
+  await installVoice(at, {log, language});
+  stampVoiceRequirements(at);
   // Only now is an environment set aside earlier no longer needed (kept if anything still runs from it).
   removeAside(at, {inUse});
   return 'installed';
@@ -175,7 +204,8 @@ export async function setup({root = projectRoot, vault, voice, autostart, provid
   writeState(at, state);
 
   if (rebuild || hudChanged || bridgeChanged || !fs.existsSync(at.buildId)) buildHud(at, log); else log('-> Jarvis HUD: already built');
-  await prepareVoice(at, {wantVoice, explicit: voice === true, log});
+  // The vault's own setting ("speechLanguage" in system/v2/profile.json); English when it says nothing.
+  await prepareVoice(at, {wantVoice, explicit: voice === true, language: speechLanguage(vault).code, log});
 
   await start({root, log});
   if (autostart === true) await startAtLogin({root, log});

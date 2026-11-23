@@ -7,6 +7,7 @@ import {fileURLToPath} from 'node:url';
 import crypto from 'node:crypto';
 import net from 'node:net';
 import os from 'node:os';
+import {withoutOpenAIKey} from './child-env.mjs';
 
 const uuid=value=>typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 const absolute=value=>typeof value==='string'&&path.isAbsolute(value)&&!/[\x00-\x1f\x7f]/.test(value);
@@ -54,7 +55,7 @@ export async function runNativeLaunch(file,{spawnImpl=spawn,signals=process,env=
  let owner=null,ownerClosed=false,stopOwned=null;
  if(endpoint)owner=await connectNativeOwner(endpoint,{platform,timeoutMs:ownerTimeoutMs,onClose:()=>{ownerClosed=true;stopOwned?.()}});
  try{if(ownerClosed)throw new Error('The native terminal closed before launch.');claim(file,ticket)}catch(error){owner?.close();throw error}
- const childEnv={...env,...ticket.env,AOS_WORK_EVENTS:ticket.events,AOS_NATIVE_INSTANCE:ticket.instance,AOS_NATIVE_TASK_ID:ticket.taskId};delete childEnv.CLAUDECODE;
+ const childEnv=withoutOpenAIKey({...env,...ticket.env,AOS_WORK_EVENTS:ticket.events,AOS_NATIVE_INSTANCE:ticket.instance,AOS_NATIVE_TASK_ID:ticket.taskId});delete childEnv.CLAUDECODE;
  let child;
  try{child=spawnImpl(ticket.command,ticket.args,{cwd:ticket.cwd,env:childEnv,shell:false,stdio:'inherit',windowsHide:true})}
  catch(error){owner?.close();publish(ticket,'native-exit',{code:1,error:'The native CLI could not start.'});throw error}

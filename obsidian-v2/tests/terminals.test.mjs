@@ -11,10 +11,10 @@ function fixture(t){const directory=fs.mkdtempSync(path.join(os.tmpdir(),'aos-te
  const manager=new TerminalManager(directory,{directory:path.join(directory,'work'),spawn});
  t.after(()=>{manager.close();fs.rmSync(directory,{recursive:true,force:true})});return {manager,processes,directory,spawn};
 }
-const selection={provider:'codex',model:'gpt-6-astra'};
+const selection={provider:'codex',model:'astra'};
 
 for(const provider of ['codex','claude'])test(`${provider} voice style travels with one work request without changing saved requests or manual resumes`,t=>{
- const {manager,processes}=fixture(t),prompt='Create a visual explanation. Return exact JSON if requested.',chosen={provider,model:provider==='codex'?'gpt-6-astra':'sonnet'};
+ const {manager,processes}=fixture(t),prompt='Create a visual explanation. Return exact JSON if requested.',chosen={provider,model:provider==='codex'?'astra':'sonnet'};
  const task=manager.start({selection:chosen,prompt,spoken:true});
  assert.equal(processes.length,1);assert.ok(processes[0].args.at(-1).startsWith(`${prompt}\n\n${WORKER_SPOKEN_STYLE}\n\n${ARTIFACT_HANDOFF_INSTRUCTIONS}`));assert.ok(processes[0].args.at(-1).includes(task.artifactRequestKey));
  assert.equal(task.prompt,prompt);manager.start({id:task.id,selection:chosen,prompt,spoken:true});assert.equal(processes.length,1);

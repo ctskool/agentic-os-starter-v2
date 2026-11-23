@@ -14,9 +14,11 @@ const stubs={
  settings:`export const DEFAULT_SETTINGS={};export class ChaseSettingTab{}`,
  'lib/provider':`export async function assertTestVault(){}export async function readSelection(){return {provider:'codex',model:'fixture'}}export const useProvider=()=>({selection:{provider:'codex',model:'fixture'}})`,
  'lib/work':`export const workTarget=()=>null,chooseWork=()=>{},setWorkProvider=()=>{},openWork=()=>{},workRequest=()=>{},isLiveTerminal=()=>false;export const workFeed={getSnapshot:()=>({tasks:[]}),subscribe:()=>()=>{},refresh:async()=>({tasks:[]})},workConversations={getSelection:async chosen=>chosen,sync:()=>{}}`,
- 'lib/v2-voice':`export function configureVoiceTransport(){}export async function assertVoiceVault(){}export const v2VoiceTransport=()=>{throw new Error('No network allowed')}`,
+ 'lib/v2-voice':`export function configureVoiceTransport(){}export async function assertVoiceVault(){}export const v2VoiceTransport=()=>{throw new Error('No network allowed')},v2LiveFetch=v2VoiceTransport`,
  'lib/voice-actions':`export async function applyVoiceAction(){}export async function openVoiceArtifact(){}`,
  'lib/queue':`export function registerSkillReports(){}export async function readRun(){return null}`,
+ 'lib/work-notices':`export function subscribeWorkNotices(){return ()=>{}}`,
+ 'shared/task-activity':`export const localTaskSpeech=mode=>mode!=='live'`,
  'lib/native-terminal':`export const NATIVE_TERMINAL_VIEW='fixture-terminal',terminalConversation=()=>null;export class NativeTerminalTabs{}`,
  'lib/native-direct-host':`export class NativeDirectHost{}`,
  'lib/native-voice-heartbeat':`export function nativeVoiceHeartbeat(){}`,
@@ -25,7 +27,12 @@ const stubs={
  GalaxyCore:`export default function GalaxyCore(){}`,
  GraphCore:`export function GraphCore(){}`,
  'shared/work-presentation':`export const shortConversationTitle=value=>value`,
- 'shared/voice-session':`export const sessions=[];export class VoiceSession{constructor(){this.mode='idle';this.toggles=0;this.connected=false;this.destroyed=false;this.getLevel=()=>null;sessions.push(this)}connect(){this.connected=true}async toggle(){this.toggles++;this.mode='listening';this.onState?.(this.mode)}async destroy(){this.destroyed=true}cancelArtifact(){}cancel(){this.mode='idle'}}`,
+ // The vault's voice settings (spoken replies, voice, speed); the orb only subscribes here.
+ 'shared/voice-prefs':`export const VOICE_RATES=[1],VOICE_SAMPLE='',rateLabel=()=>'',voiceGroups=()=>[];const snapshot={prefs:{spokenReplies:true,voice:null,rate:1,voiceMode:'local'},voices:[],fallback:null,ready:true};export const createVoicePrefsStore=()=>({getSnapshot:()=>snapshot,subscribe(fn){fn(snapshot);return ()=>{}},refresh:async()=>({}),save:async()=>({})})`,
+ 'shared/voice-session':`export const sessions=[];export class VoiceSession{constructor(){this.mode='idle';this.muted=false;this.toggles=0;this.connected=false;this.destroyed=false;this.getLevel=()=>null;sessions.push(this)}connect(){this.connected=true}async toggle(){this.toggles++;this.mode='listening';this.onState?.(this.mode)}async destroy(){this.destroyed=true}cancelArtifact(){}cancel(){this.mode='idle'}}`,
+ // The orb mounts Live support even with Local selected, so stub its direct Live imports.
+ 'shared/live-session':`const idle={state:'idle',occupied:null,unavailable:null};export class LiveSession{getSnapshot=()=>idle;subscribe(fn){fn(idle);return ()=>{}}connect(){}configure(prefs){if(prefs.voiceMode!=='local')throw new Error('Expected Local mode')}pushContext(){}destroy(){}toggle(){throw new Error('Local voice must not start Live')}}`,
+ 'shared/live-controls':`export const liveLabel=()=>'',liveToggleLabel=()=>''`, LiveVoiceControls:`export function LiveCallBar(){return null}export function LiveVoiceSettings(){return null}`,
 };
 const result=await build({stdin:{contents:`export {default as TestedPlugin} from './src/main';export {sessions} from './shared/voice-session';export {flushPassive} from 'preact/hooks';`,resolveDir:process.cwd(),loader:'ts'},bundle:true,platform:'node',format:'esm',jsxFactory:'h',write:false,plugins:[{name:'orb-start-fixture',setup(builder){
  builder.onResolve({filter:/.*/},args=>{

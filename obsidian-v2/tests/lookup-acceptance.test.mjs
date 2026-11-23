@@ -47,7 +47,7 @@ function fixture(t){
   start(options){calls.push({kind:'start',...options});return {id:options.id}},
   send(id,prompt){calls.push({kind:'send',id,prompt})},
   startWorkflow(options){calls.push({kind:'workflow',...options});return {id:options.id}}};
- const selection=provider=>({provider,model:provider==='codex'?'gpt-6-astra':'sonnet'});
+ const selection=provider=>({provider,model:provider==='codex'?'astra':'sonnet'});
  const speak=(provider,transcript,execute=()=>assert.fail('This lookup must not call a model'),extra={})=>routeVoice(root,{id:crypto.randomUUID(),selection:selection(provider),transcript,terminalMode:true,...extra},undefined,execute,terminals,{resolveCli:()=>({command:'unused-fixture-cli',prefix:[]})});
  const classify=(provider,transcript,execute=()=>assert.fail('This lookup must not call a model'),extra={})=>classifyVoice(root,{id:crypto.randomUUID(),chosen:selection(provider),transcript,terminals,execute,...extra});
  t.after(()=>{invalidateVoiceSnapshot(root);fs.rmSync(root,{recursive:true,force:true})});
@@ -65,7 +65,7 @@ async function traceReads(root,fn){
 }
 function compactModel(provider,utterance,seen,output={tier:2,reply:compactReply}){
  return async(_root,job,prompt,options)=>{
-  seen.push({job,prompt,options});assert.equal(job.provider,provider);assert.equal(job.model,provider==='codex'?'gpt-5.6-luna':'haiku');
+  seen.push({job,prompt,options});assert.equal(job.provider,provider);assert.equal(job.model,provider==='codex'?'luna':'haiku');
   assert.equal(options.user,utterance,'the classifier must receive the whole request');
   assert.ok(options.system.length<=12000,`compact system was ${options.system.length} characters`);
   assert.ok(!/PRIVATE_VIDEO_SENTINEL|Record the local demo/.test(options.system),'A compact source lookup included unrelated dashboard data.');
@@ -77,6 +77,20 @@ function compactModel(provider,utterance,seen,output={tier:2,reply:compactReply}
   return {text:JSON.stringify(output)};
  };
 }
+
+test('Live scoped and general reply prompts name the offered action and omit offers after a complete answer',async t=>{
+ const f=fixture(t);
+ for(const question of ["Why does the leading story in today's morning brief matter?",'Why is anisotropic filtering used in a renderer?']){
+  let system;
+  const answer=await f.classify('claude',question,async(_root,_job,_prompt,options)=>{
+   system=options.system;return {text:JSON.stringify({tier:2,reply:compactReply})};
+  },{transport:'live',jev:{mode:'off'}});
+  // A gap ends in the pathway that fills it, by name (2026-11-22: email questions offer Inbox Brief for newer mail).
+  assert.equal(answer.reply,compactReply);assert.match(system,/offer the pathway that would get the rest, by name, as one question/);
+  assert.match(system,/Down the chain \(use these names when you offer one\): Inbox Brief \(reads Gmail now\)/);
+  assert.match(system,/If the answer is complete, don't offer anything/);assert.doesNotMatch(system,/want me to dig into it\?/i);
+ }
+});
 
 for(const provider of ['codex','claude']){
  test(`${provider}: held-out plural rankings preserve count, order and the requested source without broad reads`,async t=>{

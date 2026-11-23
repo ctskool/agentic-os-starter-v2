@@ -6,7 +6,7 @@ export interface DirectLaunch {
 }
 export interface DirectAction {
  id:string;taskId:string;instance:string;type:'launch'|'send'|'stop';
- provider?:'codex'|'claude';title?:string;launch?:DirectLaunch;text?:string;requestKey?:string;
+ provider?:'codex'|'claude';title?:string;reveal?:boolean;launch?:DirectLaunch;text?:string;requestKey?:string;
 }
 export const directId=(value:unknown):value is string=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const absolute=(value:unknown):value is string=>typeof value==='string'&&!/[\x00-\x1f\x7f]/.test(value)&&(/^[A-Za-z]:[\\/]/.test(value)||value.startsWith('/'));

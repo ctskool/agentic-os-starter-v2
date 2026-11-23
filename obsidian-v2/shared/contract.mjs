@@ -1,7 +1,18 @@
 export const MARKER = '.agentic-os-v2-test-vault';
 export const ROOT = 'system/v2';
-export const MODELS = {codex:['gpt-6-astra','gpt-5.6-luna'],claude:['opus','sonnet','haiku','claude-fable-5-1']};
-export const VOICE_MODELS = Object.freeze({codex:'gpt-5.6-luna',claude:'haiku'});
+// Model families, never pinned releases: Claude Code resolves these names to the newest release itself, and
+// runner/codex-models.mjs picks the newest listed Codex model of a family at call time.
+export const MODELS = {codex:['astra','luna'],claude:['opus','sonnet','haiku','fable']};
+/** @type {Readonly<Record<string,string>>} */
+export const MODEL_LABELS = Object.freeze({astra:'Astra',luna:'Luna',opus:'Opus',sonnet:'Sonnet',haiku:'Haiku',fable:'Fable'});
+export const VOICE_MODELS = Object.freeze({codex:'luna',claude:'haiku'});
+// Older saved selections and task records pinned a release (gpt-6-astra, claude-fable-5-1); read them as their family.
+export function modelFamily(provider,model){
+ if(typeof model!=='string')return model;
+ if(provider==='codex'){const hit=/^gpt-\d+(?:\.\d+)*-(astra|luna)$/.exec(model);if(hit)return hit[1]}
+ if(provider==='claude'&&/^claude-fable-\d/.test(model))return 'fable';
+ return model;
+}
 /** @type {Record<string,{label:string,instruction:string,arg?:string,direct?:boolean}>} */
 export const SKILLS = {
   "vault-summary": {
@@ -101,10 +112,11 @@ export const SKILLS = {
     "arg": "prompt"
   }
 };
-export const DEFAULT_SELECTION={provider:'codex',model:'gpt-6-astra'};
+export const DEFAULT_SELECTION={provider:'codex',model:'astra'};
 export function validateSelection(value){
- if(!value || !Object.hasOwn(MODELS,value.provider) || !MODELS[value.provider].includes(value.model)) throw new Error('Unsupported provider/model pair');
- return {provider:value.provider,model:value.model};
+ const model=value&&Object.hasOwn(MODELS,value.provider)?modelFamily(value.provider,value.model):null;
+ if(!model || !MODELS[value.provider].includes(model)) throw new Error('Unsupported provider/model pair');
+ return {provider:value.provider,model};
 }
 export function validateIntent(value){
  validateSelection(value);
