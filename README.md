@@ -1,23 +1,27 @@
 <div align="center">
 
-# Agentic OS V2
+<a href="#install"><img src="docs/assets/banner.png" alt="Agentic OS V2. Your AI command center, inside Obsidian." width="100%"></a>
 
-### Your AI command center, inside Obsidian
+<br>
 
-Plan your day, talk to your agents, and run your skills from one place. Everything they produce lands in your vault as plain Markdown.
+<p><b>Plan your day, talk to your agents, and run your skills from one place.</b><br>
+Everything they produce lands in your vault as plain Markdown.</p>
 
 <p>
-<img alt="Version" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fctskool%2Fagentic-os-starter-v2%2Fmain%2Fobsidian-v2%2Fmanifest.json&query=%24.version&label=version&color=6d5ae6&style=flat-square">
-<img alt="Runs on Claude Code and Codex" src="https://img.shields.io/badge/runs%20on-Claude%20Code%20%C2%B7%20Codex-1f2430?style=flat-square">
-<img alt="Windows and macOS beta" src="https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20beta-1f2430?style=flat-square">
-<a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-1f2430?style=flat-square"></a>
+<img alt="Version" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fctskool%2Fagentic-os-starter-v2%2Fmain%2Fobsidian-v2%2Fmanifest.json&query=%24.version&label=version&labelColor=14161d&color=e8744a&style=flat-square">
+<img alt="Runs on Claude Code and Codex" src="https://img.shields.io/badge/runs%20on-Claude%20Code%20%C2%B7%20Codex-2a2d38?labelColor=14161d&style=flat-square">
+<img alt="Windows and macOS beta" src="https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20beta-2a2d38?labelColor=14161d&style=flat-square">
+<a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-2a2d38?labelColor=14161d&style=flat-square"></a>
+<a href="https://github.com/ctskool/agentic-os-starter-v2/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/ctskool/agentic-os-starter-v2?labelColor=14161d&color=2a2d38&style=flat-square"></a>
 </p>
 
 **[Install](#install)** &nbsp;·&nbsp; **[What you get](#what-you-get)** &nbsp;·&nbsp; **[Talk to it](#talk-to-it)** &nbsp;·&nbsp; **[How it works](#how-it-works)** &nbsp;·&nbsp; **[Help](#help)**
 
-<a href="docs/assets/jarvis-hud.png"><img src="docs/assets/jarvis-hud.png" alt="Jarvis HUD with demo tasks, skill buttons and provider controls" width="100%"></a>
+<br>
 
-<sub>The Jarvis HUD. Actual dashboard components, shown with demo data.</sub>
+<a href="docs/assets/jarvis-hud.png"><img src="docs/assets/showcase.webp" alt="The Jarvis HUD in a browser and the Obsidian cockpit in a vault, side by side" width="100%"></a>
+
+<sub>Actual dashboard components, shown with demo data. Full size: <a href="docs/assets/jarvis-hud.png">Jarvis HUD</a> · <a href="docs/assets/obsidian-cockpit.png">Obsidian cockpit</a></sub>
 
 </div>
 
@@ -38,7 +42,8 @@ Your agent does the rest, and asks before each step that needs you:
 3. **Installs and proves it works.** A built-in doctor runs a real workflow and shows a pass or a fix for every check.
 4. **Makes it yours.** Tell it about you, pick up to ten dashboard buttons from the starter workflows or your own skills, and choose whether you want voice.
 
-Allow installation and network access when your agent asks.
+> [!NOTE]
+> Allow installation and network access when your agent asks.
 
 <details>
 <summary><b>Already use Agentic OS? Upgrade instead</b></summary>
@@ -49,7 +54,7 @@ Allow installation and network access when your agent asks.
 Use https://github.com/ctskool/agentic-os-starter-v2 to help upgrade the Agentic OS I already use. Find my installation and vault, explain what I can add, and preserve my customizations. Show me the plan before changing my setup.
 ```
 
-You do not need to know your installation's path. The agent finds it, recommends compatible improvements, and asks before interrupting your running system. Customized setups get an integration plan. [How upgrades work](docs/UPGRADING.md)
+You do not need to know your installation's path. The agent finds it, recommends compatible improvements, and asks before interrupting your running system. Customized setups get an integration plan. After the update it offers what is new, such as Live voice, once. [How upgrades work](docs/UPGRADING.md)
 
 </details>
 
@@ -68,35 +73,56 @@ You do not need to know your installation's path. The agent finds it, recommends
 
 </details>
 
+<br>
+
 ## What you get
+
+Two screens on one system. The **Obsidian cockpit** lives in your vault and the **Jarvis HUD** runs full screen in your browser. Both read the same vault, so a report you start in one shows up in the other.
 
 <table>
 <tr>
-<td width="55%">
-<a href="docs/assets/obsidian-cockpit.png"><img src="docs/assets/obsidian-cockpit.png" alt="Obsidian cockpit with demo priorities, schedule and workflows"></a>
+<td width="50%" valign="top">
+<b>Obsidian cockpit</b><br>
+Today's plan, your top three priorities, schedule, metrics, and one-click workflows, inside the vault you already use.
 </td>
-<td>
-
-**Two screens, one system**
-
-The **Obsidian cockpit** lives in your vault: today's plan, your top three priorities, schedule, metrics, and one-click workflows.
-
-The **Jarvis HUD** is a full-screen dashboard in your browser, with Claude Code and Codex terminals, provider switching, and usage meters.
-
-Both read the same vault, so a report you start in one shows up in the other.
-
+<td width="50%" valign="top">
+<b>Jarvis HUD</b><br>
+A full-screen dashboard with Claude Code and Codex terminals, provider switching, and usage meters.
+</td>
+</tr>
+<tr>
+<td valign="top">
+<b>Your skill buttons</b><br>
+Starter workflows such as Plan Today, Morning Intel, and Deep Research, plus your own skills. Change them any time with <b>Customize dashboard</b>. <a href="docs/DASHBOARD.md">Dashboard skills</a>
+</td>
+<td valign="top">
+<b>Reports you can edit</b><br>
+Results are saved in your vault as Markdown, so you can open, edit, and link them like any other note.
+</td>
+</tr>
+<tr>
+<td valign="top">
+<b>Claude Code and Codex</b><br>
+Switch between them with one click. Each keeps its own conversations.
+</td>
+<td valign="top">
+<b>Voice, local and live</b><br>
+Speak a request on either screen. Local voice runs on your computer. Live voice is an optional real-time call.
+</td>
+</tr>
+<tr>
+<td valign="top">
+<b>Jev</b><br>
+An optional router that helps send eligible voice requests to the right place.
+</td>
+<td valign="top">
+<b>Health checks and autostart</b><br>
+A doctor that diagnoses problems and names the fix, a monitor that restarts services, and optional startup at login.
 </td>
 </tr>
 </table>
 
-| Feature | What it does |
-|---|---|
-| **Your skill buttons** | Starter workflows such as Plan Today, Morning Intel, and Deep Research, plus your own skills. Change them any time with **Customize dashboard**. [Dashboard skills](docs/DASHBOARD.md) |
-| **Reports you can edit** | Results are saved in your vault as Markdown, so you can open, edit, and link them like any other note. |
-| **Claude Code and Codex** | Switch between them with one click. Each keeps its own conversations. |
-| **Voice** | Speak a request on either screen. Local voice runs on your computer. Live voice is an optional real-time call. |
-| **Jev** | An optional router that helps send eligible voice requests to the right place. |
-| **Health checks and autostart** | A doctor that diagnoses problems and names the fix, a monitor that restarts services, and optional startup at login. |
+<br>
 
 ## Talk to it
 
@@ -105,19 +131,23 @@ Both read the same vault, so a report you start in one shows up in the other.
 | **What it is** | Click the microphone or use the shortcut, speak, then pause. | A two-way call with an assistant that answers from your day and hands real work to your agents. |
 | **Runs on** | Your computer. Whisper hears you and Kokoro speaks the reply. | GPT-Live, with your own OpenAI API key. |
 | **Cost** | No API charge for speech. | Estimated at five cents a minute while active and two cents in standby. |
-| **Setup** | Chosen during installation. | Off until you opt in. [Set up Live voice](docs/LIVE-VOICE.md) |
+| **Setup** | Chosen during installation. | Off until you opt in. Tell your agent “set up Live voice”. [Live voice guide](docs/LIVE-VOICE.md) |
 
 On a Live call, each request it hands off shows a card on the HUD, and by default you have about 2.5 seconds to cancel before it starts. The [Live voice guide](docs/LIVE-VOICE.md) lists what a call sends to OpenAI and which parts you can turn off.
 
 The voice shortcut is **Ctrl–Alt–J** on Windows and **Control–Option–J** on Mac. On Mac, keep the Obsidian orb enabled or the HUD visible. [Mac voice setup and permissions](docs/MAC-VOICE.md)
 
+<br>
+
 ## How it works
 
-<a href="https://raw.githubusercontent.com/ctskool/agentic-os-starter-v2/main/docs/assets/how-it-works.png"><img src="docs/assets/how-it-works.png" alt="Agentic OS overview: Obsidian and the Jarvis HUD connect through the bridge, with local voice, Jev routing, and a shared vault" width="100%"></a>
+<a href="docs/assets/how-it-works.png"><img src="docs/assets/how-it-works.png" alt="Agentic OS overview: you talk or click in the Obsidian cockpit or the Jarvis HUD, the bridge on your computer sends each request to an instant answer, a quick answer or real work in Claude Code or Codex, and everything reads and writes one shared vault" width="100%"></a>
 
-<sub>Conceptual overview. Click the diagram to open it full size.</sub>
+<p align="center"><sub>Conceptual overview. Click the diagram to open it full size.</sub></p>
 
 You ask or click. The bridge coordinates the work, your chosen agent carries it out, and both dashboards read the results from your vault. The local services listen only on `127.0.0.1`.
+
+<br>
 
 ## Help
 
@@ -126,12 +156,18 @@ If something is not working, open the folder in your coding agent and say **“r
 | Guide | For |
 |---|---|
 | [Dashboard skills](docs/DASHBOARD.md) | Adding, removing, and reordering your buttons. |
-| [Live voice](docs/LIVE-VOICE.md) | Setting up calls, what is sent to OpenAI, and what it costs. |
+| [Live voice](docs/LIVE-VOICE.md) | Getting a key, setting up calls, what is sent to OpenAI, and what it costs. |
 | [Mac voice](docs/MAC-VOICE.md) | Microphone and shortcut permissions on macOS. |
 | [Upgrading](docs/UPGRADING.md) | Moving an existing or customized setup to this version. |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Fixes for common problems. |
 | [Commands and reference](docs/REFERENCE.md) | Commands and settings. |
 
-## License
+<br>
 
-[MIT](LICENSE). Copyright (c) 2026 Chase AI. Third-party components retain their own licenses; see [third-party notices](THIRD_PARTY_NOTICES.md).
+<div align="center">
+
+<a href="#install"><img src="docs/assets/mark.png" alt="" width="64"></a>
+
+<sub><a href="LICENSE">MIT license</a> · Copyright (c) 2026 Chase AI · Third-party components retain their own licenses; see <a href="THIRD_PARTY_NOTICES.md">third-party notices</a>.</sub>
+
+</div>
