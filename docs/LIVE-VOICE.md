@@ -4,10 +4,12 @@
 
 ## Before you start: an OpenAI API key
 
-Live needs a key from OpenAI's API platform. That is a separate account from ChatGPT, and a ChatGPT subscription does not include it.
+Live needs a key from OpenAI's API platform, which is a separate account from ChatGPT.
+
+**On ChatGPT Pro or Business, Live can be covered by credits you already get.** Those plans include monthly OpenAI API credits: Pro $100, $200 or $500 a month depending on the tier, Business $20 per Standard seat or $100 per Premium seat (up to $500 a month). You claim them once, in ChatGPT's billing settings or the API platform's, and they go to the API account linked there; use a key from that account. Unused credit lapses at the end of each month. ChatGPT Plus does not include them. OpenAI sets and can change these terms; [their help page](https://help.openai.com/en/articles/20001626-api-credits-benefit-for-eligible-chatgpt-subscriptions) has the current ones.
 
 1. Sign in at [platform.openai.com](https://platform.openai.com).
-2. Add credit under **Billing**. Calls are paid from that credit and stop working when it runs out.
+2. Under **Billing**, add credit, or on Pro or Business check that your included credits are there. Calls are paid from that credit and stop working when it runs out.
 3. Create a key on the [API keys page](https://platform.openai.com/api-keys) and copy it whole. It starts with `sk-`. Keep it out of chat: you paste it into a page on your own computer in the next step.
 
 ## Set up Live

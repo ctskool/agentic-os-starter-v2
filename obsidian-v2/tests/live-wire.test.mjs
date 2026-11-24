@@ -78,7 +78,7 @@ test('a known rejection is said in plain words with what to do, and still never 
  const reject = (status, code, message = 'detail ' + key) => createLiveTransport({fetchImpl: async () => new Response(JSON.stringify({error: {code, message}}), {status})}).create(key, {}, new AbortController().signal);
  const said = async (status, code) => { let text = ''; await assert.rejects(reject(status, code), error => { assert.ok(error instanceof LiveCreateRejected); text = error.message; return true; }); assert.doesNotMatch(text, /sk-/); assert.match(text, /^OpenAI rejected the Live session request/); return text; };
  assert.match(await said(401, 'invalid_api_key'), /did not accept the API key\. Run aos openai-key.*\(HTTP 401 invalid_api_key\)$/);
- assert.match(await said(429, 'insufficient_quota'), /has no credit\. Add credit under Billing.*ChatGPT subscription does not include API credit\. \(HTTP 429 insufficient_quota\)$/);
+ assert.match(await said(429, 'insufficient_quota'), /has no credit\. Add credit under Billing.*ChatGPT Pro or Business claim the API credits your plan includes, then try again\. \(HTTP 429 insufficient_quota\)$/);
  assert.match(await said(429, 'rate_limit_exceeded'), /limiting requests.*Wait a minute/);
  assert.match(await said(404, 'model_not_found'), /not allowed to use the Live model \(gpt-live-1\.1\)/);
  assert.match(await said(503, ''), /problem on its side.*\(HTTP 503\)$/);

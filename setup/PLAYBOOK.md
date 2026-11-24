@@ -201,7 +201,7 @@ Ask: *"Would you like to be able to talk to your assistant on a live call? It an
 
 Only with a clear yes:
 
-1. Ask whether they already have an OpenAI **API** key. If not, walk them through it: sign in at platform.openai.com (a separate account from ChatGPT; a ChatGPT subscription does not include it), add credit under Billing, then create a key on the API keys page. They keep the key to themselves.
+1. Ask whether they already have an OpenAI **API** key. If not, walk them through it: sign in at platform.openai.com (a separate account from ChatGPT), add credit under Billing, then create a key on the API keys page. On ChatGPT Pro or Business, tell them their plan includes monthly API credits that can pay for Live: they claim them once in ChatGPT's billing settings, and the key must come from the API account linked there. ChatGPT Plus does not include them. Details: `docs/LIVE-VOICE.md`. They keep the key to themselves.
 2. Run `node aos.mjs openai-key` and give them the local page it prints. They read the disclosure, paste the key and save their consent on that page. Never ask for the key in chat, and never read `openai.json`. The page checks the key with OpenAI before saving, and the command then prints the outcome in one line. Read that line and act on it:
    - *Saved. OpenAI accepted the key.* Continue.
    - *Saved, but OpenAI did not show this key the Live model.* Tell them the key's project may not have access to it yet, and that the first call will show whether it works.

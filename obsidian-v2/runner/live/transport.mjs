@@ -6,7 +6,7 @@ export const LIVE_MODEL='gpt-live-1.1';
 // What a member can do about OpenAI's answer, or null when the answer is not one of the known cases.
 export function liveRejection(status,code=''){
  if(status===401)return {kind:'refused',text:'OpenAI did not accept the API key. Run aos openai-key and enter a current key from platform.openai.com/api-keys'};
- if(code==='insufficient_quota'||code==='billing_not_active')return {kind:'no-credit',text:'the OpenAI API account for this key has no credit. Add credit under Billing at platform.openai.com, then try again. A ChatGPT subscription does not include API credit'};
+ if(code==='insufficient_quota'||code==='billing_not_active')return {kind:'no-credit',text:'the OpenAI API account for this key has no credit. Add credit under Billing at platform.openai.com, or on ChatGPT Pro or Business claim the API credits your plan includes, then try again'};
  if(status===429)return {kind:'busy',text:'OpenAI is limiting requests for this account right now. Wait a minute and try again'};
  if(status===403||status===404||code==='model_not_found')return {kind:'no-model',text:'this key is not allowed to use the Live model ('+LIVE_MODEL+'). Check the key\'s project and permissions at platform.openai.com'};
  if(status>=500)return {kind:'openai-down',text:'OpenAI had a problem on its side. Try again in a minute'};

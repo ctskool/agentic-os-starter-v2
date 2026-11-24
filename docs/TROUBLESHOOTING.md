@@ -22,7 +22,7 @@ Keep `jev.json`, `openai.json`, `bridge-auth.json`, and `speech-auth.json` priva
 | The key page says “OpenAI did not accept that key” | The key was mistyped, cut short or revoked. Nothing was saved. Copy it whole from [platform.openai.com/api-keys](https://platform.openai.com/api-keys), or create a new one there, and paste it again. |
 | The key page says “That is an OpenRouter key” | That key is for Jev. Live needs a key from OpenAI's API platform. See [Before you start](LIVE-VOICE.md#before-you-start-an-openai-api-key). |
 | A call says “OpenAI did not accept the API key” | The saved key stopped working. Run `node aos.mjs openai-key` and enter a current one. |
-| A call says the OpenAI API account “has no credit” | Add credit under **Billing** at platform.openai.com, then start the call again. A ChatGPT subscription does not include API credit. |
+| A call says the OpenAI API account “has no credit” | Add credit under **Billing** at platform.openai.com, then start the call again. On ChatGPT Pro or Business, check that the included API credits were claimed and that the key comes from the API account linked to your ChatGPT plan. |
 | A call says the key “is not allowed to use the Live model” | The key belongs to a project without access to `gpt-live-1.1`, or it is a restricted key without that permission. Create a key in a project that has access and save it with `node aos.mjs openai-key`. |
 | A call says OpenAI “is limiting requests” or “had a problem on its side” | Wait a minute and start the call again. Nothing is wrong with your setup. |
 | You want to know whether Live is set up correctly | Run `node aos.mjs doctor` and read the **Live voice (OpenAI key)** line. It checks the saved key with OpenAI. It cannot see your credit. |

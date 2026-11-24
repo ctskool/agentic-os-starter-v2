@@ -31,7 +31,7 @@ test('OpenAI setup requires consent and saves once without echoing the key',asyn
  assert.equal(ready(),false);
  const get=await fetch(address),page=await get.text();
  assert.equal(get.status,200);assert.match(page,/microphone audio.*vault snapshot.*About me.*task titles.*inbox counts.*report excerpts.*store: false/);
- assert.match(page,/Need a key\?.*platform\.openai\.com.*ChatGPT subscription does not include it.*Add credit under Billing.*api-keys/s);
+ assert.match(page,/Need a key\?.*platform\.openai\.com.*separate from ChatGPT.*Add credit under Billing.*ChatGPT Pro or Business.*api-keys/s);
  const submit=async(consent,origin=new URL(address).origin,value=key)=>fetch(address,{method:'POST',headers:{Origin:origin},body:new URLSearchParams({key:value,consent})});
  assert.equal((await submit('no')).status,400);
  assert.equal((await submit('yes','null')).status,403);
