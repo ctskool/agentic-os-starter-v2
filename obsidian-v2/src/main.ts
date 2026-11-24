@@ -97,7 +97,7 @@ export default class ChaseCommandCenter extends Plugin {
 
 		// the orb floats over the whole workspace, not inside the cockpit
 		// view — wait for layout so document.body is settled
-		this.app.workspace.onLayoutReady(() => {retireEmptyLaunchers(this.app,WORK_VIEW);this.remountOrb()});
+		this.app.workspace.onLayoutReady(() => {retireEmptyLaunchers(this.app,WORK_VIEW);this.remountOrb();void this.introduceCockpit().catch(()=>{})});
 	}
 
 	async onunload() {
@@ -182,6 +182,16 @@ export default class ChaseCommandCenter extends Plugin {
 		render(null, this.orbEl);
 		this.orbEl.remove();
 		this.orbEl = null;
+	}
+
+	// The first time the plugin runs in a vault, open the cockpit: a new member otherwise sees an empty
+	// tab and the orb, and has to find the ribbon icon. Once only, so closing the cockpit stays closed.
+	// A convenience: the caller swallows any failure, so it can never stop the plugin from starting.
+	async introduceCockpit() {
+		if (this.settings.cockpitIntroduced) return;
+		this.settings.cockpitIntroduced = true;
+		await this.saveSettings();
+		await this.activateView();
 	}
 
 	async activateView() {

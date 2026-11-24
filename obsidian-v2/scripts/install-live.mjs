@@ -18,7 +18,9 @@ if(fs.existsSync(authFile))fs.copyFileSync(authFile,path.join(target,'bridge-aut
 // Compatibility settings for explicitly reopening older bridge-owned tabs.
 // New native tasks launch directly via immutable tickets from /native/claim.
 fs.writeFileSync(path.join(target,'terminal-runtime.json'),JSON.stringify({version:1,nodeExecutable:process.execPath,attachmentScript:path.join(projectRoot,'runner/terminal-attach.mjs'),runtimeDir:path.join(projectRoot,'.runtime'),vault:root},null,2));
-if(!fs.existsSync(path.join(target,'data.json')))fs.writeFileSync(path.join(target,'data.json'),JSON.stringify({theme:'glass',orbEnabled:true,orbRight:220,orbBottom:48}));
+// A new vault's orb starts at the bottom-left over the sidebar (the plugin clamps 100000 to the left edge,
+// see ORB_START_LEFT); 220 from the right put it on the dashboard's button grid. An existing data.json is kept.
+if(!fs.existsSync(path.join(target,'data.json')))fs.writeFileSync(path.join(target,'data.json'),JSON.stringify({theme:'glass',orbEnabled:true,orbRight:100000,orbBottom:48}));
 // The Hot Reload community plugin reloads V2 automatically after each install
 // when this marker exists; the installer never touches Hot Reload itself.
 fs.writeFileSync(path.join(target,'.hotreload'),'');

@@ -6,7 +6,7 @@ import {build} from 'esbuild';
 // Run the actual plugin command and OrbFloat component. The hook fixture keeps
 // layout effects synchronous and passive effects deferred, as Preact does.
 const stubs={
- obsidian:`export class Notice{}export class WorkspaceLeaf{}export class Plugin{constructor(app){this.app=app;this.manifest={id:'fixture'};this.commands=[];this.cleanup=[]}registerView(){}addCommand(value){this.commands.push(value)}addRibbonIcon(){}addSettingTab(){}register(fn){this.cleanup.push(fn)}registerEvent(){}async loadData(){return {orbEnabled:false,orbRight:12,orbBottom:12,pauseMotion:true}}}`,
+ obsidian:`export class Notice{}export class WorkspaceLeaf{}export class Plugin{constructor(app){this.app=app;this.manifest={id:'fixture'};this.commands=[];this.cleanup=[]}registerView(){}addCommand(value){this.commands.push(value)}addRibbonIcon(){}addSettingTab(){}register(fn){this.cleanup.push(fn)}registerEvent(){}async loadData(){return {orbEnabled:false,orbRight:12,orbBottom:12,pauseMotion:true,...globalThis.__savedPluginData}}async saveData(value){globalThis.__savedPluginData=JSON.parse(JSON.stringify(value))}}`,
  preact:`import {flushLayout,cleanup} from 'preact/hooks';export const h=(type,props,...children)=>({type,props:{...props,children}});export function render(vnode){if(vnode){vnode.type(vnode.props);flushLayout()}else cleanup()}`,
  'preact/hooks':`let layout=[],passive=[],cleanups=[];const run=queue=>{for(const effect of queue.splice(0)){const dispose=effect();if(dispose)cleanups.push(dispose)}};export const useEffect=effect=>passive.push(effect),useLayoutEffect=effect=>layout.push(effect);export const useState=initial=>[typeof initial==='function'?initial():initial,()=>{}],useRef=current=>({current}),useMemo=fn=>fn();export const flushLayout=()=>run(layout),flushPassive=()=>run(passive);export function cleanup(){passive=[];layout=[];for(const dispose of cleanups.splice(0).reverse())dispose()}`,
  'work-view':`export const WORK_VIEW='fixture-work';export class WorkView{}`,
@@ -61,4 +61,23 @@ test('first native voice command mounts a disabled orb and starts recording befo
  flushPassive();assert.equal(session.toggles,1,'passive effects do not start a duplicate recording');
  command.callback();assert.equal(session.toggles,2);assert.equal(sessions.length,1);
  await plugin.onunload();window.dispatchEvent(new Event('aos-toggle-voice'));assert.equal(session.toggles,2);assert.equal(session.destroyed,true);assert.equal(timers.size,0);
+});
+
+test('the cockpit opens by itself the first time the plugin runs in a vault, and only then',async t=>{
+ const priorWindow=globalThis.window,priorDocument=globalThis.document;
+ globalThis.window=Object.assign(new EventTarget(),{setInterval:()=>0,clearInterval:()=>{}});
+ globalThis.document={documentElement:{clientWidth:1200,clientHeight:900},body:{createDiv:()=>({remove(){}})}};
+ delete globalThis.__savedPluginData;
+ const opened=[],revealed=[];let leaves=[];
+ const workspace={onLayoutReady:fn=>fn(),on:()=>({}),getLeavesOfType:()=>leaves,getLeaf:()=>{const leaf={setViewState:async state=>{opened.push(state.type);leaves=[leaf]}};return leaf},revealLeaf:leaf=>{revealed.push(leaf)}};
+ const start=async()=>{const plugin=new TestedPlugin({vault:{configDir:'.obsidian',adapter:{}},workspace});await plugin.onload();await new Promise(resolve=>setImmediate(resolve));return plugin};
+ t.after(()=>{delete globalThis.__savedPluginData;if(priorWindow===undefined)delete globalThis.window;else globalThis.window=priorWindow;if(priorDocument===undefined)delete globalThis.document;else globalThis.document=priorDocument});
+ const first=await start();
+ assert.deepEqual(opened,['fixture-cockpit'],'a new vault shows the cockpit instead of an empty tab');assert.equal(revealed.length,1);
+ assert.equal(globalThis.__savedPluginData.cockpitIntroduced,true,'the once-only mark is saved');
+ await first.onunload();for(const dispose of first.cleanup)dispose();
+ // The member closes the cockpit; Obsidian starts again: it stays closed.
+ leaves=[];const again=await start();
+ assert.deepEqual(opened,['fixture-cockpit']);assert.equal(revealed.length,1);
+ await again.onunload();for(const dispose of again.cleanup)dispose();
 });

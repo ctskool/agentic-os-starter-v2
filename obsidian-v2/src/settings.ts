@@ -1,8 +1,13 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import type ChaseCommandCenter from './main';
 export type CockpitTheme = 'terminal' | 'glass';
-export interface ChaseSettings { vaultSystemPath:string; claudeTokenBudget5h:number; metricsPullCadenceHours:number; dismissedRunIds:string[]; orbEnabled:boolean; orbBloom:boolean; orbRight:number; orbBottom:number; jarvisHudUrl:string; jarvisEventsUrl:string; theme:CockpitTheme; reduceBlur:boolean; pauseMotion:boolean }
-export const DEFAULT_SETTINGS:ChaseSettings={vaultSystemPath:'system/v2',claudeTokenBudget5h:2000000,metricsPullCadenceHours:6,dismissedRunIds:[],orbEnabled:true,orbBloom:false,orbRight:28,orbBottom:48,jarvisHudUrl:'',jarvisEventsUrl:'',theme:'terminal',reduceBlur:false,pauseMotion:false};
+export interface ChaseSettings { vaultSystemPath:string; claudeTokenBudget5h:number; metricsPullCadenceHours:number; dismissedRunIds:string[]; orbEnabled:boolean; orbBloom:boolean; orbRight:number; orbBottom:number; cockpitIntroduced:boolean; jarvisHudUrl:string; jarvisEventsUrl:string; theme:CockpitTheme; reduceBlur:boolean; pauseMotion:boolean }
+// A new vault starts the orb at the bottom-left, over the lower part of the file sidebar, where the
+// starter layout has nothing to click. At the old bottom-right default it sat on the dashboard's button
+// grid. OrbFloat clamps this to the window's left edge. A vault that already saved settings keeps its
+// position, so nobody's orb moves on an update.
+export const ORB_START_LEFT=100000;
+export const DEFAULT_SETTINGS:ChaseSettings={vaultSystemPath:'system/v2',claudeTokenBudget5h:2000000,metricsPullCadenceHours:6,dismissedRunIds:[],orbEnabled:true,orbBloom:false,orbRight:ORB_START_LEFT,orbBottom:48,cockpitIntroduced:false,jarvisHudUrl:'',jarvisEventsUrl:'',theme:'terminal',reduceBlur:false,pauseMotion:false};
 export class ChaseSettingTab extends PluginSettingTab {
  constructor(app:App,public plugin:ChaseCommandCenter){super(app,plugin)}
  display(){const el=this.containerEl;el.empty();
