@@ -8,6 +8,10 @@ import {CORRECTION_RE} from './turns.mjs';
 const retry='Say that again in a moment.';
 const busy='One second, still on the last one.';
 const expired='That action is no longer available. Say the request again.';
+// A request that cannot be delivered says why when the reason is one the caller can act on. "Say that again in a
+// moment" told a caller nothing when the real answer was "the task you started is still working" (2026-11-23).
+const busyTarget='That task is still working, so I can\'t add to it yet. Ask me again when it finishes, or say start a new task and what you want.';
+const spokenFailure=error=>/working or needs terminal input|unfinished workflow/i.test(String(error?.message||''))?busyTarget:retry;
 const readOffer=/\b(?:hear|read|tell you|go over|walk you through|what['’]s in it|the result|the summary)\b/i;
 const compoundReadAction=/\b(?:and then|(?:and|then) (?:run|start|create|draft|write|delete|send))\b/i;
 const pendingRead=/^(?:what (?:is|are|was|were|did|does|do|happened)|when (?:is|are|was|did|does|do)|how (?:many|much)|(?:check|read|show|summarize) (?:me )?(?:the |my )?(?:saved reading|report|result|summary|note|schedule|calendar|inbox))\b/i;
@@ -61,8 +65,8 @@ export class LiveDelegations {
    if(!this.unchanged(call,captured)){call.answers.speak(delegation,retry);return}
    call.routing=pending;
    return this.stage(call,pending,stage);
-  }).catch(()=>{
-   if(this.isCurrent(call)&&!pending.cancelled)call.answers.speak(delegation,retry);
+  }).catch(error=>{
+   if(this.isCurrent(call)&&!pending.cancelled)call.answers.speak(delegation,spokenFailure(error));
   }).finally(()=>{
    if(pending.busyAnchor!==undefined)call.turns.skip(pending.busyAnchor);
    if(call.routing===pending)call.routing=null;
@@ -175,7 +179,7 @@ export class LiveDelegations {
    if(call.staged!==stage)return;
    const remaining=until-this.now();
    if(remaining>0){stage.undo=this.schedule(finishUndo,remaining);return}
-   void this.confirm(call,stage.actionId,stage.mode,delegation).catch(()=>{if(this.isCurrent(call))call.answers.speak(delegation,retry)});
+   void this.confirm(call,stage.actionId,stage.mode,delegation).catch(error=>{if(this.isCurrent(call))call.answers.speak(delegation,spokenFailure(error))});
   };
   stage.undo=this.schedule(finishUndo,Math.max(0,until-this.now()));
   const receipt=stage.action.receipt;

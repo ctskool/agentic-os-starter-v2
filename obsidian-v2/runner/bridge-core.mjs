@@ -190,6 +190,16 @@ export async function routeVoice(root,{id,transcript,selection:chosen,terminalMo
   const task=selectedStopTarget();
   if(task&&running(task)){effect('stop',{taskId:task.id},`Stop “${existingTitle(task)}”`);stopped={taskId:task.id,title:transport==='live'&&liveCallId?existingTitle(task):task.title};workTarget=null;effects.push('supersede-stop')}
  }
+ // On a call, the task started a minute ago becomes the selected conversation. A named workflow asked for while
+ // it is still working is its own job: it starts by itself instead of being refused by a busy conversation.
+ // (2026-11-23: "run an inbox brief" was refused twice on one call while a one-pager was being written, and the
+ // caller heard only "Say that again in a moment.") Free-form requests are not moved: a busy conversation never
+ // gets a replacement made for it, on a call or off one.
+ let separatedFrom=null;
+ if(transport==='live'&&skill&&skill!=='voice-ask'&&terminalMode&&terminals&&workTarget&&!SKILLS[skill]?.direct){
+  let occupied;try{occupied=terminals.get(workTarget)}catch{}
+  if(occupied&&(running(occupied)||(occupied.workflow&&!occupied.workflowCompleted))){separatedFrom=existingTitle(occupied);workTarget=null;effects.push('busy-target-separate')}
+ }
  if(skill){
    if(terminalMode||slash){
    if(!terminals)throw new Error('Terminal service is unavailable');
@@ -236,6 +246,7 @@ export async function routeVoice(root,{id,transcript,selection:chosen,terminalMo
    const acknowledge=planning||transport==='live'?createWorkAcknowledgments():workAcceptedReply;
    action='task';reply=slash&&transport==='live'?'Starting /'+slash.name+'…':acknowledge({provider:chosen.provider,count:workIds.length,continuation:!!workTarget,skill,classifiedReply:classified.decision?.source==='jev'?'':classified.reply,request:executionAsk,engine:classified.engine});
    if(stopped)reply=`Stopped ${shortTitle(stopped.title)}. ${reply}`;
+   if(separatedFrom)reply=`Running ${SKILLS[skill].label} on its own while ${shortTitle(separatedFrom)} finishes.`;
   }else{
    if(newTask?.multiple&&classified.tasks?.length>1)throw new Error('Multiple terminal tasks require the work pane.');
    const args=skill==='voice-ask'?{prompt:originalAsk,...(context?{context:context.slice(-12000)}:{})}:classified.args||{};

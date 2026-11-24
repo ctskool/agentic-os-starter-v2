@@ -140,3 +140,32 @@ for(const provider of ['codex','claude']){
   assert.equal(f.calls.length,1);const replay=await f.speak(transcript,task.id,undefined,{id});assert.deepEqual(replay.workIds,[task.id]);assert.equal(f.calls.length,1);assert.equal(f.updates.length,0);
  });
 }
+
+// Chase's call, 2026-11-23: a one-pager was being written when he asked twice for an inbox brief. Both were
+// classified correctly and then refused, because the task the call had just started was the selected
+// conversation and it was busy. He heard "Say that again in a moment." each time.
+for(const provider of ['codex','claude']){
+ test(`${provider}: on a call, a named workflow asked for while the selected task works starts on its own`,async t=>{
+  const f=fixture(t,provider),live={transport:'live',liveCallId:crypto.randomUUID()};
+  for(const state of ['working','needs input','starting']){
+   const task=f.add({state}),before=f.calls.length;
+   const result=await f.speak('Run the weekly review',task.id,f.output(),live);
+   assert.equal(f.calls.length,before+1,state);
+   assert.equal(f.calls.at(-1).kind,'workflow',state);assert.equal(f.calls.at(-1).skill,'weekly-review');
+   assert.equal(result.action,'task');assert.notDeepEqual(result.workIds,[task.id],'the busy conversation is not the one doing it');
+   assert.equal(result.reply,'Running Weekly Review on its own while that task finishes.');
+   assert.equal(task.state,state,'the busy conversation is left exactly as it was');
+  }
+  // A conversation that is free still takes the workflow, on a call as off one.
+  const free=f.add({state:'ready'});
+  await f.speak('Run the weekly review',free.id,f.output(),live);
+  assert.equal(f.calls.at(-1).kind,'continue-workflow');assert.equal(f.calls.at(-1).id,free.id);
+ });
+ test(`${provider}: off a call, and for a free-form request on one, a busy conversation still gets no replacement`,async t=>{
+  const f=fixture(t,provider),live={transport:'live',liveCallId:crypto.randomUUID()};
+  const busy=f.add({state:'working'});
+  await assert.rejects(f.speak('Run the weekly review',busy.id,f.output()),/working or needs terminal input/);
+  await assert.rejects(f.speak('Research RubyGems',busy.id,f.output(),live),/working or needs terminal input/);
+  assert.equal(f.calls.length,0);
+ });
+}

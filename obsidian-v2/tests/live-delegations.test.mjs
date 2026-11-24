@@ -600,3 +600,18 @@ test('a hand-off reports what it is doing: handed off, then starting and started
  const id=read.turn('Any important email today');await read.say('Nothing urgent came in.',id);await read.idle();
  assert.deepEqual(phases(read),[{key:id,phase:'handoff',label:''},{key:id,phase:'answered',label:'the morning brief'}]);
 });
+
+test('a request refused because the selected task is busy says so; any other failure keeps the short retry',async t=>{
+ const refusal='This task is working or needs terminal input. Wait for its answer, or type directly in its terminal.';
+ let failure=refusal;
+ const f=await fixture(t,{route:async()=>{throw new Error(failure)}});await f.start();
+ let id=f.turn('Add a section about history to it');
+ const spoken=await f.say('still working',id);await f.idle();
+ assert.match(spoken.content,/^That task is still working, so I can't add to it yet\. Ask me again when it finishes, or say start a new task and what you want\.$/);
+ assert.equal(f.appends().some(event=>/Say that again/.test(event.content)),false);
+ failure='This conversation has an unfinished workflow. Continue it before starting another workflow in this terminal.';
+ id=f.turn('Run the weekly review in there');await f.say('still working',id);await f.idle();
+ failure='Something unexpected broke.';
+ id=f.turn('Open the dashboard');await f.say('Say that again in a moment.',id);await f.idle();
+ assert.equal(f.work.length,0);
+});
