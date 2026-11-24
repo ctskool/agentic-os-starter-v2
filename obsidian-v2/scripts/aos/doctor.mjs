@@ -16,11 +16,13 @@ import {checkLiveKey, LIVE_MODEL} from '../../runner/live/transport.mjs';
 import {terminalSupport, VERIFIED_TERMINAL_VERSIONS, JARVIS_URL} from '../../shared/terminal-support.mjs';
 import {recordedTerminalPython} from '../../runner/terminal-python-record.mjs';
 import {terminalPythonWorks} from './terminal-python.mjs';
+import {setupStatus} from './setup-stamp.mjs';
 import {SPEECH_LANGUAGES, SPEECH_LANGUAGE_CODES, speechLanguage, speechCheck} from '../../shared/speech-language.mjs';
 
 const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; } };
 const SUPERVISOR_LOG = 'obsidian-v2/.runtime/service-supervisor.jsonl';
 const SHOW_SOMEONE = `Show your coding agent this line together with the last 30 lines of ${SUPERVISOR_LOG}, or post both in the community.`;
+const SETUP_CHECK = 'Setup finished for these files';
 const VOICE_CHECKS = ['Voice service healthy', 'Text to speech', 'Speech to text hears it back'];
 const HOTKEY_CHECK = 'Global voice shortcut';
 const STILL_STARTING = new Set(['checking', 'starting', 'waiting_for_listener', 'backoff']);
@@ -139,6 +141,13 @@ export async function doctor({root = projectRoot, ci = false, full = false, phas
 
   const major = Number(process.versions.node.split('.')[0]);
   add(major >= 22 ? 'PASS' : 'FAIL', 'Node.js 22 or newer', process.versions.node, 'Install the current LTS from nodejs.org, open a new terminal, run setup again.');
+
+  // An older update command can replace the files and then run its old setup (see setup-stamp.mjs).
+  const finished = setupStatus(at);
+  if (finished === 'current') add('PASS', SETUP_CHECK);
+  else if (finished === 'unknown') add('SKIP', SETUP_CHECK, 'the setup code could not be read in this folder');
+  else add('FAIL', SETUP_CHECK, setup.vault ? 'the files were updated, but setup has not run to the end with them yet' : 'setup has not run here yet',
+    setup.vault ? 'Run `node aos.mjs setup` once to finish the update (it keeps your vault, notes and choices), then run the doctor again.' : 'Run `node aos.mjs setup --vault "<absolute path>"`.');
 
   // Asked first, printed in their usual place: the plugin line below needs the bridge's answer.
   let supervisor = await tryJson(`${local(ports.supervisor)}/status`);

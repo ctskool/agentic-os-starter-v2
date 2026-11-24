@@ -16,6 +16,7 @@ import {scaffoldVault} from './vault.mjs';
 import {speechLanguage} from '../../shared/speech-language.mjs';
 import {doctor} from './doctor.mjs';
 import {assessCheckout, prepareStockUpdate} from './upgrade-checkout.mjs';
+import {stampSetup} from './setup-stamp.mjs';
 
 const hashOf = file => fs.existsSync(file) ? crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex') : '';
 
@@ -216,6 +217,8 @@ export async function setup({root = projectRoot, vault, voice, autostart, provid
   if (pending.length) log(`  still starting: ${pending.join(', ')}`);
   // The bridge mints its access token on first start; the plugin needs a copy.
   install();
+  // Every step above finished with these files; the doctor checks for this mark.
+  stampSetup(at);
   log('');
   return doctor({root, ci, phase: 'install', log});
 }
