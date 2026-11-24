@@ -6,7 +6,7 @@ import path from 'node:path';
 import {parseLsofPids, parsePsLine, parseWindowsProcess, samePath, which, listener, openUrl} from '../scripts/aos/platform.mjs';
 import {layout, desiredServices, mergePrior, bridgeIsOurs, hudIsOurs, speechIsOurs, loginItemBlocks, stop, PORTS} from '../scripts/aos/services.mjs';
 import {launchAgentPlist, scheduledTaskScript, autostartOwner, taskOwner, plistArguments, launchctlArguments, AGENT_LABEL, TASK_NAME} from '../scripts/aos/autostart.mjs';
-import {preflight} from '../scripts/aos/setup.mjs';
+import {preflight, startCommand} from '../scripts/aos/setup.mjs';
 import {scaffoldVault, pluginEnabled} from '../scripts/aos/vault.mjs';
 import {saveJevKey, hasJevKey, collectJevKey, JEV_DEFAULTS} from '../scripts/aos/jev-key.mjs';
 import {parsePythonVersion, pythonSupported, findPython, pythonCandidates, voicePythonMissing} from '../scripts/aos/speech.mjs';
@@ -410,4 +410,25 @@ test('the Mac login item runs at normal priority, and only our own old one is re
   const order = ["const slowLoginItem = loginItemNeedsSpeedFix(at) && autostartOwner(at) === 'ours';", 'atomicWrite(at.config,', 'fs.rmSync(at.pause, {force: true});', 'if (slowLoginItem) replaceSlowLoginItem(', 'return launchMonitor(at, {log});'].map(piece => source.indexOf(piece));
   assert.ok(order.every(at => at > 0), 'every step is present');
   assert.deepEqual([...order].sort((a, b) => a - b), order, 'and they run in this order');
+});
+
+test('start waits until what the monitor runs is online, says so, and returns 1 when it is not up in time', async () => {
+  const lines = [], calls = [];
+  const monitor = async () => ({services: [{id: 'bridge'}, {id: 'jarvis'}, {id: 'speech'}, {id: 'preview'}]});
+  const up = await startCommand({log: line => lines.push(line), startImpl: async options => { calls.push(options); }, monitor,
+    waitFor: async (ids, options) => { calls.push({ids, options}); return []; }});
+  assert.equal(up, 0);
+  assert.deepEqual(calls[0], {resetRecovery: false, log: calls[0].log});
+  assert.deepEqual(calls[1].ids, ['bridge', 'jarvis', 'speech'], 'only the services the doctor checks are waited for');
+  assert.match(lines.join('\n'), /Waiting for bridge, jarvis, speech to come up \(voice models can take a minute\)\nEverything is up\./);
+  // Not up in time: the command says what is still starting and what to do, and fails.
+  const late = []; const slow = await startCommand({log: line => late.push(line), startImpl: async () => {}, monitor, timeoutMs: 180000, waitFor: async () => ['bridge']});
+  assert.equal(slow, 1); assert.match(late.join('\n'), /Still starting after 3 minutes: bridge\. Run `node aos\.mjs status`/);
+  // --no-wait returns as soon as the monitor is up, as before.
+  let waited = false;
+  assert.equal(await startCommand({wait: false, log: () => {}, startImpl: async () => {}, monitor, waitFor: async () => { waited = true; return []; }}), 0);
+  assert.equal(waited, false);
+  // --reset-recovery still reaches start().
+  let reset; await startCommand({resetRecovery: true, log: () => {}, startImpl: async options => { reset = options.resetRecovery; }, monitor, waitFor: async () => []});
+  assert.equal(reset, true);
 });

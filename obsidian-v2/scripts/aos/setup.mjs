@@ -177,6 +177,23 @@ export const watchedServices = monitor => {
   return ids.length ? ids : ['bridge', 'jarvis'];
 };
 
+// `node aos.mjs start`. start() returns once the recovery monitor answers, but the monitor brings the
+// bridge up about ten seconds later and the HUD and voice after that. A doctor run straight after an
+// unwaited start (what the playbooks do) reported "Bridge answering: FAIL" on a system that was fine.
+// So the command waits for exactly what the monitor runs, like setup does. --no-wait keeps the old
+// behaviour. Returns the exit code. startImpl, monitor and waitFor exist for the tests.
+export async function startCommand({resetRecovery = false, wait = true, log = console.log, timeoutMs = 180000,
+  startImpl = start, monitor = () => tryJson(`http://127.0.0.1:${PORTS.supervisor}/status`), waitFor = waitForServices} = {}) {
+  await startImpl({resetRecovery, log});
+  if (!wait) return 0;
+  const wanted = watchedServices(await monitor());
+  log(`-> Waiting for ${wanted.join(', ')} to come up${wanted.includes('speech') ? ' (voice models can take a minute)' : ''}`);
+  const pending = await waitFor(wanted, {timeoutMs});
+  if (!pending.length) { log('Everything is up.'); return 0; }
+  log(`Still starting after ${Math.round(timeoutMs / 60000)} minutes: ${pending.join(', ')}. Run \`node aos.mjs status\` in a minute; if it is still not online, run \`node aos.mjs doctor\` and follow its fix lines.`);
+  return 1;
+}
+
 export async function setup({root = projectRoot, vault, voice, autostart, provider, rebuild = false, ci = false, adopt = false, log = console.log} = {}) {
   const at = layout(root), state = readState(at);
   if (Number(process.versions.node.split('.')[0]) < 22) throw new Error(`Node.js 22 or newer is required (this is ${process.versions.node}). Install the LTS from nodejs.org, open a new terminal and run setup again.`);
