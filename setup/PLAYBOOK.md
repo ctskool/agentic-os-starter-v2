@@ -149,23 +149,27 @@ Draft an **About me** section from what the member shares. Show it and get their
 
 ### Choose their dashboard buttons
 
-Ask: *"Would you like me to wire your own skills into the button section of both dashboards? Tell me what you want those buttons to do, or we can keep the starter buttons for now."* Keeping the starter buttons is a complete answer: leave their selection unchanged and continue.
+This is a menu, not an open question. The member picks from a list.
 
-If they want to personalize, ask these one at a time:
+1. Ask one thing first: *"What do you mainly use AI for: running your day, client work, research, content, or something else?"* Their answer decides what you suggest.
+2. Run `node aos.mjs dashboard list`. Every entry in `catalog` is a button they can have. The built-in ones (`"kind": "builtin"`) work with nothing installed: their instructions ship inside the app. Each has a `description` and a `needs` list.
+3. With their agreement, also run `node aos.mjs dashboard discover --provider claude` (or `codex`) to find skills already on their computer. Do not claim to know which ones they use.
+4. Show them **one list**, grouped by job, each line with its name, what it produces and what it needs:
 
-1. *"What do you mainly use AI for — running your day, client work, research, content, or something else?"*
-2. *"Which skills do you already use regularly, and is there a new workflow you would like a button for?"* Do not claim to know their usage history. With their agreement, use `node aos.mjs dashboard discover --provider claude` or `--provider codex` to find installed skills for the tool they use.
-3. Suggest a short starting list, with one plain-language reason for each recommendation, and ask what they would like to keep or change. Offer up to ten buttons; they do not need to fill all ten.
+   ```text
+   Run your day
+     [x] Plan Today        today's note: top three, schedule, carry-overs        needs Google Calendar
+     [ ] Weekly Review     a review of your last seven daily notes               needs a few days of notes
+   Research
+     [x] Deep Research     a cited synthesis on any topic                        needs nothing
+   Your own skills (found on this computer)
+     [ ] <their skill>     <its description>
+   ```
 
-First read the available bundled and registered choices with `node aos.mjs dashboard list`. Recommend only actual entries or installed skills you have verified. Useful examples:
+   Tick three to five that fit what they told you, and say why in a few words. Put the ones that need nothing first. If a suggestion needs an account they have not connected, say so on its line. Do not tick a workflow whose need they cannot meet today (for example Lead Research without a leads database).
+5. Ask: *"Which of these do you want as buttons? You can have up to ten, in any order, and change them later."* Keeping the starter buttons is a complete answer: leave their selection unchanged and continue.
 
-| Their work | Possible bundled buttons |
-|---|---|
-| Daily organization | Plan Today, Inbox Brief, Weekly Review, Summarize Vault |
-| Client work and research | Lead Research, Deep Research, Weekly Review |
-| Content creation | Content Cascade, Brainstorm Angles, Build Outline, YT Pipeline |
-
-These are suggestions, not fixed presets. Explain any required connection: for example, calendar and email workflows need their connected accounts. A skill file being present does not prove its tools or accounts are available. Read the selected skill's instructions before recommending it, explain missing requirements, and do not install new skills or connect accounts without the member choosing that step.
+A skill file being present does not prove its tools or accounts are available. Read an installed skill's instructions before recommending it, explain missing requirements, and do not install new skills or connect accounts without the member choosing that step.
 
 If they want a new skill that does not exist yet, help define its job, required inputs and expected result. After they choose to create it, use the coding tool's normal skill-creation workflow and an appropriate user or vault skill folder. Check the resulting SKILL.md, its provider compatibility and its dependencies before wiring the button. Do not modify this application's source or promise an unavailable integration works. If a skill needs more setup, say what remains and leave that button unwired until the member is ready. Never run a publishing, messaging, purchasing or other external action merely to test a new button.
 
@@ -176,6 +180,17 @@ Once they approve the selection, run `node aos.mjs dashboard select --skills "<c
 Read `node aos.mjs dashboard list` again to confirm the saved order. Both the Obsidian cockpit and the HUD pick it up within a few seconds. Point out **Customize dashboard** in either app: they can add, remove or reorder buttons, find installed skills, and restore defaults later. Bundled workflows produce reports in the background; personal skills open an ordinary conversation in their selected coding tool, where questions and approvals remain visible. Never run an installed skill merely to test registration: ask for the actual task first.
 
 Full commands and limits: `docs/DASHBOARD.md`. Dashboard choices live in `system/v2/dashboard.json` inside their vault and survive updates; do not change application source code to customize them.
+
+### Offer the skill pack
+
+The starter also ships a small pack of skills the member can own. Unlike the built-in buttons, these are copied into their coding tool's own skills folder, where they can read, edit and use them in any conversation.
+
+1. Run `node aos.mjs skills list --provider claude` (or `codex`, the tool they use). It prints each skill's `description`, what it `needs`, and whether it is already `installed`.
+2. Show the list the same way as the buttons, one line each, and ask: *"Want any of these installed as your own skills?"* A no is a complete answer.
+3. Install only what they chose: `node aos.mjs skills install --skills "<id>,<id>" --provider claude`. A skill that leans on another brings it along and says so. A status of `kept-yours` means a different copy was already there and was left alone.
+4. Ask whether any of them should also be a dashboard button. For each yes, use the `path` the install printed with `dashboard add`, then `dashboard select`, as above.
+
+Installing never runs a skill. A copy the member edits is theirs: a later install or update does not overwrite it.
 
 ### Live voice (optional)
 

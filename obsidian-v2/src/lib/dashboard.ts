@@ -1,7 +1,7 @@
 import type { App } from 'obsidian';
 import { useEffect, useState } from 'preact/hooks';
 import { SKILLS } from '../../shared/contract.mjs';
-import { DEFAULT_COCKPIT_SKILLS, MAX_DASHBOARD_SKILLS } from '../../shared/dashboard.mjs';
+import { DEFAULT_COCKPIT_SKILLS, MAX_DASHBOARD_SKILLS, builtinDescription } from '../../shared/dashboard.mjs';
 import { createPollStore } from '../../shared/poll-store.mjs';
 import { assertTestVault, readSelection, type Health, type Provider } from './provider';
 import { assertVoiceVault, v2VoiceTransport } from './v2-voice';
@@ -40,7 +40,7 @@ export interface DiscoveredSkill {
 const defaults = (): DashboardSnapshot => ({
  revision: '', configured: false, selected: null, ready: false, error: '',
  catalog: Object.entries(SKILLS).filter(([id]) => id !== 'voice-ask').map(([id, skill]) => ({
-  id, label: skill.label, description: skill.instruction, kind: 'builtin',
+  id, label: skill.label, description: builtinDescription(skill), kind: 'builtin',
   arg: skill.arg, direct: skill.direct, providers: ['claude', 'codex'], available: true,
  })),
 });

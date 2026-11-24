@@ -4,7 +4,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import {load as parseYaml, JSON_SCHEMA} from 'js-yaml';
 import {SKILLS, validateSelection} from '../shared/contract.mjs';
-import {isInstalledSkill, validateDashboardSelection} from '../shared/dashboard.mjs';
+import {isInstalledSkill, validateDashboardSelection, builtinDescription} from '../shared/dashboard.mjs';
 import {findCli} from './cli-runtime.mjs';
 import {atomicRename} from './core.mjs';
 
@@ -83,7 +83,7 @@ function readState(root) {
 }
 const installedProvidersFor = options => ['claude','codex'].filter(provider => cliAvailable(provider,options));
 function catalogFor(config, options, installedProviders = installedProvidersFor(options)) {
-  const builtins = builtinIds.map(id => ({id,label:SKILLS[id].label,description:SKILLS[id].instruction,kind:'builtin',...(SKILLS[id].arg ? {arg:SKILLS[id].arg} : {}),...(SKILLS[id].direct ? {direct:true} : {}),providers:['claude','codex'],available:!!SKILLS[id].direct || installedProviders.length > 0,...(!SKILLS[id].direct && !installedProviders.length ? {reason:'Install and sign in to Claude Code or Codex to run this workflow.'} : {})}));
+  const builtins = builtinIds.map(id => ({id,label:SKILLS[id].label,description:builtinDescription(SKILLS[id]),needs:[...(SKILLS[id].needs||[])],...(SKILLS[id].better?.length ? {better:[...SKILLS[id].better]} : {}),kind:'builtin',...(SKILLS[id].arg ? {arg:SKILLS[id].arg} : {}),...(SKILLS[id].direct ? {direct:true} : {}),providers:['claude','codex'],available:!!SKILLS[id].direct || installedProviders.length > 0,...(!SKILLS[id].direct && !installedProviders.length ? {reason:'Install and sign in to Claude Code or Codex to run this workflow.'} : {})}));
   const installed = config.skills.map(entry => {
     let reason;
     try {

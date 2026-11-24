@@ -1,0 +1,98 @@
+{
+ "version": 1,
+ "skills": [
+  {
+   "id": "close-day",
+   "label": "Close Day",
+   "providers": [
+    "claude",
+    "codex"
+   ],
+   "since": "0.4.5",
+   "description": "End-of-day check-in. Logs your effort, focus blocks and what you shipped into today's daily note, with a short reflection.",
+   "needs": [
+    "Python 3",
+    "Today's daily note (press Plan Today first)"
+   ],
+   "files": [
+    "SKILL.md",
+    "scripts/close_day.py"
+   ]
+  },
+  {
+   "id": "yt-search",
+   "label": "YouTube Search",
+   "providers": [
+    "claude",
+    "codex"
+   ],
+   "since": "0.4.5",
+   "description": "Searches YouTube and returns videos with views, channel size, and how far each one outperformed its channel.",
+   "needs": [
+    "Python 3",
+    "A YouTube Data API key (YOUTUBE_API_KEY in ~/.claude/.env)"
+   ],
+   "files": [
+    "SKILL.md",
+    "scripts/search.py"
+   ]
+  },
+  {
+   "id": "claudex-route",
+   "label": "Claudex Route",
+   "providers": [
+    "claude",
+    "codex"
+   ],
+   "since": "0.4.5",
+   "description": "Recommends which model should take a task, and can hand one scoped piece of work to it.",
+   "needs": [
+    "Claude Code or Codex (both, for a second opinion from the other one)"
+   ],
+   "files": [
+    "SKILL.md"
+   ]
+  },
+  {
+   "id": "claudex-loop",
+   "label": "Claudex Loop",
+   "providers": [
+    "claude"
+   ],
+   "since": "0.4.5",
+   "with": [
+    "codex-build"
+   ],
+   "description": "Hardens a plan before you build: scouts the project, questions the decisions that matter, then has Codex review the plan until it holds.",
+   "needs": [
+    "Claude Code and Codex, both signed in"
+   ],
+   "files": [
+    "SKILL.md",
+    "ADR-FORMAT.md",
+    "CODEX-CAPABILITIES.md",
+    "CONTEXT-FORMAT.md",
+    "TANDEM-DESIGN.md",
+    "probes.sh"
+   ]
+  },
+  {
+   "id": "codex-build",
+   "label": "Codex Build",
+   "providers": [
+    "claude",
+    "codex"
+   ],
+   "since": "0.4.5",
+   "description": "Hands a written plan to Codex to implement, then reviews the full diff and runs the checks.",
+   "needs": [
+    "Codex installed and signed in"
+   ],
+   "files": [
+    "SKILL.md",
+    "TANDEM-MODE.md",
+    "asset-lab-template.html"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,92 @@
+<!doctype html>
+<!-- ASSET QA LAB — fixed audited template, ships with the skill. Codex NEVER generates this file.
+     Claude populates window.LAB_DATA below from the locked contract + validated results, then opens
+     in the Browser pane. Script-free beyond the inline renderer; no network requests; images load
+     from relative staging paths or data: URIs only. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Asset QA Lab</title>
+<style>
+  :root { --bg:#14120f; --panel:#1e1b17; --line:#3a352e; --text:#e8e2d8; --dim:#9a917f; --accent:#d97a4a; --ok:#7aa85c; --bad:#c65f4e; }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font: 13px/1.5 ui-monospace, Consolas, monospace; margin: 0; padding: 24px; }
+  h1 { font-size: 16px; margin: 0 0 4px; } h1 em { color: var(--accent); font-style: normal; }
+  .meta { color: var(--dim); margin-bottom: 20px; }
+  .asset { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .asset h2 { font-size: 13px; margin: 0 0 10px; display: flex; gap: 10px; align-items: baseline; }
+  .asset h2 .spec { color: var(--dim); font-weight: normal; }
+  .row { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+  .cell { text-align: center; } .cell .cap { color: var(--dim); margin-top: 6px; font-size: 11px; }
+  .stage { position: relative; display: inline-block; background:
+    repeating-conic-gradient(#2a261f 0% 25%, #201c17 0% 50%) 0 0 / 16px 16px; /* alpha checkerboard */
+    border: 1px solid var(--line); }
+  .stage img { display: block; image-rendering: pixelated; }
+  .dims { position: absolute; inset: 0; outline: 1px dashed var(--accent); pointer-events: none; } /* contract dims box */
+  .anchor { position: absolute; width: 11px; height: 11px; margin: -5px 0 0 -5px; pointer-events: none; }
+  .anchor::before, .anchor::after { content: ""; position: absolute; background: var(--ok); }
+  .anchor::before { left: 5px; top: 0; width: 1px; height: 11px; }
+  .anchor::after { top: 5px; left: 0; height: 1px; width: 11px; }
+  .strip { display: flex; gap: 2px; } /* frame strip, cut client-side via background-position */
+  .frame { background-repeat: no-repeat; border: 1px solid var(--line); image-rendering: pixelated; }
+  .tile3 { display: grid; grid-template-columns: repeat(3, auto); } .tile3 div { background-repeat: repeat; image-rendering: pixelated; }
+  .badge { font-size: 11px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); }
+  .badge.gen { color: var(--ok); } .badge.fb { color: var(--bad); }
+</style>
+</head>
+<body>
+<h1><em>ASSET QA LAB</em> — contract vs candidate</h1>
+<div class="meta" id="meta"></div>
+<div id="assets"></div>
+<script>
+// Claude fills this from assets.contract.json + out-rN/results.json. No other edits to this file.
+window.LAB_DATA = {
+  run_id: "RUN_ID_HERE",
+  round: 1,
+  assets: [
+    // { id, path (relative to this file), dims:[w,h], anchor:[x,y]|null,
+    //   frames:{count,layout}|null, tileable:bool, provenance:"generated r1"|"fallback", scale:4 }
+  ]
+};
+const D = window.LAB_DATA, $ = (t, c) => { const e = document.createElement(t); if (c) e.className = c; return e; };
+document.getElementById("meta").textContent = `run ${D.run_id} · round ${D.round} · ${D.assets.length} assets · checkerboard = alpha · dashed = contract dims · crosshair = anchor`;
+const root = document.getElementById("assets");
+for (const a of D.assets) {
+  const [w, h] = a.dims, s = a.scale || 4, card = $("div", "asset"), head = $("h2");
+  head.innerHTML = `${a.id} <span class="spec">${w}×${h}${a.frames ? ` · ${a.frames.count} frames` : ""}${a.tileable ? " · tileable" : ""}</span> <span class="badge ${a.provenance.startsWith("fallback") ? "fb" : "gen"}">${a.provenance}</span>`;
+  card.appendChild(head);
+  const row = $("div", "row");
+  const mk = (imgW, imgH, cap, scale) => {
+    const cell = $("div", "cell"), st = $("div", "stage"), img = new Image();
+    img.src = a.path; img.style.width = imgW * scale + "px"; img.style.height = imgH * scale + "px";
+    st.appendChild(img);
+    const db = $("div", "dims"); db.style.width = w * scale + "px"; db.style.height = h * scale + "px"; st.appendChild(db);
+    if (a.anchor) { const an = $("div", "anchor"); an.style.left = a.anchor[0] * scale + "px"; an.style.top = a.anchor[1] * scale + "px"; st.appendChild(an); }
+    cell.appendChild(st); const c = $("div", "cap"); c.textContent = cap; cell.appendChild(c); row.appendChild(cell);
+  };
+  mk(w * (a.frames ? a.frames.count : 1) / (a.frames ? 1 : 1), h, "actual size", 1);
+  mk(w * (a.frames ? a.frames.count : 1), h, s + "× zoom", s);
+  if (a.frames) { // individual frames side by side
+    const cell = $("div", "cell"), strip = $("div", "strip");
+    for (let i = 0; i < a.frames.count; i++) {
+      const f = $("div", "frame");
+      f.style.width = w * s + "px"; f.style.height = h * s + "px";
+      f.style.backgroundImage = `url("${a.path}")`;
+      f.style.backgroundSize = `${w * a.frames.count * s}px ${h * s}px`;
+      f.style.backgroundPosition = `-${i * w * s}px 0`;
+      strip.appendChild(f);
+    }
+    cell.appendChild(strip); const c = $("div", "cap"); c.textContent = "frames"; cell.appendChild(c); row.appendChild(cell);
+  }
+  if (a.tileable) { // 3×3 tiling — seams jump out visually
+    const cell = $("div", "cell"), g = $("div", "tile3"), t = $("div");
+    t.style.width = w * 3 + "px"; t.style.height = h * 3 + "px";
+    t.style.backgroundImage = `url("${a.path}")`; t.style.backgroundSize = `${w}px ${h}px`;
+    g.appendChild(t); cell.appendChild(g);
+    const c = $("div", "cap"); c.textContent = "3×3 tiling"; cell.appendChild(c); row.appendChild(cell);
+  }
+  card.appendChild(row); root.appendChild(card);
+}
+</script>
+</body>
+</html>

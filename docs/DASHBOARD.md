@@ -43,6 +43,14 @@ For registration, `--provider` accepts `claude`, `codex` or `both`; only choose 
 
 Keep unrelated notes and profile settings unchanged. The configuration is a separate file, `system/v2/dashboard.json`, inside the vault. It is preserved by setup and update. If it is malformed, the UI reports the error and refuses to overwrite it; have your coding agent help repair that file.
 
+## What each button needs
+
+Every built-in button says what it produces and what it needs, in **Customize dashboard** and in `node aos.mjs dashboard list`. Some work on a brand-new vault with nothing connected: Summarize Vault, Deep Research, Vault Cleanup, the Intel Brief, Morning Report, AI Trend Scan, Brainstorm Angles and Build Outline. Others stop and say so until their need is met: Plan Today, Plan Tomorrow and Refresh Schedule need Google Calendar, Inbox Brief and Morning Brief need Gmail, the YouTube workflows need a YouTube API key, and Lead Research needs a leads database of your own.
+
+## The skill pack
+
+The built-in buttons run inside the app and cannot be edited. The starter also ships a small pack of skills you can own: `node aos.mjs skills list` shows them, and `node aos.mjs skills install --skills "<id>" --provider claude` (or `codex`) copies the ones you choose into your coding tool's own skills folder. There you can read them, change them, and use them in any conversation. To put one on the dashboard, register the path the install prints with `dashboard add`. A copy you edited is never overwritten by a later install or update.
+
 ## Suggestions during setup
 
 Tell the agent what work you do and which skills you use often. It should explain a short recommended selection and ask you to approve it. It should not invent usage history, install every recommendation, or promise an unconnected skill works. Keeping the defaults is always an option.

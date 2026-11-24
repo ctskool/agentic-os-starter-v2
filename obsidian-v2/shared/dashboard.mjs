@@ -18,3 +18,12 @@ export function validateDashboardSelection(selected, knownIds) {
 export function dashboardSelected(selected, surface = 'cockpit') {
   return selected == null ? [...(surface === 'hud' ? DEFAULT_HUD_SKILLS : DEFAULT_COCKPIT_SKILLS)] : validateDashboardSelection(selected);
 }
+
+// What a member reads about a built-in workflow: what it produces, then what it needs, then what makes it better.
+// Wording comes from running each one on a blank vault with no accounts connected (see shared/contract.mjs).
+export function builtinDescription(skill) {
+  if (!skill?.about) return skill?.instruction || '';
+  const needs = skill.needs?.length ? ` Needs ${skill.needs.join('; ')}.` : '';
+  const better = skill.better?.length ? ` Better with ${skill.better.join('; ')}.` : '';
+  return skill.about + needs + better;
+}

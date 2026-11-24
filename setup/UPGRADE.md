@@ -145,13 +145,17 @@ Check first, without reading any secret file:
 
 - `node aos.mjs about show` shows whether they have an **About me**.
 - `node aos.mjs openai-key --check` prints `{"ready":true}` when a key and consent for Live voice are saved. Never open `openai.json`.
-- `node aos.mjs dashboard list` shows their saved buttons.
+- `node aos.mjs dashboard list` shows their saved buttons, and every button now carries a `description` and a `needs` list.
+- `node aos.mjs skills list --provider claude` (or `codex`) shows the skill pack, with a `since` version and an `installed` state for each skill.
+
+Show only what is new to them. Before the update, note the version they are on (`VERSION.json`). Afterwards, a pack skill is new when its `since` is later than that version and its state is `missing`. Do not walk them through choices they already made.
 
 Then, in this order:
 
 1. **About me**, if it is empty: run the short intake in [the fresh-install playbook](PLAYBOOK.md#tell-your-assistant-about-you).
-2. **Dashboard buttons:** their saved selection survives an update. Point out **Customize dashboard** in either app. If they are still on the starter buttons, offer the intake in [Choose their dashboard buttons](PLAYBOOK.md#choose-their-dashboard-buttons).
-3. **Live voice**, if it is not set up: follow [Live voice (optional)](PLAYBOOK.md#live-voice-optional) exactly as written, with its cost sentence, the local key page and the three things to try on a first call.
+2. **Dashboard buttons:** their saved selection survives an update, so do not re-run the menu. Point out **Customize dashboard** in either app, where each button now says what it does and needs. If they are still on the starter buttons, offer the menu in [Choose their dashboard buttons](PLAYBOOK.md#choose-their-dashboard-buttons).
+3. **The skill pack**, for the skills that are new to them: follow [Offer the skill pack](PLAYBOOK.md#offer-the-skill-pack). A skill shown as `update` is an older copy they have not changed; installing it again brings it up to date. One shown as `edited` is theirs and stays as it is.
+4. **Live voice**, if it is not set up: follow [Live voice (optional)](PLAYBOOK.md#live-voice-optional) exactly as written, with its cost sentence, the local key page and the three things to try on a first call.
 
 ## 8. Final report
 

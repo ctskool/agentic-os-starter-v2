@@ -18,7 +18,9 @@ Run commands from the starter's top-level folder. For guided installation, use t
 | `node aos.mjs openai-key` | Add or replace the OpenAI API key and record consent for [Live voice](LIVE-VOICE.md). The page checks the key with OpenAI before saving it. |
 | `node aos.mjs openai-key --check` | Say whether a key and consent are saved, without showing the key. |
 | `node aos.mjs autostart on\|off` | Enable or disable starting this installation at login. |
-| `node aos.mjs dashboard` | Manage dashboard choices; see [personalization commands](DASHBOARD.md). |
+| `node aos.mjs dashboard` | Manage dashboard choices; see [personalization commands](DASHBOARD.md). `dashboard list` shows what every button does and needs. |
+| `node aos.mjs skills list` | Show the skill pack: optional skills you can install as your own, what each needs, and which are installed. |
+| `node aos.mjs skills install --skills "<id>,<id>" --provider claude\|codex` | Copy the chosen skills into that coding tool's skills folder. A copy you edited is never overwritten. |
 | `node aos.mjs schedule` | Run a bundled workflow by itself at a set time, for example `schedule add plan-today 07:00 --days weekdays`. Nothing is scheduled until you add it; `node aos.mjs schedule help` explains the rules. |
 | `node aos.mjs voice` | Show and change how voice sounds (mute, voice, speed), how fast it answers, and the words it listens for. `node aos.mjs voice help` lists the choices; the same settings are in the voice menu on both screens. |
 | `node aos.mjs about show` | Show the About me text Live receives and the bytes used out of 2,000. |

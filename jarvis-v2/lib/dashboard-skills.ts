@@ -1,5 +1,5 @@
 import {SKILLS} from '../../obsidian-v2/shared/contract.mjs';
-import {DEFAULT_HUD_SKILLS,MAX_DASHBOARD_SKILLS} from '../../obsidian-v2/shared/dashboard.mjs';
+import {DEFAULT_HUD_SKILLS,MAX_DASHBOARD_SKILLS,builtinDescription} from '../../obsidian-v2/shared/dashboard.mjs';
 import {createPollStore} from '../../obsidian-v2/shared/poll-store.mjs';
 import {bridge} from './bridge';
 
@@ -11,7 +11,7 @@ export type DashboardDiscovery={skills:DiscoveredSkill[];skipped?:number;truncat
 export type DashboardState={data:DashboardSnapshot;loaded:boolean;error:string};
 type Request=(path:string,body?:unknown,timeoutMs?:number)=>Promise<any>;
 
-export const initialDashboard:DashboardSnapshot={revision:'',configured:false,selected:null,catalog:Object.entries(SKILLS).filter(([id])=>id!=='voice-ask').map(([id,spec])=>({id,label:spec.label,description:spec.instruction,kind:'builtin',arg:spec.arg,direct:spec.direct,providers:['claude','codex'],available:true}))};
+export const initialDashboard:DashboardSnapshot={revision:'',configured:false,selected:null,catalog:Object.entries(SKILLS).filter(([id])=>id!=='voice-ask').map(([id,spec])=>({id,label:spec.label,description:builtinDescription(spec),kind:'builtin',arg:spec.arg,direct:spec.direct,providers:['claude','codex'],available:true}))};
 export function dashboardIds(data:DashboardSnapshot):string[]{return [...(data.selected??DEFAULT_HUD_SKILLS)]}
 export function dashboardEntries(data:DashboardSnapshot):DashboardSkill[]{return dashboardIds(data).map(id=>data.catalog.find(skill=>skill.id===id)??{id,label:id,description:'This saved skill is no longer in the catalog.',kind:'installed',providers:[],available:false,reason:'Skill unavailable. Remove it or register its current location in Customize dashboard.'})}
 export function skillUnavailable(skill:DashboardSkill,provider:DashboardProvider,installedProviders?:DashboardProvider[]):string{
