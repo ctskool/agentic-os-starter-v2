@@ -25,6 +25,10 @@ Run commands from the starter's top-level folder. For guided installation, use t
 | `node aos.mjs voice` | Show and change how voice sounds (mute, voice, speed), how fast it answers, and the words it listens for. `node aos.mjs voice help` lists the choices; the same settings are in the voice menu on both screens. |
 | `node aos.mjs about show` | Show the About me text Live receives and the bytes used out of 2,000. |
 | `node aos.mjs about write --from <file>` | Back up `AGENTS.md` if it exists, then write its About me section from a file. |
+| `node aos.mjs live-context show [--full]` | List what a Live call reads when it starts. `--full` prints it exactly as it would be sent now. |
+| `node aos.mjs live-context add <path> [--label "…"]` | Add one of your notes, or a report folder whose newest note is read, to every call. Up to six. |
+| `node aos.mjs live-context remove <path or number>` | Take a note off the list. |
+| `node aos.mjs live-context section <name> on\|off` | Turn a built-in part on or off: `today`, `inbox`, `numbers`, `news`, `radar`. Saved in `system/v2/live-context.json`. |
 | `node aos.mjs about migrate` | Preview moving `CLAUDE.md` to `AGENTS.md` and linking it back with an import. Add `--yes` to apply after reviewing the preview. |
 
 Doctor prints **PASS**, **FAIL**, **WAIT** or **SKIP**, with reasons. Any FAIL produces exit code 1; the summary distinguishes core failures from optional features that need attention. Its speech round trip tests generated audio, not your microphone. See [Mac voice checks](MAC-VOICE.md) for app permissions and shortcut testing.

@@ -52,9 +52,19 @@ If Live offers a concrete next step, say “go ahead” within a minute. An offe
 
 ## What is sent and what it costs
 
-Live sends audio, the vault snapshot, and answers to handed-off requests to OpenAI with `store:false`. At the start of every call the snapshot can include your **About me**, today’s top three priorities and schedule from the `/today` daily note, your Daily Drivers, up to five task titles with provider and status, counts of new notes in your vault’s `inbox/` folders for the last 24 hours (notes, not email), metrics and the latest video, headlines, and radar. Task prompts, replies, and report paths stay out of the snapshot. The note counts contain no note names.
+Live sends audio, the vault snapshot, and answers to handed-off requests to OpenAI with `store:false`. At the start of every call the snapshot can include your **About me**, today’s top three priorities and schedule from the `/today` daily note, your Daily Drivers, up to five task titles with provider and status, counts of new notes in your vault’s `inbox/` folders for the last 24 hours (notes, not email), metrics and the latest video, headlines, radar, and any notes you added yourself. Task prompts, replies, and report paths stay out of the snapshot. The note counts contain no note names.
 
 With **Share morning brief** on, the whole morning brief takes the place of the headlines: every section, including its email section, with links removed, up to 36,000 bytes. With it off, email contents stay on your computer.
+
+### Choose what Live knows
+
+The snapshot is yours to shape. Run `node aos.mjs live-context show` to see what a call reads, or ask your coding agent, for example *"add my goals note to Live"* or *"stop sending the radar to Live"*.
+
+- **Turn parts off.** `node aos.mjs live-context section radar off` (or `today`, `inbox`, `numbers`, `news`). A part fed by a workflow you do not run is empty anyway.
+- **Add your own notes and reports.** `node aos.mjs live-context add "projects/goals.md" --label "Goals"`. Add a folder instead of a note and Live reads the newest note in it, so a report one of your skills saves each day stays current. Up to six; each is read up to about 6,000 characters, so a short summary note works better than a long one.
+- **See it exactly.** `node aos.mjs live-context show --full` prints the snapshot as it would be sent now.
+
+Long-lived facts about you belong in About me; today's details belong in your daily note; anything else you want on every call goes in a note you add here.
 
 Your Claude and Codex agents read **About me** from the vault’s `AGENTS.md`. Live reads up to 2,000 bytes of that section. Run `node aos.mjs about show` to see the text Live receives, or ask your coding agent “update my About me” to review and change it.
 

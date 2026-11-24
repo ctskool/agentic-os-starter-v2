@@ -29,6 +29,7 @@ const HELP = `Agentic OS V2
   voice               how voice sounds, how fast it answers, the words it listens for (voice help)
   schedule            run a workflow by itself at a set time, for example Plan Today at 7:00 (schedule help)
   about               show or update the vault's About me section (about help)
+  live-context        what a Live call reads when it starts: your notes and reports, parts on or off (live-context help)
 `;
 
 export function parseArgs(argv) {
@@ -79,6 +80,7 @@ export async function main(argv = process.argv.slice(2), log = console.log) {
     case 'voice': return (await import('./aos/voice.mjs')).voiceCommand({words, flags, log});
     case 'schedule': return (await import('./aos/schedule.mjs')).scheduleCommand({words, flags, log});
     case 'about': return (await import('./aos/about.mjs')).aboutCommand({words, flags, log});
+    case 'live-context': return (await import('./aos/live-context.mjs')).liveContextCommand({words, flags, log});
     default: log(HELP); return command === 'help' ? 0 : 1;
   }
 }

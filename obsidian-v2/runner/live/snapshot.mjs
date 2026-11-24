@@ -14,6 +14,7 @@ import {LIVE_MODEL} from './transport.mjs';
 import {readAboutMe} from './about.mjs';
 import {clip} from './clip.mjs';
 import {PATHWAYS} from '../lookup-fallback.mjs';
+import {readLiveContext,resolveNotes,noteSections,noteForCall,cutToBytes} from './context.mjs';
 
 const jiti=createJiti(import.meta.url);
 // A UTF-8 byte cap is conservative even for an unusual script or input.
@@ -30,15 +31,9 @@ function wholeBrief(root,brief,today){
   if(!info.isFile()||info.size>512000)return null;
   raw=fs.readFileSync(file,'utf8');saved=new Date(info.mtimeMs);
  }catch{return null}
- // Links, rules and bold cost tokens and mean nothing spoken. No blank lines: a snapshot section is one block.
- let text=raw.replace(/\r\n/g,'\n').replace(/^﻿?---\n[\s\S]*?\n---\n/,'').replace(/<!--[\s\S]*?-->/g,'').replace(/!\[[^\]]*\]\([^)]*\)/g,'')
-  .replace(/\[([^\]]+)\]\([^)]*\)/g,'$1').replace(/https?:\/\/\S+/g,'').replace(/\*\*/g,'')
-  .split('\n').map(line=>line.trimEnd()).filter(line=>line.trim()&&!/^\s{0,3}(?:-\s*){3,}$/.test(line)).join('\n');
+ let text=noteForCall(raw);
  if(!text)return null;
- if(Buffer.byteLength(text)>BRIEF_MAX_BYTES){
-  const cut=Buffer.from(text).subarray(0,BRIEF_MAX_BYTES).toString('utf8').replace(/�$/,'');
-  text=cut.slice(0,cut.lastIndexOf('\n'))+'\n(Cut here for length; the rest is in the note.)';
- }
+ text=cutToBytes(text,BRIEF_MAX_BYTES).text;
  // Newer ICU puts a narrow no-break space before AM/PM.
  const time=saved.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}).replace(/\s/g,' ');
  return `Morning brief (${clip(brief.briefSource,130)}, ${brief.date}, saved ${time}${brief.date===today?'':'; the latest one, today’s has not been saved yet'}; the whole note, and its Inbox section is email as of then)\n${text}`;
@@ -93,7 +88,9 @@ function workRows(tasks,now){
  }).sort((a,b)=>b.at-a.at).slice(0,5).map(item=>item.row);
 }
 const sourceFolder=(source,fallback)=>source?.slice(0,source.lastIndexOf('/'))||fallback;
-export async function liveSnapshot(root,{now=new Date(),usage={claude:getClaudeUsage,codex:getCodexUsage},tasks=()=>[],liveShareWork=readVoicePrefs(root).liveShareWork,liveShareBrief=readVoicePrefs(root).liveShareBrief}={}){
+export async function liveSnapshot(root,{now=new Date(),usage={claude:getClaudeUsage,codex:getCodexUsage},tasks=()=>[],liveShareWork=readVoicePrefs(root).liveShareWork,liveShareBrief=readVoicePrefs(root).liveShareBrief,context=readLiveContext(root)}={}){
+ // The member chooses which built-in parts a call reads and adds their own notes (context.mjs, aos live-context).
+ const on=context.sections;
  const vault=await jiti.import('../voice-vault.ts');
  let metricsAt=-Infinity;
  const {daily,metrics,latestVideo,outliers,trending}=withVoiceContext({root,exchanges:[]},()=>({
@@ -113,29 +110,30 @@ export async function liveSnapshot(root,{now=new Date(),usage={claude:getClaudeU
  const usable=metrics.filter(m=>m.status==='ok'||m.status==='stale');
  const youtube=m=>m.source==='youtube'&&['subscribers','views_28d'].includes(m.metric);
  const cards=[...usable.filter(youtube),...usable.filter(m=>!youtube(m))].slice(0,8);
- const date=section('Today',[`daily-notes/${today}.md, ${today}`,'system/v2/profile.json'],[
+ const date=on.today&&section('Today',[`daily-notes/${today}.md, ${today}`,'system/v2/profile.json'],[
   ...(!daily?.isToday?['No daily note for today yet, so the schedule and top 3 are unknown.']:[]),
   `Daily Drivers: ${dailyDrivers(root).join(', ')}`,
   ...(daily?.isToday?[...daily.top3.slice(0,3).map(item=>`${item.done?'Done':'Open'}: ${item.text}`),...daily.schedule.slice(0,10).map(item=>`${item.time} ${item.item}`)]:[])
  ],900);
  const work=liveShareWork?workRows(tasks(),now):[];
  const inbox=inboxCounts(root,now),metricsDate=Number.isFinite(metricsAt)?new Date(metricsAt).toISOString().slice(0,10):'unavailable',stale=now-metricsAt>2*DAY_MS&&Number.isFinite(metricsAt);
- const numbers=section('Numbers',[`system/metrics/metrics.csv, ${metricsDate}${stale?', stale':''}`],
+ const numbers=on.numbers&&section('Numbers',[`system/metrics/metrics.csv, ${metricsDate}${stale?', stale':''}`],
   [...(stale?[`Metrics were last pulled ${metricsDate}; say so if asked.`]:[]),...meters.filter(Boolean).map(item=>clip(item,175)),
    ...(['ok','stale'].includes(latestVideo?.status)?[`system/metrics/latest-video.json, published ${sourceDate(latestVideo.published_at)||'unknown'}: ${clip(latestVideo.title,75)}, ${latestVideo.views} views`]:[]),
    ...cards.map(m=>`${m.source} ${m.metric}: ${m.value} as of ${sourceDate(m.timestamp)||'unknown date'}${m.deltaWeek===null?'':', week change '+m.deltaWeek}`)],900);
  // The router's public catalog excludes inbox and private TL;DR material. These lines go when the whole brief is not shared.
  const whole=liveShareBrief?wholeBrief(root,brief,today):null;
- const news=whole||section('News',[`${sourceFolder(brief.briefSource,'morning-intel')}, ${brief.date}${brief.status==='stale'?', stale':''}`],
+ const news=whole||on.news&&section('News',[`${sourceFolder(brief.briefSource,'morning-intel')}, ${brief.date}${brief.status==='stale'?', stale':''}`],
   [...brief.headlines.slice(0,4).map(item=>clip(item,220)),...brief.hackerNews.slice(0,2).map(item=>'Hacker News: '+clip(item.title,95)),
    ...[...(brief.xHighlights||[]),...Object.values(brief.sections||{}).flatMap(entry=>(entry?.items||[]).filter(item=>/\b(?:x\.com|twitter|on X|X highlight)\b/i.test(item.text)).map(item=>item.text))].slice(0,2).map(item=>'X: '+clip(item,105))],1400);
- const radar=section('Radar',[`${sourceFolder(outliers?.rel,'outlier-radar')}, ${outliers?.date||'unavailable'}`,`${sourceFolder(trending?.rel,'github-trending')}, ${savedDate(root,trending?.rel)}`],
+ const radar=on.radar&&section('Radar',[`${sourceFolder(outliers?.rel,'outlier-radar')}, ${outliers?.date||'unavailable'}`,`${sourceFolder(trending?.rel,'github-trending')}, ${savedDate(root,trending?.rel)}`],
   [...(outliers?.top||[]).map(item=>clip(`${item.title} (${item.mult}, ${item.channel})`,175)),
    ...(trending?.repos||[]).map(repo=>trending.descriptions[repo]?`${repo}: ${clip(trending.descriptions[repo],140)}`:repo)],900);
- return [`Vault snapshot captured ${now.toISOString()} (${today} locally)`,personal,date,
+ const own=noteSections(resolveNotes(root,context));
+ return [`Vault snapshot captured ${now.toISOString()} (${today} locally)`,personal,date,...own,
   work.length?section('Work in progress',[`Work drawer, ${today}`],work,700):null,
   // Named for what it counts: "Inbox" read as email, and "nothing new" was said about mail (2026-11-22).
-  section('New vault notes',[`inbox/ folders, last 24 h, ${today}; not email`],[inbox.join(', ')||'none'],250),numbers,news,radar].filter(Boolean).join('\n\n');
+  on.inbox?section('New vault notes',[`inbox/ folders, last 24 h, ${today}; not email`],[inbox.join(', ')||'none'],250):null,numbers,news,radar].filter(Boolean).join('\n\n');
 }
 export function liveHistory(root,scope,now=new Date()){
  const dir=vaultPath(root,`${ROOT}/voice-results`),today=localDate(now);

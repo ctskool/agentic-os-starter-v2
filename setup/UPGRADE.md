@@ -145,6 +145,7 @@ Check first, without reading any secret file:
 
 - `node aos.mjs about show` shows whether they have an **About me**.
 - `node aos.mjs openai-key --check` prints `{"ready":true}` when a key and consent for Live voice are saved. Never open `openai.json`.
+- `node aos.mjs live-context show` lists what a Live call reads when it starts, including any notes of their own.
 - `node aos.mjs dashboard list` shows their saved buttons, and every button now carries a `description` and a `needs` list.
 - `node aos.mjs skills list --provider claude` (or `codex`) shows the skill pack, with a `since` version and an `installed` state for each skill.
 
@@ -156,6 +157,7 @@ Then, in this order:
 2. **Dashboard buttons:** their saved selection survives an update, so do not re-run the menu. Point out **Customize dashboard** in either app, where each button now says what it does and needs. If they are still on the starter buttons, offer the menu in [Choose their dashboard buttons](PLAYBOOK.md#choose-their-dashboard-buttons).
 3. **The skill pack**, for the skills that are new to them: follow [Offer the skill pack](PLAYBOOK.md#offer-the-skill-pack). A skill shown as `update` is an older copy they have not changed; installing it again brings it up to date. One shown as `edited` is theirs and stays as it is.
 4. **Live voice**, if it is not set up: follow [Live voice (optional)](PLAYBOOK.md#live-voice-optional) exactly as written, with its cost sentence, the local key page and the three things to try on a first call.
+5. **What Live knows when a call starts**, if Live is already set up and `live-context show` lists none of their own notes: offer step 5 of [Live voice (optional)](PLAYBOOK.md#live-voice-optional), which lets them turn parts off and add their own notes and reports. New in 0.4.6.
 
 ## 8. Final report
 
