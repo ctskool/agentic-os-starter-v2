@@ -193,18 +193,26 @@ jobs:
   # Two steps differ from a member's machine, both because the commit under test is not on main yet:
   # the download takes that commit instead of pulling main, and the re-run of setup gets --ci (no
   # coding CLI is signed in on a runner). See obsidian-v2/tests/fixtures/ci-upgrade.cjs.
+  # The early variant is a member whose 0.3.64 predates 22 September 2026: its update runs the setup it
+  # had already loaded, the OLD one, so the new setup steps do not happen. The new doctor must say so,
+  # and the one `node aos.mjs setup` it asks for must finish the update.
   upgrade:
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
+        old: [late]
+        include:
+          - os: macos-latest
+            old: early
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     defaults:
       run:
         shell: bash
     env:
-      OLD_SHA: 6bfc2195e7cc70b728dd68de387c350a940c2337   # 0.3.64, the release members installed
+      # 0.3.64 as members installed it: the last build (late) and one from before 22 September (early).
+      OLD_SHA: ${{ matrix.old == 'early' && '7d9d0501eb2d6f59dca1a18d1cb5e9641df315d8' || '6bfc2195e7cc70b728dd68de387c350a940c2337' }}
       NEW_SHA: ${{ github.sha }}
     steps:
       - uses: actions/setup-node@v4
@@ -245,10 +253,22 @@ jobs:
           cd "$RUNNER_TEMP/agentic-os"
           node "$RUNNER_TEMP/ci-upgrade.cjs" 2>&1 | tee "$RUNNER_TEMP/update.log"
           test "$(git rev-parse HEAD)" = "$NEW_SHA"
+      - name: An early 0.3.64 update stops short; the doctor says so and one setup run finishes it
+        if: matrix.old == 'early'
+        run: |
+          cd "$RUNNER_TEMP/agentic-os"
+          node aos.mjs doctor --ci > "$RUNNER_TEMP/doctor-short.log" 2>&1 || true
+          cat "$RUNNER_TEMP/doctor-short.log"
+          grep -q "FAIL Setup finished for these files" "$RUNNER_TEMP/doctor-short.log"
+          grep -q "Run \`node aos.mjs stop\`, then \`node aos.mjs setup\` once to finish the update" "$RUNNER_TEMP/doctor-short.log"
+          # As the doctor says: stop first, so setup can bring the voice packages up to date.
+          node aos.mjs stop
+          node aos.mjs setup --ci
       - name: Doctor on the updated installation
         run: |
           cd "$RUNNER_TEMP/agentic-os"
           node aos.mjs doctor --ci | tee "$RUNNER_TEMP/doctor-new.log"
+          grep -q "PASS Setup finished for these files" "$RUNNER_TEMP/doctor-new.log"
           grep -q "PASS Bridge answering" "$RUNNER_TEMP/doctor-new.log"
           grep -q "PASS Jarvis HUD answering" "$RUNNER_TEMP/doctor-new.log"
           grep -q "PASS Voice service healthy - .*this installation's own service on 3220" "$RUNNER_TEMP/doctor-new.log"

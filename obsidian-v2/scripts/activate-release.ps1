@@ -123,6 +123,11 @@ Write-Step ("Bridge online as PID "+$taskBridge.health.pid)
 Write-Step ("Installing plugin "+$taskRepoVersion)
 & $taskNode (Join-Path $taskObsidian 'scripts\install-live.mjs') $taskVault
 if($LASTEXITCODE -ne 0){throw 'Plugin installation failed. Services are running the new runner; the previous plugin bundle is in .runtime\backups.'}
+# This installs what `node aos.mjs setup` would, so it leaves the same mark; the doctor's
+# "Setup finished for these files" line checks for it.
+Push-Location $taskObsidian
+try{& $taskNode --input-type=module -e 'const {layout}=await import(`./scripts/aos/services.mjs`);const {stampSetup}=await import(`./scripts/aos/setup-stamp.mjs`);stampSetup(layout());'}finally{Pop-Location}
+if($LASTEXITCODE -ne 0){Write-Step 'Could not record the finished setup; the doctor will ask for a setup run.'}
 
 # 9. Report the loaded native version when Obsidian was connected before.
 $taskLoaded=$null

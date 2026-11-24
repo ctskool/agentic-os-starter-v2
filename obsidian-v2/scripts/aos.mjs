@@ -4,18 +4,18 @@
 //   node aos.mjs start | stop | status | doctor [--full] | jev-key | autostart on|off | update
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {layout, start, stop, status} from './aos/services.mjs';
+import {layout, stop, status} from './aos/services.mjs';
 import {disableAutostart} from './aos/autostart.mjs';
 import {collectJevKey, hasJevKey} from './aos/jev-key.mjs';
 import {doctor} from './aos/doctor.mjs';
-import {setup, update, startAtLogin} from './aos/setup.mjs';
+import {setup, update, startAtLogin, startCommand} from './aos/setup.mjs';
 
 const HELP = `Agentic OS V2
 
   setup --vault "<path>" [--provider claude|codex] [--voice yes|no] [--autostart yes|no] [--rebuild]
                       install or repair everything, then run the checks
                       (--provider: the coding tool buttons and voice use; default = the one installed)
-  start               start the local services (bridge, Jarvis HUD, voice)
+  start [--no-wait]   start the local services (bridge, Jarvis HUD, voice) and wait until they answer
   stop                stop them (refuses while a task is open)
   status              what is running
   doctor [--full]     PASS / FAIL checks; --full also runs one real workflow
@@ -50,7 +50,7 @@ export async function main(argv = process.argv.slice(2), log = console.log) {
   const {command, flags, words} = parseArgs(argv);
   switch (command) {
     case 'setup': return (await setup({vault: typeof flags.vault === 'string' ? flags.vault : undefined, voice: yesNo(flags.voice, 'voice'), autostart: yesNo(flags.autostart, 'autostart'), provider: providerFlag(flags.provider), rebuild: flags.rebuild === true, ci: flags.ci === true, adopt: flags.adopt === true, log})).ok ? 0 : 1;
-    case 'start': await start({resetRecovery: flags['reset-recovery'] === true, log}); return 0;
+    case 'start': return startCommand({resetRecovery: flags['reset-recovery'] === true, wait: flags['no-wait'] !== true, log});
     case 'stop': await stop({log}); return 0;
     case 'status': log(JSON.stringify(await status(), null, 1)); return 0;
     case 'doctor': return (await doctor({ci: flags.ci === true, full: flags.full === true, phase: flags.phase === 'install' ? 'install' : 'ready', log})).ok ? 0 : 1;
