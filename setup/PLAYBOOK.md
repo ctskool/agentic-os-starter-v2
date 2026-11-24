@@ -125,9 +125,9 @@ Every line is PASS, FAIL, WAIT or SKIP, and every FAIL names its fix; a check th
 
 Then have the user try three things themselves:
 
-1. Click **Plan Today** in the cockpit.
-2. Hold the microphone button in the HUD and say *"What is on my schedule today?"*
-3. Say *"Open the morning intel"* (after they have run Morning Intel once).
+1. Click a button that will work with what they have connected. If they connected Google Calendar in Phase 4: **Plan Today**. If they skipped it: **Intel Brief**, which needs nothing connected. Say so plainly: *"Plan Today needs your calendar, so it will stop and tell you that until you connect it. Let's try Intel Brief first."* A button that stops for a missing account is not a failed install.
+2. Hold the microphone button in the HUD and say *"What is on my schedule today?"* (after Plan Today has written today's note; skip it if they have no calendar connected).
+3. Say *"Open the morning intel"* (after they have run the Intel Brief once).
 
 On Mac with its own voice service, also put another app in front, press **Control–Option–J**, say a harmless request and pause. Verify recording ends, exactly one request is sent, and a reply is heard. The doctor's shortcut PASS proves registration only; do not claim the microphone or background interaction works until this hands-on test succeeds. If the user chose autostart, have them repeat at their next normal login.
 
@@ -153,12 +153,14 @@ This is a menu, not an open question. The member picks from a list.
 
 1. Ask one thing first: *"What do you mainly use AI for: running your day, client work, research, content, or something else?"* Their answer decides what you suggest.
 2. Run `node aos.mjs dashboard list`. Every entry in `catalog` is a button they can have. The built-in ones (`"kind": "builtin"`) work with nothing installed: their instructions ship inside the app. Each has a `description` and a `needs` list.
-3. With their agreement, also run `node aos.mjs dashboard discover --provider claude` (or `codex`) to find skills already on their computer. Do not claim to know which ones they use.
-4. Show them **one list**, grouped by job, each line with its name, what it produces and what it needs:
+3. With their agreement, also run `node aos.mjs dashboard discover --provider claude` (or `codex`) to find skills already on their computer, and name what you found: *"I found these skills of yours: A, B and C."* Do not claim to know which ones they use.
+4. Say what is on their dashboard right now. In the `dashboard list` output, `"selected": null` means the starter buttons, and a list means buttons they already chose. For a new install: *"Right now your dashboard has the starter buttons: Plan Today, Inbox Brief, Deep Research and Content Cascade on the HUD, and ten in Obsidian."*
+5. Show them **one list**, grouped by job. Each line has its name, what it produces, what it needs, and whether they have that need today. They told you in Phase 4 whether they connected calendar and mail; do not guess.
 
    ```text
    Run your day
-     [x] Plan Today        today's note: top three, schedule, carry-overs        needs Google Calendar
+     [x] Plan Today        today's note: top three, schedule, carry-overs        needs Google Calendar (connected)
+     [ ] Inbox Brief       triage of the last 24 hours of email                  needs Gmail (not connected yet)
      [ ] Weekly Review     a review of your last seven daily notes               needs a few days of notes
    Research
      [x] Deep Research     a cited synthesis on any topic                        needs nothing
@@ -166,8 +168,9 @@ This is a menu, not an open question. The member picks from a list.
      [ ] <their skill>     <its description>
    ```
 
-   Tick three to five that fit what they told you, and say why in a few words. Put the ones that need nothing first. If a suggestion needs an account they have not connected, say so on its line. Do not tick a workflow whose need they cannot meet today (for example Lead Research without a leads database).
-5. Ask: *"Which of these do you want as buttons? You can have up to ten, in any order, and change them later."* Keeping the starter buttons is a complete answer: leave their selection unchanged and continue.
+   Tick three to five that fit what they told you, and say why in a few words. Put the ones that need nothing first. Do not tick a workflow whose need they cannot meet today (for example Inbox Brief without Gmail, or Lead Research without a leads database). For a need they could meet in a minute, offer it: *"Want to connect Gmail now, or leave Inbox Brief off for the moment?"*
+6. Ask the swap question in plain words: *"Which of these do you want as your buttons? Your picks replace the starter set, so you can swap any starter button for one of your own skills, keep some of each, or leave the starters as they are. Up to ten, in any order, and you can change them later with Customize dashboard."* Keeping the starter buttons is a complete answer: leave their selection unchanged and continue.
+7. Read their choice back before saving it: *"So your dashboard will be: A, B, C. These starter buttons come off: X, Y."*
 
 A skill file being present does not prove its tools or accounts are available. Read an installed skill's instructions before recommending it, explain missing requirements, and do not install new skills or connect accounts without the member choosing that step.
 
