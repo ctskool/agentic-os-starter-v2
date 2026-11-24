@@ -14,6 +14,12 @@ export const PORTS = {jarvis: 3217, preview: 3218, bridge: 3219, speech: 3220, s
 const local = port => `http://127.0.0.1:${port}`;
 const OPEN_STATES = new Set(['working', 'ready', 'editing', 'starting', 'needs input']);
 
+// On Windows a venv's Scripts\python.exe is only a launcher: it starts the real interpreter as its own child.
+// Started the way the monitor starts a service (detached, hidden, no console of its own), the launcher has no
+// console to pass on, so Windows opened a new, visible one for the interpreter. Closing that window stopped
+// voice until the monitor restarted it (starter issue #17). pythonw.exe never opens a console. Setup keeps using
+// python.exe to install packages and fetch models, where output matters.
+const serverPython = (venv, platform) => platform === 'win32' ? path.join(venv, 'Scripts', 'pythonw.exe') : path.join(venv, 'bin', 'python');
 export function layout(root = projectRoot) {
   const runtime = path.join(root, '.runtime'), jarvis = path.resolve(root, '..', 'jarvis-v2');
   const venv = path.join(runtime, 'speech-venv');
@@ -22,7 +28,8 @@ export function layout(root = projectRoot) {
     supervisor: path.join(root, 'runner', 'service-supervisor.mjs'), bridge: path.join(root, 'runner', 'bridge.mjs'), preview: path.join(root, 'preview', 'server.mjs'),
     next: path.join(jarvis, 'node_modules', 'next', 'dist', 'bin', 'next'), buildId: path.join(jarvis, '.next', 'BUILD_ID'),
     speechScript: path.join(root, 'runner', 'speech.py'), speechAssets: path.join(runtime, 'speech-assets'),
-    speechPython: process.platform === 'win32' ? path.join(venv, 'Scripts', 'python.exe') : path.join(venv, 'bin', 'python'), venv};
+    speechPython: process.platform === 'win32' ? path.join(venv, 'Scripts', 'python.exe') : path.join(venv, 'bin', 'python'),
+    speechServerPython: serverPython(venv, process.platform), venv};
 }
 
 const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
@@ -30,11 +37,13 @@ export const configuredVaultPath = at => fs.existsSync(at.vaultFile) ? readJson(
 export const speechInstalled = at => fs.existsSync(at.speechPython) && ['kokoro-v1.0.onnx', 'voices-v1.0.bin'].every(name => fs.existsSync(path.join(at.speechAssets, name)));
 
 // Pure: the list of services the monitor should keep alive.
-export function desiredServices(at, {node = process.execPath, speechUrl = null, vault = null, jarvisBuilt = false, ownSpeech = false, language = 'en'} = {}) {
+export function desiredServices(at, {node = process.execPath, speechUrl = null, vault = null, jarvisBuilt = false, ownSpeech = false, language = 'en', exists = fs.existsSync} = {}) {
+  // A venv without pythonw.exe (not made by the standard venv module) keeps python.exe and its console.
+  const speechCommand = at.speechServerPython && exists(at.speechServerPython) ? at.speechServerPython : at.speechPython;
   const env = {...(speechUrl ? {AOS_V2_SPEECH_URL: speechUrl} : {}), ...(vault ? {AOS_V2_VAULT: vault} : {})};
   const services = [{id: 'bridge', port: PORTS.bridge, command: node, args: [at.bridge], cwd: at.root, env}];
   if (jarvisBuilt) services.push({id: 'jarvis', port: PORTS.jarvis, command: node, args: [at.next, 'start', '--hostname', '127.0.0.1', '--port', String(PORTS.jarvis)], cwd: at.jarvis});
-  if (ownSpeech) services.push({id: 'speech', port: PORTS.speech, command: at.speechPython, args: ['-u', at.speechScript, '--assets', at.speechAssets, ...speechArguments(language)], cwd: at.root});
+  if (ownSpeech) services.push({id: 'speech', port: PORTS.speech, command: speechCommand, args: ['-u', at.speechScript, '--assets', at.speechAssets, ...speechArguments(language)], cwd: at.root});
   return services;
 }
 

@@ -100,6 +100,21 @@ test('the service list matches the PowerShell launcher, is accepted by the monit
   assert.throws(() => mergePrior([], {runtimeDir: path.resolve('/elsewhere/.runtime'), services: []}, at.runtime), /another installation/);
 });
 
+test('on Windows the voice service starts from pythonw.exe, so it never opens a console window (starter issue #17)', () => {
+  const at = layout(path.resolve('/x/aos/obsidian-v2'));
+  const speech = exists => desiredServices(at, {ownSpeech: true, exists}).find(service => service.id === 'speech').command;
+  if (process.platform === 'win32') {
+    // python.exe in a venv is a launcher; started with no console of its own, the real interpreter opened a visible one.
+    assert.equal(at.speechServerPython, path.join(at.venv, 'Scripts', 'pythonw.exe'));
+    assert.equal(at.speechPython, path.join(at.venv, 'Scripts', 'python.exe'), 'setup still installs packages with python.exe');
+    assert.equal(speech(file => file === at.speechServerPython), at.speechServerPython);
+    assert.equal(speech(() => false), at.speechPython, 'a venv without pythonw.exe keeps python.exe');
+  } else {
+    assert.equal(at.speechServerPython, at.speechPython);
+    assert.equal(speech(() => true), path.join(at.venv, 'bin', 'python'));
+  }
+});
+
 function stopWith(at, {state = {vault: path.join(at.root, 'vault')}, work = {tasks: []}, hudService = {kind: 'jarvis-v2', pid: 2, root: at.jarvis}, hudVault = path.join(at.root, 'vault'),
   speechService, listeners = {[PORTS.jarvis]: 2}, post = bridgeLike(TOKEN), inspect} = {}) {
   const killed = [], posted = [];
