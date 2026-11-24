@@ -17,6 +17,7 @@ after(async () => { await Promise.all(workers.map(worker => worker.terminate()))
 
 const VOICE = ['Voice service healthy', 'Text to speech', 'Speech to text hears it back'];
 const HOTKEY = 'Global voice shortcut';
+const PROVIDER = 'Buttons and voice can run';
 const TERMINAL = 'Terminal plugin (conversations inside Obsidian)';
 const freeze = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
@@ -395,7 +396,7 @@ test('every run prints every line, even with the bridge down or no vault configu
   const install = installation(); fs.rmSync(install.at.vaultFile);
   const found = await examine(services, install, {full: true});
   const expected = ['Node.js 22 or newer', 'Vault configured', 'Vault has the daily-note schema', 'Obsidian plugin files installed', 'Plugin switched on in Obsidian',
-    TERMINAL, 'Python helper for conversations inside Obsidian', 'Recovery monitor running', `Bridge answering on ${services.ports.bridge}`, `Jarvis HUD answering on ${services.ports.jarvis}`, 'claude CLI', 'codex CLI', 'Claude connectors in background work', VOICE[0], HOTKEY, ...VOICE.slice(1), 'Jev fast voice routing', 'Live voice (OpenAI key)', 'A real workflow end to end'];
+    TERMINAL, 'Python helper for conversations inside Obsidian', 'Recovery monitor running', `Bridge answering on ${services.ports.bridge}`, `Jarvis HUD answering on ${services.ports.jarvis}`, 'claude CLI', 'codex CLI', PROVIDER, 'Claude connectors in background work', VOICE[0], HOTKEY, ...VOICE.slice(1), 'Jev fast voice routing', 'Live voice (OpenAI key)', 'A real workflow end to end'];
   assert.deepEqual(found.results.map(item => item.name), expected);
   for (const name of ['Vault has the daily-note schema', 'claude CLI', ...VOICE, HOTKEY, 'A real workflow end to end']) { assert.equal(found.line(name).status, 'SKIP', name); assert.match(found.line(name).detail, /not (run|checked)/); }
   assert.equal(found.line(TERMINAL).status, 'SKIP'); assert.match(found.line(TERMINAL).detail, /no vault configured/);
@@ -403,6 +404,38 @@ test('every run prints every line, even with the bridge down or no vault configu
   assert.match(usual.line('A real workflow end to end').detail, /doctor --full/);
   const ci = await examine(await fakeServices({speech: 'shared', providers: {claude: {installed: true, version: '1', command: 'x'}}}), installation(), {ci: true, full: true});
   assert.equal(ci.line('claude signed in').status, 'SKIP'); assert.equal(ci.line('A real workflow end to end').status, 'SKIP'); assert.equal(ci.failed, 0, ci.text);
+});
+
+test('buttons saved for a coding tool that is not installed or not signed in are a core FAIL that names the switch, and the workflow is not attempted', async () => {
+  const claudeOnly = await fakeServices({speech: 'shared'});
+  const install = installation(), choose = (provider, model) => { fs.mkdirSync(path.join(install.vault, 'system', 'v2'), {recursive: true}); fs.writeFileSync(path.join(install.vault, 'system', 'v2', 'provider.json'), JSON.stringify({provider, model})); };
+  // No choice saved yet (the usual test installation): nothing to judge.
+  assert.equal((await examine(claudeOnly, install)).line(PROVIDER).status, 'SKIP');
+  // The Mac that found this: a vault still set to Codex, only Claude Code installed and signed in.
+  choose('codex', 'astra');
+  const stuck = await examine(claudeOnly, install, {full: true});
+  assert.equal(stuck.line('claude signed in').status, 'PASS');
+  assert.equal(stuck.line(PROVIDER).status, 'FAIL'); assert.equal(stuck.line(PROVIDER).optional, false);
+  assert.match(stuck.line(PROVIDER).detail, /Codex, which is not installed here/);
+  assert.match(stuck.text, /fix: `node aos\.mjs setup --provider claude` switches the buttons and voice to Claude Code, which is installed here/);
+  assert.equal(stuck.line('A real workflow end to end').status, 'SKIP'); assert.match(stuck.line('A real workflow end to end').detail, /Buttons and voice can run/);
+  // Installed, but its sign-in check does not answer; the other tool does.
+  const both = await fakeServices({speech: 'shared', providers: {claude: {installed: true, version: '1', command: process.execPath}, codex: {installed: true, version: '2', command: process.execPath}}});
+  const signedOut = await examine(both, install, {runCommand: async (command, args) => args[0] === 'exec' ? {status: 1, stdout: ''} : {status: 0, stdout: 'OK'}});
+  assert.equal(signedOut.line(PROVIDER).status, 'FAIL'); assert.match(signedOut.line(PROVIDER).detail, /did not answer its sign-in check/);
+  assert.match(signedOut.text, /run `codex` and sign in\. Or `node aos\.mjs setup --provider claude` switches/);
+  // The saved tool is installed and answers.
+  choose('claude', 'opus');
+  const fine = await examine(claudeOnly, install);
+  assert.equal(fine.line(PROVIDER).status, 'PASS'); assert.match(fine.line(PROVIDER).detail, /Claude Code \(opus\)/);
+  assert.equal(fine.ok, true, fine.text);
+  // --ci signs nothing in, so it judges nothing.
+  choose('codex', 'astra');
+  const ci = await examine(claudeOnly, install, {ci: true});
+  assert.equal(ci.line(PROVIDER).status, 'SKIP'); assert.equal(ci.failed, 0, ci.text);
+  // A damaged choice says how to choose again.
+  fs.writeFileSync(path.join(install.vault, 'system', 'v2', 'provider.json'), '{broken');
+  assert.match((await examine(claudeOnly, install)).text, /provider\.json in the vault could not be read\n\s+fix: Run `node aos\.mjs setup --provider claude`/);
 });
 
 test('the Terminal plugin line reports every state from the vault files and never throws', () => {

@@ -16,6 +16,7 @@ import {checkLiveKey, LIVE_MODEL} from '../../runner/live/transport.mjs';
 import {terminalSupport, VERIFIED_TERMINAL_VERSIONS, JARVIS_URL} from '../../shared/terminal-support.mjs';
 import {recordedTerminalPython} from '../../runner/terminal-python-record.mjs';
 import {terminalPythonWorks} from './terminal-python.mjs';
+import {readStoredSelection} from './provider.mjs';
 import {SPEECH_LANGUAGES, SPEECH_LANGUAGE_CODES, speechLanguage, speechCheck} from '../../shared/speech-language.mjs';
 
 const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; } };
@@ -26,6 +27,8 @@ const HOTKEY_CHECK = 'Global voice shortcut';
 const STILL_STARTING = new Set(['checking', 'starting', 'waiting_for_listener', 'backoff']);
 const LIVE_CHECK = 'Live voice (OpenAI key)';
 const CONNECTOR_CHECK = 'Claude connectors in background work';
+const PROVIDER_CHECK = 'Buttons and voice can run';
+const PROVIDER_NAME = {claude: 'Claude Code', codex: 'Codex'};
 const TERMINAL_CHECK ='Terminal plugin (conversations inside Obsidian)';
 const TERMINAL_PYTHON_CHECK = 'Python helper for conversations inside Obsidian';
 
@@ -192,6 +195,25 @@ export async function doctor({root = projectRoot, ci = false, full = false, phas
   if (!ci && services && !installed.length) add('FAIL', 'At least one of Claude Code or Codex', 'neither found', 'Install Claude Code or Codex, sign in, then run `node aos.mjs setup` again so its location is saved.');
   else if (!ci && installed.length && !signedIn.length) add('FAIL', 'A provider that is signed in', `${installed.join(' and ')} installed, none answered`, 'Nothing can run without one. Open a terminal, run `claude` or `codex`, sign in, then run the doctor again.');
 
+  // The buttons and voice run on the ONE tool saved in the vault (system/v2/provider.json), not on
+  // whichever is signed in. A vault can keep a choice from another computer or an older release
+  // (early 0.3.64 seeded Codex into new vaults), and then every workflow ends "codex CLI not installed"
+  // while the lines above all pass.
+  const stored = vault && fs.existsSync(vault) ? readStoredSelection(vault) : {state: 'novault'};
+  const chosen = stored.selection?.provider, other = chosen === 'claude' ? 'codex' : 'claude';
+  const switchTo = `\`node aos.mjs setup --provider ${other}\` switches the buttons and voice to ${PROVIDER_NAME[other]}`;
+  if (stored.state === 'novault') add('SKIP', PROVIDER_CHECK, 'no vault configured');
+  else if (stored.state === 'absent') add('SKIP', PROVIDER_CHECK, 'no choice saved in the vault yet (setup saves it)');
+  else if (stored.state === 'invalid') add('FAIL', PROVIDER_CHECK, 'system/v2/provider.json in the vault could not be read', 'Run `node aos.mjs setup --provider claude` (or `codex`) to choose again.');
+  else if (!services) add('SKIP', PROVIDER_CHECK, `uses ${PROVIDER_NAME[chosen]}; not checked: ${bridgeDown}`);
+  else if (ci) add('SKIP', PROVIDER_CHECK, `uses ${PROVIDER_NAME[chosen]}; not checked with --ci`);
+  else if (!services.providers?.[chosen]?.installed) add('FAIL', PROVIDER_CHECK, `they use ${PROVIDER_NAME[chosen]}, which is not installed here, so every button and workflow will stop`,
+    installed.includes(other) ? `${switchTo}, which is installed here. Or install ${PROVIDER_NAME[chosen]} and sign in.` : `Install ${PROVIDER_NAME[chosen]} and sign in, then run \`node aos.mjs setup\` again.`);
+  else if (!signedIn.includes(chosen)) add('FAIL', PROVIDER_CHECK, `they use ${PROVIDER_NAME[chosen]}, which did not answer its sign-in check`,
+    signedIn.includes(other) ? `Open a terminal, run \`${chosen}\` and sign in. Or ${switchTo}, which is signed in.` : `Open a terminal, run \`${chosen}\` and sign in, then run the doctor again.`);
+  else add('PASS', PROVIDER_CHECK, `${PROVIDER_NAME[chosen]} (${stored.selection.model})`);
+  const providerProblem = results.find(item => item.name === PROVIDER_CHECK && item.status === 'FAIL');
+
   // A saved CLAUDE_CODE_OAUTH_TOKEN signs Claude in without the account's connectors, so calendar and mail workflows
   // end "blocked" with the connector connected. The bridge reports what it found; it never reports the token.
   const signIn = services?.claudeSignIn, signInFix = 'Open a terminal, run `claude` and sign in with /login (the saved token can stay for your other tools), then run the doctor again.';
@@ -299,6 +321,7 @@ export async function doctor({root = projectRoot, ci = false, full = false, phas
   const WORKFLOW = 'A real workflow end to end';
   if (!full) add('SKIP', WORKFLOW, 'not asked for (`node aos.mjs doctor --full` includes it)');
   else if (ci) add('SKIP', WORKFLOW, 'not run with --ci');
+  else if (providerProblem) add('SKIP', WORKFLOW, `not run: "${PROVIDER_CHECK}" did not pass, so it could only fail`);
   else await group([WORKFLOW], async () => {
     if (!services?.bridge?.online) return bridgeDown;
     const token = JSON.parse(fs.readFileSync(at.auth, 'utf8')).token, id = crypto.randomUUID();
