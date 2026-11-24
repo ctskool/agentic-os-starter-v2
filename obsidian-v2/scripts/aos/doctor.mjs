@@ -25,6 +25,7 @@ const VOICE_CHECKS = ['Voice service healthy', 'Text to speech', 'Speech to text
 const HOTKEY_CHECK = 'Global voice shortcut';
 const STILL_STARTING = new Set(['checking', 'starting', 'waiting_for_listener', 'backoff']);
 const LIVE_CHECK = 'Live voice (OpenAI key)';
+const CONNECTOR_CHECK = 'Claude connectors in background work';
 const TERMINAL_CHECK ='Terminal plugin (conversations inside Obsidian)';
 const TERMINAL_PYTHON_CHECK = 'Python helper for conversations inside Obsidian';
 
@@ -190,6 +191,18 @@ export async function doctor({root = projectRoot, ci = false, full = false, phas
   }
   if (!ci && services && !installed.length) add('FAIL', 'At least one of Claude Code or Codex', 'neither found', 'Install Claude Code or Codex, sign in, then run `node aos.mjs setup` again so its location is saved.');
   else if (!ci && installed.length && !signedIn.length) add('FAIL', 'A provider that is signed in', `${installed.join(' and ')} installed, none answered`, 'Nothing can run without one. Open a terminal, run `claude` or `codex`, sign in, then run the doctor again.');
+
+  // A saved CLAUDE_CODE_OAUTH_TOKEN signs Claude in without the account's connectors, so calendar and mail workflows
+  // end "blocked" with the connector connected. The bridge reports what it found; it never reports the token.
+  const signIn = services?.claudeSignIn, signInFix = 'Open a terminal, run `claude` and sign in with /login (the saved token can stay for your other tools), then run the doctor again.';
+  if (!services) add('SKIP', CONNECTOR_CHECK, `not checked: ${bridgeDown}`);
+  else if (!services.providers?.claude?.installed) add('SKIP', CONNECTOR_CHECK, 'Claude Code is not installed');
+  else if (!signIn) add('SKIP', CONNECTOR_CHECK, 'the running bridge does not report this yet; restart the services after updating');
+  else if (!signIn.token) add('PASS', CONNECTOR_CHECK, 'workflows use your normal Claude sign-in');
+  else if (signIn.fallback) add('FAIL', CONNECTOR_CHECK, 'your stored Claude sign-in stopped working, so workflows are back on the saved CLAUDE_CODE_OAUTH_TOKEN, which has no calendar or mail connectors', signInFix, {optional: true});
+  else if (signIn.stored === true) add('PASS', CONNECTOR_CHECK, 'a CLAUDE_CODE_OAUTH_TOKEN is saved on this computer; workflows use your normal Claude sign-in instead, so calendar and mail connectors stay available');
+  else if (signIn.stored === null) add('SKIP', CONNECTOR_CHECK, 'the bridge has not checked yet (it does within a minute of starting); run the doctor again');
+  else add('FAIL', CONNECTOR_CHECK, 'Claude signs in only through a saved CLAUDE_CODE_OAUTH_TOKEN, which has no connectors: Plan Today, Inbox Brief and other calendar or mail workflows will end "blocked"', signInFix, {optional: true});
 
   if (setup.voice === false) {
     add('SKIP', 'Voice', 'not installed (add later: `node aos.mjs setup --voice yes`)');

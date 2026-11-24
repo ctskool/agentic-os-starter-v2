@@ -11,6 +11,7 @@ import {getCodexUsage} from './codexUsage.mjs';
 import {getClaudeUsage} from './claudeUsage.mjs';
 import {claudeUsageReading} from './claude-login.mjs';
 import {closeClaudeSignIn} from './claude-signin.mjs';
+import {refreshStoredSignIn,signInReport} from './claude-stored-signin.mjs';
 import {taskSummary} from '../shared/work-feed.mjs';
 import {readDashboard,saveDashboard,registerDashboardSkill,discoverDashboardSkills,prepareDashboardSkill,assertDashboardReplay} from './dashboard.mjs';
 import {configuredVault} from './runtime.mjs';
@@ -72,6 +73,9 @@ const liveBridge=createLiveBridge({root,runtimeDir:path.join(base,'.runtime'),hu
  speechMode:liveSpeechMode({speech,authFile:path.join(base,'.runtime','speech-auth.json')}),
  stopLocalAudio:()=>{for(const playback of localPlaybacks)playback.abort()}});
 const liveTimer=setInterval(()=>liveBridge.sweep(),1000);liveTimer.unref();
+// Whether Claude workers can use the member's normal sign-in instead of a saved token (see claude-stored-signin.mjs).
+refreshStoredSignIn().catch(()=>{});
+setInterval(()=>{refreshStoredSignIn().catch(()=>{})},10*60*1000).unref();
 const artifacts=new ArtifactHandoff({load:()=>readJson(root,`${ROOT}/artifact-handoffs.json`,{}),save:state=>writeJson(root,`${ROOT}/artifact-handoffs.json`,state),onExpired:item=>{
  const replaced=hub.retireCompletion(item.completionId),outcome=replaced&&item.completionText?artifactOutcomeSpeech({}, {text:item.completionText})+' ':'';
  hub.publish(`artifact:${item.id}`,outcome+artifactSpeech([item.artifact],'failed',item.target.kind),{appScope:item.target.kind,kind:'completion-error',taskId:item.artifact.taskId});
@@ -263,7 +267,7 @@ server.on('request',async(req,res)=>{
     case '/work/keep':return json(terminals.setKeep(b.id,b.keep));
    }
   }
-  if(['/services','/work/services'].includes(url.pathname)&&req.method==='GET')return json({bridge:{online:true,pid:process.pid,uptimeSeconds:Math.round(process.uptime()),memoryMiB:Math.round(process.memoryUsage().rss/1048576)},surfaces:hub.live(),providers:providerHealth(),voice:fastVoiceStatus(),speech:{eventsConnected:speechLink.connected(),url:speech,shared:speech.endsWith(':3108'),health:await speechHealth(),captureEvents:hub.captureDiagnostics()},tasks:terminals.list().map(t=>({id:t.id,title:t.title,state:t.state,provider:t.provider})),legacyQueue:{online:!!health(root),pending:list('queue').length},shutdownCommand:'scripts/services.ps1 -Action Stop',note:'Only V2-owned services are stopped. The shared speech service and original V1 services are retained.'});
+  if(['/services','/work/services'].includes(url.pathname)&&req.method==='GET')return json({bridge:{online:true,pid:process.pid,uptimeSeconds:Math.round(process.uptime()),memoryMiB:Math.round(process.memoryUsage().rss/1048576)},surfaces:hub.live(),providers:providerHealth(),claudeSignIn:signInReport(),voice:fastVoiceStatus(),speech:{eventsConnected:speechLink.connected(),url:speech,shared:speech.endsWith(':3108'),health:await speechHealth(),captureEvents:hub.captureDiagnostics()},tasks:terminals.list().map(t=>({id:t.id,title:t.title,state:t.state,provider:t.provider})),legacyQueue:{online:!!health(root),pending:list('queue').length},shutdownCommand:'scripts/services.ps1 -Action Stop',note:'Only V2-owned services are stopped. The shared speech service and original V1 services are retained.'});
   if(url.pathname==='/shutdown'&&req.method==='POST'){
    if([...terminals.live.keys()].some(id=>terminals.get(id).execution!=='native')||active.size||classifierProcesses().total)return json({error:'Stop active terminal tasks and voice requests first. Saved conversations and message-box drafts are retained.'},409);
    // Persist intent before releasing the port so recovery cannot undo an explicit Stop.

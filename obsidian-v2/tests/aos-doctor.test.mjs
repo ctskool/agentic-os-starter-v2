@@ -395,7 +395,7 @@ test('every run prints every line, even with the bridge down or no vault configu
   const install = installation(); fs.rmSync(install.at.vaultFile);
   const found = await examine(services, install, {full: true});
   const expected = ['Node.js 22 or newer', 'Vault configured', 'Vault has the daily-note schema', 'Obsidian plugin files installed', 'Plugin switched on in Obsidian',
-    TERMINAL, 'Python helper for conversations inside Obsidian', 'Recovery monitor running', `Bridge answering on ${services.ports.bridge}`, `Jarvis HUD answering on ${services.ports.jarvis}`, 'claude CLI', 'codex CLI', VOICE[0], HOTKEY, ...VOICE.slice(1), 'Jev fast voice routing', 'Live voice (OpenAI key)', 'A real workflow end to end'];
+    TERMINAL, 'Python helper for conversations inside Obsidian', 'Recovery monitor running', `Bridge answering on ${services.ports.bridge}`, `Jarvis HUD answering on ${services.ports.jarvis}`, 'claude CLI', 'codex CLI', 'Claude connectors in background work', VOICE[0], HOTKEY, ...VOICE.slice(1), 'Jev fast voice routing', 'Live voice (OpenAI key)', 'A real workflow end to end'];
   assert.deepEqual(found.results.map(item => item.name), expected);
   for (const name of ['Vault has the daily-note schema', 'claude CLI', ...VOICE, HOTKEY, 'A real workflow end to end']) { assert.equal(found.line(name).status, 'SKIP', name); assert.match(found.line(name).detail, /not (run|checked)/); }
   assert.equal(found.line(TERMINAL).status, 'SKIP'); assert.match(found.line(TERMINAL).detail, /no vault configured/);
@@ -572,4 +572,26 @@ test('the Live voice line: skipped until a key is saved, then says what OpenAI t
   save({consentVersion: CONSENT_VERSION + 1});
   const stale = await examine(services, install, {checkLive: async () => { throw new Error('must not be asked'); }});
   assert.equal(stale.line(LIVE).status, 'FAIL'); assert.equal(stale.line(LIVE).detail, 'Live voice needs current consent.'); assert.match(stale.text, /save the key and consent again/);
+});
+
+test('the connector line says whether a saved Claude token leaves background work without calendar and mail', async () => {
+  const CHECK = 'Claude connectors in background work', install = installation();
+  const claude = {providers: {claude: {installed: true, version: '1.0', command: process.execPath}}, speech: 'shared'};
+  const seen = async (claudeSignIn, more = {}) => (await examine(await fakeServices({...claude, ...more, ...(claudeSignIn ? {claudeSignIn} : {})}), install)).line(CHECK);
+  const older = await seen(null);
+  assert.equal(older.status, 'SKIP'); assert.match(older.detail, /does not report this yet/);
+  const plain = await seen({token: false, stored: null, fallback: false});
+  assert.equal(plain.status, 'PASS'); assert.match(plain.detail, /normal Claude sign-in/);
+  const both = await seen({token: true, stored: true, fallback: false});
+  assert.equal(both.status, 'PASS'); assert.match(both.detail, /CLAUDE_CODE_OAUTH_TOKEN is saved.*normal Claude sign-in instead.*connectors stay available/);
+  const waiting = await seen({token: true, stored: null, fallback: false});
+  assert.equal(waiting.status, 'SKIP'); assert.match(waiting.detail, /has not checked yet/);
+  const only = await examine(await fakeServices({...claude, claudeSignIn: {token: true, stored: false, fallback: false}}), install);
+  assert.equal(only.line(CHECK).status, 'FAIL'); assert.equal(only.line(CHECK).optional, true);
+  assert.match(only.line(CHECK).detail, /only through a saved CLAUDE_CODE_OAUTH_TOKEN, which has no connectors: Plan Today, Inbox Brief/);
+  assert.match(only.text, /fix: Open a terminal, run `claude` and sign in with \/login/);
+  const back = await seen({token: true, stored: true, fallback: true});
+  assert.equal(back.status, 'FAIL'); assert.match(back.detail, /stored Claude sign-in stopped working/);
+  const none = await seen({token: true, stored: false, fallback: false}, {providers: {codex: {installed: true, version: '1', command: process.execPath}}});
+  assert.equal(none.status, 'SKIP'); assert.match(none.detail, /Claude Code is not installed/);
 });

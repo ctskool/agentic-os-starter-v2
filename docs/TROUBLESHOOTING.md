@@ -79,6 +79,8 @@ See [Live voice setup](LIVE-VOICE.md) for the settings and data disclosure.
 
 **Plan Today says the calendar is unavailable.** Connect Google Calendar in your coding tool (Claude Code: `/mcp`; Codex: connector settings), then run it again.
 
+**The calendar is connected and Plan Today still says it is unavailable.** Run `node aos.mjs doctor` and read the **Claude connectors in background work** line. If your computer has a saved `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), a Claude Code started with it gets none of your account's connectors. The system uses your normal Claude sign-in for workflows instead whenever you have one. If the line fails, open a terminal, run `claude`, sign in with `/login`, and run the doctor again. The saved token can stay for your other tools.
+
 **The weekly-usage meter says "unavailable".** Codex: sign in to the Codex CLI once. Claude on Windows: run `claude` once; the meter renews its sign-in by itself afterwards. Claude on Mac: not supported yet. Claude Code keeps its sign-in in the Mac Keychain, which this system does not open; hover the meter to read that, and type `/usage` in Claude Code to see your usage. Everything else works as normal.
 
 **After moving the repository folder.** Run `node aos.mjs autostart off` from the old location first if you can, then `node aos.mjs setup --vault "<path>" --autostart yes` from the new one.

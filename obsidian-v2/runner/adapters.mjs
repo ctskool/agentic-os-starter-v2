@@ -8,6 +8,7 @@ import {workerEnv} from './workflows.mjs';
 import {withoutOpenAIKey} from './child-env.mjs';
 import {projectRoot} from './runtime.mjs';
 import {stopCliProcessTree} from './cli-process-tree.mjs';
+import {useStoredSignIn,SIGN_IN_TOKEN} from './claude-stored-signin.mjs';
 const resultSchema=fs.readFileSync(path.join(projectRoot,'runner/result-schema.json'),'utf8');
 const classifierInstructions=fs.readFileSync(path.join(projectRoot,'runner/voice-classifier-instructions.md'),'utf8');
 // A background Claude worker runs with --print: nobody is there to approve a tool, so a tool that is not pre-approved
@@ -17,7 +18,7 @@ const classifierInstructions=fs.readFileSync(path.join(projectRoot,'runner/voice
 // the same as a background Codex worker already has (approval_policy="never", connectors on). --allowedTools only
 // pre-approves; the workflow prompt still forbids sending, deleting and changing accounts unless a workflow says so.
 export const CLAUDE_WORKER_GOOGLE=Object.freeze(['mcp__claude_ai_Google_Calendar__*','mcp__claude_ai_Gmail__*','mcp__claude_ai_Google_Drive__*']);
-export function classifierEnv(job,inherited=process.env){
+export function classifierEnv(job,inherited=process.env,{storedSignIn=useStoredSignIn()}={}){
  const env=withoutOpenAIKey(inherited);
  if(job.provider==='claude'){
   // Use Claude Code's sign-in without inheriting an API-billed gateway or
@@ -25,6 +26,9 @@ export function classifierEnv(job,inherited=process.env){
   // OAuth credentials and the user's config directory remain available.
   const overrides=new Set(['ANTHROPIC_API_KEY','ANTHROPIC_AUTH_TOKEN','ANTHROPIC_BASE_URL','CLAUDE_CODE_USE_BEDROCK','CLAUDE_CODE_USE_VERTEX','CLAUDE_CODE_USE_FOUNDRY','CLAUDE_CODE_SIMPLE','CLAUDECODE']);
   for(const name of Object.keys(env))if(overrides.has(name.toUpperCase()))delete env[name];
+  // A full worker may need the account's connectors, which a CLI signed in by the saved token does not get.
+  // Only once the CLI has confirmed a normal stored sign-in; the classifier needs no connectors and keeps it.
+  if(storedSignIn&&job.skill&&!job.restricted)for(const name of Object.keys(env))if(name.toUpperCase()===SIGN_IN_TOKEN)delete env[name];
   env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC='1';
   env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE='1';
   if(!job.skill||job.restricted){

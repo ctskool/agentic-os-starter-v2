@@ -3,8 +3,11 @@ import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} fro
 import {MARKER,ROOT} from '../shared/contract.mjs';
 import {assertVault,vaultPath,writeJson,processJob,atomicRename} from './core.mjs';
 import {findCli,executeCli} from './adapters.mjs';
+import {withSignInFallback,refreshStoredSignIn} from './claude-stored-signin.mjs';
 const base=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const root=assertVault(configuredVault());
+// A saved Claude token would leave these workers without connectors: see claude-stored-signin.mjs.
+refreshStoredSignIn().catch(()=>{});
 for(const dir of ['queue','processing','runs','logs','rejected'])fs.mkdirSync(vaultPath(root,`${ROOT}/${dir}`),{recursive:true});
 const lock=vaultPath(root,`${ROOT}/runner.lock`);
 if(fs.existsSync(lock)){
@@ -28,7 +31,7 @@ try{
   if(name){
    const incoming=vaultPath(root,`${ROOT}/queue/${name}`), claimed=vaultPath(root,`${ROOT}/processing/${name}`);
    try{atomicRename(incoming,claimed)}catch(e){if(['EPERM','EACCES','EBUSY'].includes(e.code)){console.error('Queue claim deferred:',e.message);await new Promise(r=>setTimeout(r,1000));continue}throw e}busy=true;heartbeat();
-   try{const job=JSON.parse(fs.readFileSync(claimed,'utf8'));if(name!==`${job.id}.json`)throw new Error('Filename does not match job ID');const record=await processJob(root,job,(j,p)=>executeCli(root,j,p));console.log(`${record.id} ${record.provider} ${record.status}`)}
+   try{const job=JSON.parse(fs.readFileSync(claimed,'utf8'));if(name!==`${job.id}.json`)throw new Error('Filename does not match job ID');const record=await processJob(root,job,(j,p)=>withSignInFallback(j,()=>executeCli(root,j,p)));console.log(`${record.id} ${record.provider} ${record.status}`)}
    catch(e){fs.renameSync(claimed,vaultPath(root,`${ROOT}/rejected/${Date.now()}-${name}`));console.error('Rejected job:',e.message)}
    busy=false;heartbeat();
   }

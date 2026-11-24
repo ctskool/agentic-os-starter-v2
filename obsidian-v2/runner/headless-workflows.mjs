@@ -3,6 +3,7 @@ import path from 'node:path';
 import {SKILLS,ROOT} from '../shared/contract.mjs';
 import {writeJson} from './core.mjs';
 import {saveWorkflowResult} from './terminal-workflows.mjs';
+import {withSignInFallback} from './claude-stored-signin.mjs';
 
 // A button is a bounded report job, not a resumable conversation. The normal
 // authenticated CLI executes it with pipes; no PTY or native launch ticket exists.
@@ -23,7 +24,7 @@ export function startHeadlessWorkflow(manager,workflow,appScope){
  manager.live.set(job.id,live);
  live.done=Promise.resolve().then(()=>{
   if(controller.signal.aborted)throw new Error('Workflow stopped.');
-  return manager.execute(manager.root,{...job,execution:'headless'},workflow.prompt,{signal:controller.signal});
+  return withSignInFallback(job,()=>manager.execute(manager.root,{...job,execution:'headless'},workflow.prompt,{signal:controller.signal}));
  }).then(result=>{
   if(manager.live.get(job.id)!==live)return;
   if(controller.signal.aborted)throw new Error('Workflow stopped. The report was not replaced.');

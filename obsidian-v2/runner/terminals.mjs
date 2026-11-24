@@ -13,6 +13,7 @@ import {destinationFor,directWorkflow} from './workflows.mjs';
 import {windowsArguments,TerminalPromptDetector,TerminalInputBoundary,stopOwnedPtyTree,releaseStoppedWindowsPty} from './terminal-transport.mjs';
 import {TaskRetention,migrateTaskRetention,TASK_SWEEP_MS} from './task-retention.mjs';
 import {withoutOpenAIKey} from './child-env.mjs';
+import {workerSignInEnv} from './claude-stored-signin.mjs';
 // Idle close: default 30 minutes; AOS_V2_TERMINAL_IDLE_MINUTES overrides, 0 or "off" disables it.
 export const IDLE_STOP_MS=30*60*1000,IDLE_SWEEP_MS=60*1000;
 // A one-click close is refused while the CLI's screen changed this recently: a working CLI keeps redrawing, also
@@ -270,7 +271,9 @@ export class TerminalManager {
   const events=this.artifactOutbox(r.id);
   const spec=terminalSpec(this.root,r,this.spawn?{command:r.provider,prefix:[]}:undefined,{resumePrompt,spoken,events});
   const spawn=this.spawn||require('node-pty').spawn;
-  const env=withoutOpenAIKey({...process.env,TERM:'xterm-256color',COLORTERM:'truecolor',AOS_WORK_EVENTS:path.join(this.folder(r.id),'events'),AOS_WORK_SESSION:r.sessionId||'',AOS_WORK_PROMPT:spec.args[spec.args.length-1],AOS_ARTIFACT_NODE:process.execPath,AOS_ARTIFACT_HELPER:path.join(projectRoot,'runner','artifact-result.mjs')});
+  // A Claude conversation started on the saved token would have no connectors: see claude-stored-signin.mjs.
+  const signIn=r.provider==='claude'?workerSignInEnv:value=>value;
+  const env=signIn(withoutOpenAIKey({...process.env,TERM:'xterm-256color',COLORTERM:'truecolor',AOS_WORK_EVENTS:path.join(this.folder(r.id),'events'),AOS_WORK_SESSION:r.sessionId||'',AOS_WORK_PROMPT:spec.args[spec.args.length-1],AOS_ARTIFACT_NODE:process.execPath,AOS_ARTIFACT_HELPER:path.join(projectRoot,'runner','artifact-result.mjs')}));
   // A parent Claude session must not make the new, independent CLI look nested.
   delete env.CLAUDECODE;
   const proc=spawn(spec.command,process.platform==='win32'&&!this.spawn?windowsArguments(spec.args):spec.args,{cwd:this.root,env,cols:110,rows:30,name:'xterm-256color',useConpty:true});
