@@ -47,7 +47,8 @@ async function fixture(t,{mode='voice',context=true,speechMode,route,hasSkill,mo
   startWorkflow:job=>{work.push(['workflow',job]);tasks.set(job.id,{id:job.id,...job.selection,execution:'cli',state:'working',title:job.skill,created:Date.now(),turns:[]});return {id:job.id}},
   continueWorkflow:(id,job)=>{work.push(['workflow',job]);return {id}},
   stop:id=>{work.push(['stop',id]);tasks.get(id).state='stopped'},
-  send:(id,prompt)=>work.push(['send',id,prompt])
+  send:(id,prompt)=>work.push(['send',id,prompt]),
+  sendWhenFree:(id,prompt)=>work.push([['starting','working'].includes(tasks.get(id)?.state)?'queue':'send',id,prompt])
  };
  const saved=()=>{const current=readCurrentState(root);return {selection:chosen,workTarget:current.claude,conversationEpoch:readConversationEpoch(root,'claude'),appScope:'web',revision:current.revision}};
  const hub=new VoiceHub({now:()=>hubTime,canSpeak:()=>prefs.voiceMode!=='live',emit:e=>broadcasts.push(e),onPublish:item=>bridge.calls.completion(item)});
@@ -614,4 +615,24 @@ test('a request refused because the selected task is busy says so; any other fai
  failure='Something unexpected broke.';
  id=f.turn('Open the dashboard');await f.say('Say that again in a moment.',id);await f.idle();
  assert.equal(f.work.length,0);
+});
+
+test('on a call, a follow-up for a working task waits for it; if the task frees up first, it is sent at once',async t=>{
+ const f=await fixture(t,{mode:'auto',modelReply:{tier:3,reply:'Working on that.'}});await f.start();
+ f.turn('Draft a launch plan');await until(()=>f.call?.staged);await f.idle();f.advance(2500);await until(()=>f.work.length===1);await f.idle();
+ await f.post('/voice/live/context',f.saved());
+ const first=f.saved().workTarget;assert.equal(f.tasks.get(first).state,'working');
+ let id=f.turn('Make the second half shorter and punchier');
+ const stage=await until(()=>f.call?.staged);await f.idle();
+ assert.match((await f.say('add that as soon as',id)).content,/^Got it\. I'll add that as soon as that task is free\.$/);
+ f.advance(2500);await f.idle();
+ assert.equal(f.work.length,2);assert.deepEqual(f.work[1].slice(0,2),['queue',first]);assert.match(f.work[1][2],/Make the second half shorter and punchier/);
+ assert.equal(f.appends().some(event=>/Say that again|still working/.test(event.content)),false);
+ // The same request, when the task finishes its turn inside the cancel window, is not refused for having changed.
+ id=f.turn('Give it a stronger closing line');await until(()=>f.call?.staged);await f.idle();
+ f.tasks.get(first).state='ready';
+ f.advance(2500);await f.idle();
+ assert.equal(f.work.length,3);assert.deepEqual(f.work[2].slice(0,2),['send',first]);
+ assert.equal(f.appends().some(event=>/Say that again/.test(event.content)),false);
+ assert.ok(stage.actionId);
 });

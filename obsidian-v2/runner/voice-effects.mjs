@@ -44,7 +44,17 @@ export function checkVoiceAction(root,terminals,plan,{request,profile,handoffTar
  if(!isDeepStrictEqual(context.request,request)||!isDeepStrictEqual(context.profile,profile)||
     !isDeepStrictEqual(context.handoffTarget,handoffTarget)||!isDeepStrictEqual(context.current,current)||
     context.resolvedTarget!==resolvedTarget||context.epoch!==readConversationEpoch(root,provider,scope))throw changed();
- for(const [id,revision]of targets)if(!isDeepStrictEqual(revision,snapshot(taskRevision(terminals,id))))throw changed();
+ // A request that waits for a working conversation is still good when that conversation finishes its turn before
+ // the request is committed: it is then sent at once. Every other change to the conversation still refuses it.
+ const waitsFor=new Set(effects.filter(effect=>effect.site==='queueFollowup').map(effect=>effect.details.taskId));
+ // Only another action on that same conversation makes its exact state matter again; bookkeeping does not.
+ for(const effect of effects)if(['send','continueWorkflow','stop','reopenArtifact'].includes(effect.site))waitsFor.delete(effect.details.taskId);
+ const settled=({state,turnId,...rest})=>({...rest,busy:['starting','working'].includes(state)||state==='ready'});
+ for(const [id,revision]of targets){
+  const now=snapshot(taskRevision(terminals,id));
+  if(waitsFor.has(id)&&revision&&now?isDeepStrictEqual(settled(revision),settled(now)):isDeepStrictEqual(revision,now))continue;
+  throw changed();
+ }
  return effects.map(effect=>{
   const {site,details}=effect;
   if(hasWorkflowDestination(site)&&details.destination!==destinationFor(details.job))throw changed();
@@ -76,6 +86,7 @@ export function voiceEffectRunner(root,terminals,{guard,enqueue,resolveCli,updat
     case 'editDaily':return replaceDaily(root,note,()=>check(site,details));
     case 'stop':check(site,details);return terminals.stop(taskId);
     case 'send':check(site,details);return terminals.send(taskId,details.prompt,options);
+    case 'queueFollowup':check(site,details);return terminals.sendWhenFree(taskId,details.prompt,options);
     case 'continueWorkflow':check(site,details);return terminals.continueWorkflow(taskId,job,options);
     case 'startWorkflow':check(site,details);return terminals.startWorkflow(job);
     case 'start':check(site,details);return terminals.start(job);
@@ -90,6 +101,7 @@ export function voiceEffectRunner(root,terminals,{guard,enqueue,resolveCli,updat
 
 export function describeWork(site,{job,taskTitle}){
  if(site==='send')return `Continue “${taskTitle}”`;
+ if(site==='queueFollowup')return `Add to “${taskTitle}” when it is free`;
  if(site==='continueWorkflow')return `Run the ${job.skill} workflow in “${taskTitle}”`;
  if(site==='startWorkflow')return `Start the ${job.skill} workflow in your ${providerName(job.selection.provider)} terminal`;
  if(site==='enqueue')return job.skill==='voice-ask'?'Queue the requested work':`Queue the ${job.skill} workflow`;

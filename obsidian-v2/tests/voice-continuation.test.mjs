@@ -16,6 +16,7 @@ function fixture(t,provider){
  const available=id=>{const task=get(id);if(task.state==='stopped')throw new Error('Resume this terminal before sending a follow-up.');if(task.state!=='ready')throw new Error('This task is working or needs terminal input. Wait for its answer, or type directly in its terminal.');return task};
  const terminals={live:new Map(),list:()=>tasks,get,
   send(id,text){const task=available(id);task.state='working';calls.push({kind:'send',id,text});return task},
+  sendWhenFree(id,text){const task=get(id);if(['starting','working'].includes(task.state)){calls.push({kind:'queue',id,text});return task}return this.send(id,text)},
   start(options){const task={id:options.id,...options.selection,title:options.title,state:'working',turns:[]};tasks.push(task);calls.push({kind:'start',...options});return task},
   startWorkflow(options){const direct=['metrics-pull','github-trending'].includes(options.skill);const task={id:options.id,...options.selection,title:options.skill,state:'working',turns:[],execution:direct?'script':'cli',workflow:{job:{skill:options.skill},destination:'fixture.md'}};tasks.push(task);calls.push({kind:'workflow',...options});return task},
   continueWorkflow(id,options){const task=available(id);assert.equal(options.selection.provider,task.provider);assert.equal(options.selection.model,task.model);task.state='working';calls.push({kind:'continue-workflow',id,options});return task}
@@ -155,6 +156,7 @@ for(const provider of ['codex','claude']){
    assert.equal(result.action,'task');assert.notDeepEqual(result.workIds,[task.id],'the busy conversation is not the one doing it');
    assert.equal(result.reply,'Running Weekly Review on its own while that task finishes.');
    assert.equal(task.state,state,'the busy conversation is left exactly as it was');
+   assert.equal(f.updates.some(update=>update.id===result.workIds[0]),false,'the selection stays on the task the caller was on');
   }
   // A conversation that is free still takes the workflow, on a call as off one.
   const free=f.add({state:'ready'});
@@ -165,7 +167,35 @@ for(const provider of ['codex','claude']){
   const f=fixture(t,provider),live={transport:'live',liveCallId:crypto.randomUUID()};
   const busy=f.add({state:'working'});
   await assert.rejects(f.speak('Run the weekly review',busy.id,f.output()),/working or needs terminal input/);
-  await assert.rejects(f.speak('Research RubyGems',busy.id,f.output(),live),/working or needs terminal input/);
   assert.equal(f.calls.length,0);
+  // On a call the free-form request is not refused either: it waits for that conversation. Still no replacement.
+  const held=await f.speak('Research RubyGems',busy.id,f.output(),live);
+  assert.deepEqual(f.calls.map(call=>call.kind),['queue']);assert.equal(f.calls[0].id,busy.id);assert.match(f.calls[0].text,/^Research RubyGems/);
+  assert.deepEqual(held.workIds,[busy.id]);assert.equal(held.reply,"Got it. I'll add that as soon as that task is free.");
+  assert.equal(f.tasks.length,1,'no new conversation was made');
+  // One that is waiting for an approval takes nothing, on a call or off it.
+  const approval=f.add({state:'needs input'});
+  await assert.rejects(f.speak('Research RubyGems',approval.id,f.output(),live),/working or needs terminal input/);
+ });
+}
+
+// A call starts fresh: the first thing said on it does not reopen a conversation that was stopped before the call.
+for(const provider of ['codex','claude']){
+ test(`${provider}: a call does not reopen a conversation stopped before it, but keeps using one of its own`,async t=>{
+  const f=fixture(t,provider),live={transport:'live',liveCallId:crypto.randomUUID()};
+  for(const state of ['stopped','error']){
+   const old=f.add({state}),before=f.calls.length;
+   const result=await f.speak('Make me a one page explainer of how black holes form',old.id,f.output(),live);
+   assert.equal(f.calls.length,before+1,state);assert.equal(f.calls.at(-1).kind,'start',state);
+   assert.notDeepEqual(result.workIds,[old.id]);assert.equal(old.state,state,'the earlier conversation is left as it was');
+  }
+  // The same stopped conversation, when this call is the one that used it, is still continued.
+  const own=f.add({state:'ready'});own.state='ready';
+  await f.speak('Make it shorter',own.id,f.output(),{...live,liveTaskIds:[own.id]});
+  assert.equal(f.calls.at(-1).kind,'send');assert.equal(f.calls.at(-1).id,own.id);
+  // An open conversation the caller has selected is used, as before.
+  const open=f.add({state:'ready'});
+  await f.speak('Tighten the introduction',open.id,f.output(),live);
+  assert.equal(f.calls.at(-1).kind,'send');assert.equal(f.calls.at(-1).id,open.id);
  });
 }

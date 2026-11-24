@@ -109,10 +109,18 @@
 
 .v2-stage[data-live-state] .core-transition { filter:drop-shadow(0 0 13px #9f85e76b); }
 .v2-stage[data-live-state=standby] .core-transition { opacity:.52; }
-.live-voice-settings p { grid-column:1 / -1; margin:4px 0 0; }
-.voice-conversation-menu .live-voice-settings input[type=checkbox] { width:16px; height:16px; }
+/* The voice menu opens over the sections below it. Each section is its own stacking layer (the boot animation
+   leaves it one), and later sections paint above earlier ones, so the open menu's section is lifted: before
+   this, the AI wire's text showed through the lower half of the menu (2026-11-23). */
+.hud .block:has(.voice-conversation-controls[open]) { z-index:30; }
+.live-voice-settings p { grid-column:1 / -1; margin:-3px 0 2px; color:#8f9bb0; }
+.voice-conversation-menu .live-voice-settings input[type=checkbox] { width:16px; height:16px; margin:0; flex:none; accent-color:#947bd0; cursor:pointer; }
+/* A switch is one row: its name on the left, the box on the right, and its one-line explanation underneath. */
+.voice-conversation-menu .live-voice-settings label:has(input[type=checkbox]) { grid-column:1 / -1; display:flex; align-items:center; justify-content:space-between; gap:12px; padding-top:8px; border-top:1px solid #222a37; color:#e5e9ef; font-size:11px; cursor:pointer; }
 .live-voice-mode { grid-column:1 / -1; display:flex; align-items:center; gap:5px; }
 .live-voice-mode span { margin-right:auto; }
+.voice-conversation-menu .live-voice-mode button { padding:4px 11px; min-height:26px; background:transparent; color:#aebacb; border:1px solid #454f60; border-radius:4px; font:11px/1.4 var(--font-mono),monospace; cursor:pointer; }
+.voice-conversation-menu .live-voice-mode button:hover:not(:disabled):not([aria-pressed=true]) { color:#e5e9ef; border-color:#627089; }
 .voice-conversation-menu .live-voice-mode button[aria-pressed=true] { color:#dfd2ff; border-color:#947bd0; background:#392e52; }
 .voice-conversation-menu .live-voice-mode button:disabled { opacity:.45; cursor:default; }
 .live-call { display:grid; gap:8px; margin:8px 0; }

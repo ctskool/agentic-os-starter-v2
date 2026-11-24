@@ -184,7 +184,10 @@ export class LiveDelegations {
   stage.undo=this.schedule(finishUndo,Math.max(0,until-this.now()));
   const receipt=stage.action.receipt;
   const slash=receipt?.decision?.rule==='frontdoor.slashSkill';
-  call.answers.speak(delegation,slash?receipt.reply:`Starting ${stage.spokenDescription.replace(/^Start /i,'')}…`);
+  // Two cases need their own sentence, because "Starting…" would say the wrong thing: a workflow that runs on its
+  // own while the selected task works, and a follow-up that waits for that task.
+  const explained=receipt?.reply&&receipt.decision?.effects?.some(effect=>effect==='busy-target-separate'||effect==='queueFollowup');
+  call.answers.speak(delegation,slash||explained?receipt.reply:`Starting ${stage.spokenDescription.replace(/^Start /i,'')}…`);
  }
  view(result,call){return this.requestContext().liveView?.(result,call.appScope)??result}
  async route(call,pending,request,delegation,phase,stage){
@@ -211,7 +214,7 @@ export class LiveDelegations {
   if(this.isCurrent(call)){
    const started=stage.action.effects.flatMap(({site,details})=>{
     if(['start','startWorkflow','enqueue'].includes(site))return [details.job.id];
-    return ['send','continueWorkflow'].includes(site)?[details.taskId]:[];
+    return ['send','queueFollowup','continueWorkflow'].includes(site)?[details.taskId]:[];
    });
    call.taskUpdates?.started(started,this.now());
    call.answers.result(delegation,result,this.view(result,call),{speak:!(stage.undo&&result.action==='task')});

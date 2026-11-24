@@ -67,6 +67,11 @@ export function terminalSpec(root,record,cli=findCli(record.provider),{resumePro
  args.push('--',explicit&&!(record.slashSkill&&!record.sessionId)?`${request}${spoken?`\n\n${WORKER_SPOKEN_STYLE}`:''}\n\n${handoff}`:request);
  return {command:cli.command,args:[...cli.prefix,...args]};
 }
+// A follow-up spoken for a conversation that is in the middle of a turn waits in the bridge and is sent when that
+// turn ends. It is never typed into a working CLI: the CLI could be showing an approval prompt that would take the
+// words as its answer. Held in memory with the live session, so a conversation that stops drops what was waiting.
+export const MAX_QUEUED_FOLLOWUPS=3;
+export const QUEUED_FOLLOWUP_MAX_AGE_MS=30*60*1000;
 export class TerminalManager {
  constructor(root,{directory=path.join(projectRoot,'.runtime','terminals'),spawn,direct=directWorkflow,execute=executeCli,stopTree=process.platform==='win32'&&!spawn,now=Date.now,schedule=setInterval,cancelSchedule=clearInterval,defer=setTimeout,cancelDeferred=clearTimeout,deliveryWatch=createCodexDeliveryWatch,idleStopMs=terminalIdleStopMs(),voiceBusy=()=>false}={}){
   this.root=root;this.directory=path.resolve(directory);this.spawn=spawn;this.direct=direct;this.stopTree=stopTree;this.records=new Map();this.live=new Map();this.now=now;this.cancelSchedule=cancelSchedule;this.closed=false;
@@ -165,7 +170,7 @@ export class TerminalManager {
   fs.writeFileSync(metadata+'.tmp',JSON.stringify({taskId:r.id,requestKey:r.artifactRequestKey,outbox,vault:this.root}));atomicRename(metadata+'.tmp',metadata);
  }
  save(r){if(this.records.get(r.id)!==r||this.retention.retired.has(r.id))return;const file=path.join(this.folder(r.id),'session.json');fs.writeFileSync(file+'.tmp',JSON.stringify(r,null,2));atomicRename(file+'.tmp',file);this.onChange?.(r)}
- list(){return [...this.records.values()].sort((a,b)=>b.created-a.created).map(r=>({...r,expiresAt:this.retention.expiresAt(r,this.live.has(r.id)),prompt:undefined,vault:undefined,native:undefined,activeLiveCallId:undefined,pendingArtifacts:undefined,artifactRequestKey:undefined,workflowHistory:undefined,completedTurnIds:undefined,workflow:r.workflow?{skill:r.workflow.job.skill,destination:r.workflow.destination,startedAt:r.workflow.startedAt}:undefined}))}
+ list(){return [...this.records.values()].sort((a,b)=>b.created-a.created).map(r=>({...r,queuedFollowups:this.live.get(r.id)?.queued?.length||0,expiresAt:this.retention.expiresAt(r,this.live.has(r.id)),prompt:undefined,vault:undefined,native:undefined,activeLiveCallId:undefined,pendingArtifacts:undefined,artifactRequestKey:undefined,workflowHistory:undefined,completedTurnIds:undefined,workflow:r.workflow?{skill:r.workflow.job.skill,destination:r.workflow.destination,startedAt:r.workflow.startedAt}:undefined}))}
  setKeep(id,keep){if(typeof keep!=='boolean')throw new Error('Keep must be true or false');const r=this.get(id);if(r.keep!==keep){r.keep=keep;if(!keep)this.touch(r);this.save(r)}return {...r,expiresAt:this.retention.expiresAt(r,this.live.has(id))}}
  prune(){
   if(this.closed)return;
@@ -351,6 +356,28 @@ export class TerminalManager {
   if(live.exitObserved)throw new Error('This terminal is still closing. Wait for it to stop before sending a follow-up.');
   if(r.state!=='ready'||live.inputBoundary?.hasDraft)throw new Error(r.state==='needs input'&&r.error?r.error:'This task is working or needs terminal input. Wait for its answer, or type directly in its terminal.');
  }
+ // Sends now when the conversation is free; holds the request when it is in the middle of a turn.
+ sendWhenFree(id,text,{resumeStopped=false,spoken=false,openWhenDone=false,liveCallId}={}){
+  const r=this.get(id),live=this.live.get(id);
+  if(!live||live.exitObserved||!['starting','working'].includes(r.state))return this.send(id,text,{resumeStopped,spoken,openWhenDone,liveCallId});
+  if(r.execution==='headless'||r.execution==='script')throw new Error('Background workflows do not have an interactive terminal. Start a new workflow instead.');
+  text=cleanPrompt(text);
+  live.queued=(live.queued||[]).filter(item=>item.at>=this.now()-QUEUED_FOLLOWUP_MAX_AGE_MS);
+  if(live.queued.length>=MAX_QUEUED_FOLLOWUPS)throw new Error(`That task already has ${MAX_QUEUED_FOLLOWUPS} requests waiting. Let it catch up first.`);
+  live.queued.push({text,options:{spoken,openWhenDone,...(liveCallId?{liveCallId}:{})},at:this.now()});
+  return r;
+ }
+ // Called when a turn ends. One waiting request per turn: sending it starts the next turn, and the one after
+ // goes when that ends. A request that cannot be sent yet (a draft in the box, an approval) stays for the next turn.
+ deliverQueued(id){
+  const r=this.records.get(id),live=this.live.get(id);
+  if(!r||!live?.queued?.length||live.exitObserved)return false;
+  live.queued=live.queued.filter(item=>item.at>=this.now()-QUEUED_FOLLOWUP_MAX_AGE_MS);
+  if(!live.queued.length||r.state!=='ready')return false;
+  const next=live.queued[0];
+  try{this.send(id,next.text,next.options)}catch{return false}
+  live.queued.shift();return true;
+ }
  send(id,text,{resumeStopped=false,spoken=false,openWhenDone=false,liveCallId}={}){const r=this.get(id);text=cleanPrompt(text);
   this.assertFollowup(id,{resumeStopped});this.collect(id);this.assertFollowup(id,{resumeStopped});
   // A promised open stays with the conversation until a turn produces a file.
@@ -496,6 +523,8 @@ export class TerminalManager {
    delete r.activeLiveCallId;
   }
   this.save(r);
+  // After the hook has been fully handled: sending re-reads this conversation's events.
+  if(completion&&this.live.get(id)?.queued?.length)this.defer(()=>{try{this.deliverQueued(id)}catch{}},0);
  }
  close(){this.closed=true;this.cancelSchedule(this.timer);this.cancelSchedule(this.retentionTimer);if(this.idleTimer)this.cancelSchedule(this.idleTimer);for(const id of [...this.live.keys()])this.stop(id)}
 }
