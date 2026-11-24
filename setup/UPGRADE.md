@@ -147,9 +147,9 @@ Check first, without reading any secret file:
 - `node aos.mjs openai-key --check` prints `{"ready":true}` when a key and consent for Live voice are saved. Never open `openai.json`.
 - `node aos.mjs live-context show` lists what a Live call reads when it starts, including any notes of their own.
 - `node aos.mjs dashboard list` shows their saved buttons, and every button now carries a `description` and a `needs` list.
-- `node aos.mjs skills list --provider claude` (or `codex`) shows the skill pack, with a `since` version and an `installed` state for each skill.
+- `node aos.mjs skills list --provider claude` (or `codex`) shows the skill pack, with an `installed` state and whether it was already `offered` for each skill.
 
-Show only what is new to them. Before the update, note the version they are on (`VERSION.json`). Afterwards, a pack skill is new when its `since` is later than that version and its state is `missing`. Do not walk them through choices they already made.
+Show only what is new to them. A pack skill is new to them when its state is `missing` and `offered` is `false`; do not decide by version, because a member whose earlier update nobody walked through never saw skills from that version. After showing pack skills, record them with `node aos.mjs skills offered --skills "<every id you showed>"`, whatever they answered. Do not walk them through choices they already made.
 
 Then, in this order:
 

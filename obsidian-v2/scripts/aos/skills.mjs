@@ -16,6 +16,7 @@ export const SKILLS_HELP = `Usage: node aos.mjs skills <action>
   list [--provider claude|codex]                       what the pack holds, and what is already installed
   install --skills "<id>,<id>" --provider claude|codex  copy the chosen skills into that tool's skills folder
   install --all --provider claude|codex                 copy every skill that works with that tool
+  offered --skills "<id>,<id>"                         remember that these were shown to the member (yes or no)
 
 Installed skills are yours to edit. A copy you changed is never overwritten.`;
 
@@ -46,6 +47,19 @@ function fingerprint(folder, files) {
   return hash.digest('hex');
 }
 const recordFile = runtimeDir => path.join(runtimeDir, 'skill-pack-installed.json');
+// Which pack skills the member has been shown, whatever they answered. "What's new after an update"
+// offers a skill once: comparing versions missed members whose earlier update nobody walked through.
+const offeredFile = runtimeDir => path.join(runtimeDir, 'skill-pack-offered.json');
+function readOffered(runtimeDir) { try { const ids = JSON.parse(fs.readFileSync(offeredFile(runtimeDir), 'utf8')).offered; return Array.isArray(ids) ? ids.filter(id => typeof id === 'string') : []; } catch { return []; } }
+export function recordOffered({ids, packDir, runtimeDir} = {}) {
+  const known = new Set(readSkillPack(packDir).skills.map(skill => skill.id));
+  if (!ids?.length) throw new Error('Name the skills that were shown: skills offered --skills "<id>,<id>"');
+  const unknown = ids.filter(id => !known.has(id));
+  if (unknown.length) throw new Error(`Not in the skill pack: ${unknown.join(', ')}`);
+  const offered = [...new Set([...readOffered(runtimeDir), ...ids])];
+  fs.mkdirSync(runtimeDir, {recursive: true}); fs.writeFileSync(offeredFile(runtimeDir), JSON.stringify({offered}, null, 1));
+  return {offered};
+}
 function readRecord(runtimeDir) { try { const value = JSON.parse(fs.readFileSync(recordFile(runtimeDir), 'utf8')); return value && typeof value === 'object' ? value : {}; } catch { return {}; } }
 function writeRecord(runtimeDir, record) { fs.mkdirSync(runtimeDir, {recursive: true}); fs.writeFileSync(recordFile(runtimeDir), JSON.stringify(record, null, 1)); }
 
@@ -60,13 +74,14 @@ function stateOf(skill, provider, {packDir, home, record}) {
 }
 
 export function listSkillPack({provider, packDir, home = os.homedir(), runtimeDir} = {}) {
-  const pack = readSkillPack(packDir), record = readRecord(runtimeDir);
+  const pack = readSkillPack(packDir), record = readRecord(runtimeDir), offered = new Set(readOffered(runtimeDir));
   const tools = provider ? [provider] : PROVIDERS;
   return {
     skills: pack.skills.filter(skill => !provider || skill.providers.includes(provider)).map(skill => ({
       id: skill.id, label: skill.label, description: skill.description, needs: skill.needs || [], providers: skill.providers, since: skill.since,
       ...(skill.with?.length ? {installsWith: skill.with} : {}),
       installed: Object.fromEntries(tools.filter(tool => skill.providers.includes(tool)).map(tool => [tool, stateOf(skill, tool, {packDir: pack.packDir, home, record}).state])),
+      offered: offered.has(skill.id),
     })),
     folders: Object.fromEntries(tools.map(tool => [tool, skillsFolder(tool, home)])),
   };
@@ -105,13 +120,15 @@ export function installSkillPack({ids, all = false, provider, packDir, home = os
 export function skillsCommand({words = [], flags = {}, log = console.log, at = layout(), options = {}} = {}) {
   const action = words[0] || 'list';
   if (flags.help || action === 'help') { log(SKILLS_HELP); return 0; }
-  if (!['list', 'install'].includes(action) || words.length > 1) throw new Error('Use: skills list  or  skills install');
-  const allowed = action === 'list' ? ['provider'] : ['provider', 'skills', 'all'];
+  if (!['list', 'install', 'offered'].includes(action) || words.length > 1) throw new Error('Use: skills list, skills install  or  skills offered');
+  const allowed = action === 'list' ? ['provider'] : action === 'offered' ? ['skills'] : ['provider', 'skills', 'all'];
   for (const name of Object.keys(flags)) if (!allowed.includes(name)) throw new Error('Unknown skills flag: --' + name);
   if (flags.provider !== undefined && !PROVIDERS.includes(flags.provider)) throw new Error('--provider takes claude or codex.');
   const shared = {runtimeDir: at.runtime, ...options, provider: flags.provider};
+  const ids = typeof flags.skills === 'string' ? flags.skills.split(',').map(id => id.trim()).filter(Boolean) : [];
   const result = action === 'list' ? listSkillPack(shared)
-    : installSkillPack({...shared, all: flags.all === true, ids: typeof flags.skills === 'string' ? flags.skills.split(',').map(id => id.trim()).filter(Boolean) : []});
+    : action === 'offered' ? recordOffered({...shared, ids})
+    : installSkillPack({...shared, all: flags.all === true, ids});
   log(JSON.stringify(result, null, 2));
   return 0;
 }

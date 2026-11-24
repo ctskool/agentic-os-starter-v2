@@ -111,3 +111,26 @@ test('the command refuses what it cannot do and says how to use it', t => {
   assert.equal(run(['install'], {provider: 'claude', skills: 'close-day, yt-search'}), 0);
   assert.deepEqual(JSON.parse(lines.pop()).results.map(item => item.status), ['installed', 'installed']);
 });
+
+test('what the member was shown is remembered, whatever they answered, so a later update offers each skill once', t => {
+  const at = scratch(t), lines = [], run = (words, flags) => skillsCommand({words, flags, log: line => lines.push(line), at: {runtime: at.runtimeDir}, options: {home: at.home, packDir: at.packDir}});
+  const offered = () => Object.fromEntries(listSkillPack(at).skills.map(skill => [skill.id, skill.offered]));
+  // Nothing shown yet: every skill is still to be offered, including ones from an older version
+  // (a member whose earlier update nobody walked through never saw them).
+  assert.ok(Object.values(offered()).every(value => value === false));
+  assert.equal(run(['offered'], {skills: 'close-day, yt-search'}), 0);
+  assert.deepEqual(JSON.parse(lines.pop()).offered, ['close-day', 'yt-search']);
+  assert.equal(offered()['close-day'], true); assert.equal(offered()['claudex-loop'], false);
+  // Recording again adds without forgetting; the member saying no is still "offered".
+  run(['offered'], {skills: 'claudex-loop,close-day'});
+  assert.deepEqual(JSON.parse(lines.pop()).offered, ['close-day', 'yt-search', 'claudex-loop']);
+  // Installing does not need it and does not change it.
+  run(['install'], {provider: 'claude', skills: 'codex-build'});
+  assert.equal(offered()['codex-build'], false);
+  assert.throws(() => run(['offered'], {}), /Name the skills that were shown/);
+  assert.throws(() => run(['offered'], {skills: 'not-a-skill'}), /Not in the skill pack: not-a-skill/);
+  assert.throws(() => run(['offered'], {skills: 'close-day', provider: 'claude'}), /Unknown skills flag/);
+  // A damaged record reads as nothing shown, never as an error.
+  fs.writeFileSync(path.join(at.runtimeDir, 'skill-pack-offered.json'), '{broken');
+  assert.ok(Object.values(offered()).every(value => value === false));
+});

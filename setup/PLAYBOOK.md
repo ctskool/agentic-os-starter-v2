@@ -107,7 +107,7 @@ You cannot do the sign-in for them. Everything else works without it; those work
 ## Phase 5 — The clicks only the user can do
 
 1. Open Obsidian → *Open folder as vault* → the vault path.
-2. New vault: Obsidian asks whether to trust the author and enable plugins → **Trust**. Existing vault: *Settings → Community plugins → Turn on community plugins → enable "Agentic OS V2"*.
+2. New vault: Obsidian asks whether to trust the author and enable plugins → **Trust**. Existing vault: *Settings → Community plugins → Turn on community plugins → enable "Agentic OS V2"*. The cockpit opens by itself the first time; if it is closed or not showing, click the pulse icon in the strip of icons on Obsidian's left edge (*Open Agentic OS V2*), or press Cmd/Ctrl+P and run *Open Agentic OS V2*.
 3. For conversations and personal-skill buttons inside Obsidian: *Community plugins → Browse → "Terminal"* (by polyipseity) → install and enable. Any stable 3.x release from 3.27.1 on works (3.27.1 and 3.27.2 are tested; a newer one shows a one-time notice); pre-releases are not supported. The doctor's "Terminal plugin" line reports the installed version. They can skip this and use the Jarvis HUD for personal skills and conversations; bundled background workflows still work inside Obsidian. Before wiring personal skills, explain this choice.
 4. Open the HUD: http://127.0.0.1:3217
 5. First use of the microphone: the browser (and on Mac, *System Settings → Privacy & Security → Microphone*) asks for permission → allow.
@@ -189,7 +189,7 @@ Full commands and limits: `docs/DASHBOARD.md`. Dashboard choices live in `system
 The starter also ships a small pack of skills the member can own. Unlike the built-in buttons, these are copied into their coding tool's own skills folder, where they can read, edit and use them in any conversation.
 
 1. Run `node aos.mjs skills list --provider claude` (or `codex`, the tool they use). It prints each skill's `description`, what it `needs`, and whether it is already `installed`.
-2. Show the list the same way as the buttons, one line each, and ask: *"Want any of these installed as your own skills?"* A no is a complete answer.
+2. Show the list the same way as the buttons, one line each, and ask: *"Want any of these installed as your own skills?"* A no is a complete answer. Either way, record what you showed with `node aos.mjs skills offered --skills "<every id you showed>"`, so a later update does not offer them again.
 3. Install only what they chose: `node aos.mjs skills install --skills "<id>,<id>" --provider claude`. A skill that leans on another brings it along and says so. A status of `kept-yours` means a different copy was already there and was left alone.
 4. Ask whether any of them should also be a dashboard button. For each yes, use the `path` the install printed with `dashboard add`, then `dashboard select`, as above.
 
