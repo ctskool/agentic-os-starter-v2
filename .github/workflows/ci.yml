@@ -152,6 +152,7 @@ jobs:
           sleep 2
           if curl -fs http://127.0.0.1:3108/health; then echo "stand-in still running"; exit 1; fi
       # Now the ordinary case: nothing to share, so setup installs this installation's own voice.
+      # (The upgrade job at the end of this file is the other ordinary case: a member who already has it.)
       - name: Install into a fresh vault, with voice
         run: |
           node aos.mjs setup --vault "$RUNNER_TEMP/vault" --provider claude --voice yes --autostart no --ci | tee ci-logs/setup-own.log
@@ -182,3 +183,93 @@ jobs:
         run: |
           cat obsidian-v2/.runtime/service-supervisor.jsonl || true
           ls -la obsidian-v2/.runtime || true
+
+  # A member who installed 0.3.64 and now runs `node aos.mjs update`. This job is that member on a
+  # clean computer: it clones the public repository the way their agent did, installs 0.3.64 with
+  # voice, uses it a little (a note, Daily Drivers, chosen dashboard buttons), then updates to the
+  # commit under test with 0.3.64's OWN update command. Afterwards the doctor must pass on the new
+  # version, what the member had must still be there, and the checkout must still count as a stock
+  # starter so the next update is allowed.
+  # Two steps differ from a member's machine, both because the commit under test is not on main yet:
+  # the download takes that commit instead of pulling main, and the re-run of setup gets --ci (no
+  # coding CLI is signed in on a runner). See obsidian-v2/tests/fixtures/ci-upgrade.cjs.
+  upgrade:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      OLD_SHA: 6bfc2195e7cc70b728dd68de387c350a940c2337   # 0.3.64, the release members installed
+      NEW_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Clone the public repository and stand where that member stands (main at 0.3.64)
+        run: |
+          git clone https://github.com/ctskool/agentic-os-starter-v2 "$RUNNER_TEMP/agentic-os"
+          cd "$RUNNER_TEMP/agentic-os"
+          git cat-file -e "$NEW_SHA^{commit}" 2>/dev/null || git fetch origin "$NEW_SHA"
+          git merge-base --is-ancestor "$OLD_SHA" "$NEW_SHA"
+          git show "$NEW_SHA:obsidian-v2/tests/fixtures/ci-upgrade.cjs" > "$RUNNER_TEMP/ci-upgrade.cjs"
+          git show "$NEW_SHA:obsidian-v2/tests/fixtures/ci-upgrade-check.cjs" > "$RUNNER_TEMP/ci-upgrade-check.cjs"
+          git checkout -q main
+          git reset -q --hard "$OLD_SHA"
+          git update-ref refs/remotes/origin/main "$OLD_SHA"
+          git status -sb
+          test "$(node -p "require('./VERSION.json').plugin")" = "0.3.64"
+          echo "VAULT=$RUNNER_TEMP/vault" >> "$GITHUB_ENV"
+      # 0.3.64's own doctor may fail its voice round trip today (a later PyAV broke speech-to-text, fixed
+      # since by a pin), so its verdict is recorded, not required. The update below has to repair it.
+      - name: Install 0.3.64 with voice
+        run: |
+          cd "$RUNNER_TEMP/agentic-os"
+          node aos.mjs setup --vault "$VAULT" --provider claude --voice yes --autostart no --ci 2>&1 | tee "$RUNNER_TEMP/old-setup.log" || echo "::warning::0.3.64 setup reported a problem; see its doctor lines"
+          test "$(node -p "require(process.env.VAULT + '/.obsidian/plugins/agentic-os-v2/manifest.json').version")" = "0.3.64"
+          test -e obsidian-v2/.runtime/speech-venv
+          node aos.mjs status || true
+      - name: Use it like a member (a note, Daily Drivers, chosen buttons)
+        run: |
+          cd "$RUNNER_TEMP/agentic-os"
+          node "$RUNNER_TEMP/ci-upgrade-check.cjs" before
+      - name: Update with 0.3.64's own update command
+        run: |
+          cd "$RUNNER_TEMP/agentic-os"
+          node "$RUNNER_TEMP/ci-upgrade.cjs" 2>&1 | tee "$RUNNER_TEMP/update.log"
+          test "$(git rev-parse HEAD)" = "$NEW_SHA"
+      - name: Doctor on the updated installation
+        run: |
+          cd "$RUNNER_TEMP/agentic-os"
+          node aos.mjs doctor --ci | tee "$RUNNER_TEMP/doctor-new.log"
+          grep -q "PASS Bridge answering" "$RUNNER_TEMP/doctor-new.log"
+          grep -q "PASS Jarvis HUD answering" "$RUNNER_TEMP/doctor-new.log"
+          grep -q "PASS Voice service healthy - .*this installation's own service on 3220" "$RUNNER_TEMP/doctor-new.log"
+          grep -q "PASS Speech to text hears it back" "$RUNNER_TEMP/doctor-new.log"
+          grep -q "SKIP Live voice (OpenAI key) - not set up" "$RUNNER_TEMP/doctor-new.log"
+      - name: What the member had is still there
+        run: |
+          cd "$RUNNER_TEMP/agentic-os"
+          node obsidian-v2/tests/fixtures/ci-upgrade-check.cjs after
+      - name: The checkout still counts as a stock starter, so the next update is allowed
+        run: |
+          cd "$RUNNER_TEMP/agentic-os"
+          git status -sb
+          node -e "import('./obsidian-v2/scripts/aos/upgrade-checkout.mjs').then(m => { const a = m.assessCheckout(require('path').resolve('obsidian-v2')); console.log(a.kind, a.issues, a.changes); if (a.updateAllowed !== true) process.exit(1); })"
+      - name: Status
+        if: always()
+        run: cd "$RUNNER_TEMP/agentic-os" && node aos.mjs status || true
+      - name: Stop
+        run: cd "$RUNNER_TEMP/agentic-os" && node aos.mjs stop
+      - name: Logs
+        if: failure()
+        run: |
+          cat "$RUNNER_TEMP/agentic-os/obsidian-v2/.runtime/service-supervisor.jsonl" || true
+          ls -la "$RUNNER_TEMP/agentic-os/obsidian-v2/.runtime" || true
