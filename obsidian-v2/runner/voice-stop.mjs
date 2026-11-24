@@ -7,6 +7,27 @@ const STOP=new RegExp(`^${LEAD}(?:stop|cancel|abort|halt|kill|scratch)(?:\\s+(?:
 // Returns {provider} (null when none was named) or null when this is not a stop.
 export function stopIntent(text){const match=STOP.exec(normalize(text));return match?{provider:match.groups.provider?.toLowerCase()||null}:null}
 
+// "What's going on? Why is this taking so long", "where are we at with that", "is it done yet": a question about work
+// already under way. It is answered from what the tasks are doing. Sent on as work, it became a new request for the
+// very task it was asking about. A sentence that also asks for something ("is it done? open it") is not a status question.
+const SUBJECT="(?:it|this|that|they|these|those|things|everything|you|we|(?:the|my|that|this) [\\w'-]+(?: [\\w'-]+){0,3})";
+const STATUS=new RegExp([
+ "what(?:'s| is) (?:going on|happening|the (?:status|hold ?up|holdup|progress|delay)|taking so long)",
+ "taking (?:so|this|that|too) long","taking forever","how far along",
+ "why (?:is|are|'s) "+SUBJECT+" (?:taking|so slow|still (?:working|going|running|not (?:done|finished|ready)))",
+ "(?:is|are) "+SUBJECT+" (?:done|finished|ready|complete|still (?:working|going|running))(?: yet)?",
+ "how(?:'s| is| are) "+SUBJECT+" (?:going|coming(?: along)?|progressing)",
+ "where are (?:we|you|things)(?: at)?(?: with| on)?",
+ "(?:any|an|some) (?:update|progress|news)\\b","status (?:update|check|report)","what(?:'s| is) the status",
+ "how (?:much )?long(?:er)?\\b.{0,30}\\b(?:take|taking|left|going to be|gonna be|until)",
+ "(?:did|has|have) "+SUBJECT+" (?:finish|finished|done)",
+].map(part=>"(?:"+part+")").join("|"),'i');
+const ASKS_FOR_MORE=/(?:^|[.!?;,]\s*|\b(?:and|then|so|also)\s+)(?:(?:please|just|now|go ahead and)\s+)*(?:open|show|bring up|pull up|make|create|build|write|add|run|start|redo|change|fix|update|send|draft|research|find|remove|delete|put|use|stop|cancel)\b/i;
+export function statusIntent(text){
+ const t=normalize(text).replace(new RegExp('^'+LEAD,'i'),'');
+ return t.split(' ').length<=28&&STATUS.test(t)&&!ASKS_FOR_MORE.test(t);
+}
+
 // A running task is replaced only by a closed set of phrases at the start of
 // the utterance, and only when what follows is punctuation, "and" or "then":
 // "drop that adjective" and "stop that animation" are tweaks, "instead of

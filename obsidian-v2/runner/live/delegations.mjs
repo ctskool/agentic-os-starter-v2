@@ -76,10 +76,13 @@ export class LiveDelegations {
  }
  // What a hand-off is doing, for the surface to show beside the call like a skill run (Chase, 2026-11-23).
  // Display only: handoff, then answered (a read), or starting and started (an action), or dropped.
- activity(call,pending,phase,label=''){
+ // A started action names the tasks it started or added to, so the surface can keep the card up until that task
+ // finishes instead of clearing it a few seconds after "started".
+ activity(call,pending,phase,label='',taskIds=[]){
   if(!pending?.key||call.state==='closing')return;
   pending.activity=phase;
-  call.updates.push({type:'activity',key:pending.key,phase,label:String(label??'').slice(0,120)});
+  const ids=taskIds.filter(id=>typeof id==='string'&&id).slice(0,4);
+  call.updates.push({type:'activity',key:pending.key,phase,label:String(label??'').slice(0,120),...(ids.length?{taskIds:ids}:{})});
  }
  fragment(call,row){
   if(!row.user||!row.text.trim())return;
@@ -147,7 +150,7 @@ export class LiveDelegations {
   if(!this.unchanged(call,captured)){call.answers.speak(delegation,retry);return}
   if(result.kind==='read'){
    call.answers.result(delegation,result,this.view(result,call));
-   this.activity(call,pending,'answered',result.briefSource?'the morning brief':'saved notes');return;
+   this.activity(call,pending,'answered',result.briefSource?'the morning brief':result.decision?.rule==='router.taskStatus'?'task status':'saved notes');return;
   }
   if(result.kind!=='action')throw new Error('Invalid Live voice plan.');
   const setting=this.prefs().liveConfirm??'auto';
@@ -210,12 +213,12 @@ export class LiveDelegations {
   let result;
   try{result=await this.route(call,pending,stage.request,delegation,'commit',stage)}
   catch(error){this.activity(call,stage.activity,'dropped');throw error}
-  this.activity(call,stage.activity,'started',stage.description);
+  const started=stage.action.effects.flatMap(({site,details})=>{
+   if(['start','startWorkflow','enqueue'].includes(site))return [details.job.id];
+   return ['send','queueFollowup','continueWorkflow'].includes(site)?[details.taskId]:[];
+  });
+  this.activity(call,stage.activity,'started',stage.description,started);
   if(this.isCurrent(call)){
-   const started=stage.action.effects.flatMap(({site,details})=>{
-    if(['start','startWorkflow','enqueue'].includes(site))return [details.job.id];
-    return ['send','queueFollowup','continueWorkflow'].includes(site)?[details.taskId]:[];
-   });
    call.taskUpdates?.started(started,this.now());
    call.answers.result(delegation,result,this.view(result,call),{speak:!(stage.undo&&result.action==='task')});
   }

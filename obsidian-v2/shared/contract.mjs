@@ -13,6 +13,10 @@ export function modelFamily(provider,model){
  if(provider==='claude'&&/^claude-fable-\d/.test(model))return 'fable';
  return model;
 }
+// Effort for full Claude workers, in terminals and in background workflows. Set on every launch so a worker does not
+// inherit a higher personal default: at high, Opus thought for a minute and a half before starting a one-page
+// explainer (Chase's call, 2026-11-24). Codex workers are pinned to medium the same way.
+export const CLAUDE_WORKER_EFFORT='medium';
 /** @type {Record<string,{label:string,instruction:string,arg?:string,direct?:boolean}>} */
 export const SKILLS = {
   "vault-summary": {

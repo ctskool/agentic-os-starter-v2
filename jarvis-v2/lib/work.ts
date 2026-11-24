@@ -12,6 +12,8 @@ export interface WorkTask {
   /** Set when the bridge closed this finished terminal after it sat idle at its prompt. */
   idleStoppedAt?:number|null;
   inputReason?:string|null; recoveryAvailable?:boolean; execution?:'script'|'cli'|'headless'; background?:boolean; workflow?:{destination:string};
+  /** Spoken follow-ups the bridge is holding until this conversation finishes its turn. */
+  queuedFollowups?:number;
   turns:{id:string;ts:number;text:string}[];
 }
 export const workRequest=(path='',body?:unknown)=>bridge('/work'+path,body);

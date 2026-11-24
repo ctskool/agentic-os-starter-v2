@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import {classifierEnv,commandFor} from '../runner/adapters.mjs';
+import {terminalSpec} from '../runner/terminals.mjs';
 
 test('restricted Claude inherits sign-in storage, not incidental API or cloud-provider credentials',()=>{
  const inherited={PATH:'path',HOME:'home',USERPROFILE:'user',CLAUDE_CONFIG_DIR:'config',CLAUDE_CODE_OAUTH_TOKEN:'existing-subscription-token',ANTHROPIC_API_KEY:'incidental-key',anthropic_auth_token:'proxy-token',Anthropic_Base_Url:'proxy',CLAUDE_CODE_USE_BEDROCK:'1',CLAUDE_CODE_USE_VERTEX:'1',CLAUDE_CODE_USE_FOUNDRY:'1',CLAUDE_CODE_SIMPLE:'1',CLAUDECODE:'parent-session'};
@@ -28,5 +29,11 @@ test('Haiku classifier is nonpersistent, tool-free and customization-free withou
  assert.equal(args[args.indexOf('--effort')+1],'low','The voice classifier answers at low effort (MAX_THINKING_TOKENS alone does not stop Haiku thinking)');
  const worker=commandFor(os.tmpdir(),{id:crypto.randomUUID(),provider:'claude',model:'sonnet',skill:'review'},{command:'claude',prefix:[]}).args;
  assert.ok(!worker.includes('--safe-mode'));assert.ok(!worker.includes('--disable-slash-commands'));
- assert.ok(!worker.includes('--effort'),'Full workers keep their own effort');
+ // Full workers run at medium effort whatever the person's own default is (Chase, 2026-11-24: at high, Opus thought
+ // for a minute and a half before starting a one-page explainer). Interactive terminals get the same setting.
+ assert.equal(worker[worker.indexOf('--effort')+1],'medium');assert.equal(worker.filter(arg=>arg==='--effort').length,1);
+ const record={id:crypto.randomUUID(),provider:'claude',model:'opus',prompt:'Make a one-pager'};
+ for(const terminal of [terminalSpec(os.tmpdir(),record,{command:'claude',prefix:[]}).args,terminalSpec(os.tmpdir(),{...record,sessionId:record.id},{command:'claude',prefix:[]},{resumePrompt:'Make it shorter'}).args]){
+  assert.equal(terminal[terminal.indexOf('--effort')+1],'medium');assert.equal(terminal[terminal.indexOf('--model')+1],'opus');
+ }
 });

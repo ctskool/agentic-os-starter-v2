@@ -1,4 +1,5 @@
 import {SKILLS} from '../shared/contract.mjs';
+import {statusIntent} from './voice-stop.mjs';
 
 export function taskLabel(task){
  const workflow=SKILLS[task?.workflow?.job?.skill||task?.workflow?.skill||task?.skill]?.label;
@@ -32,7 +33,29 @@ export function taskUpdate(item){
 const statusPattern=/^(?:(?:hey|please|so)[,\s]+)*(?:(?:how(?:['’]?s| is) (?:it|that|(?:the )?.+? task) going|(?:is|was) (?:it|that|(?:the )?.+? task) (?:done|finished)(?: yet)?|(?:what(?:['’]?s| is)|which tasks? (?:are|is)) running(?: right now)?)|(?:what(?:['’]?s| is) (?:the )?)?status (?:of|on) (?:the )?(.+?))[\s.!?]*$/i;
 
 export function taskStatusReply(text,readTasks,callIds=[],now=Date.now()){
- const match=statusPattern.exec(text.trim());if(!match)return null;
+ const match=statusPattern.exec(text.trim());
+ // The pattern above covers the short forms. People also ask loosely ("What's going on? Why is this taking so
+ // long", "where are we at with that"): those were handed to the working task they asked about, and since follow-ups
+ // wait for a working task the caller heard "I'll add that as soon as that task is free" (Chase's call, 2026-11-24).
+ // A loose question gets every running task and what this call has finished, and is left to the model when there
+ // is neither, since "how are things going" can also be small talk.
+ if(!match){
+  if(!statusIntent(text))return null;
+  const tasks=readTasks(),byId=new Map(tasks.map(task=>[task.id,task]));
+  const active=tasks.filter(taskRunning).sort((a,b)=>(a.state==='needs input'?0:1)-(b.state==='needs input'?0:1)||(b.created||0)-(a.created||0));
+  const ended=[...callIds].reverse().map(id=>byId.get(id)).filter(task=>task&&!taskRunning(task));
+  if(!active.length&&!ended.length)return null;
+  const since=ts=>Math.max(0,Math.floor((now-(ts??now))/60000));
+  // A workflow has a name, and so does a task Claude Code has titled. Anything else is known only by the words it
+  // was asked in, so it is quoted as a request.
+  const name=task=>{const label=taskLabel(task);return SKILLS[task?.workflow?.job?.skill||task?.workflow?.skill||task?.skill]||task?.titleSource==='session'?label:'Your request “'+(label.length>60?label.slice(0,60).trimEnd()+'…':label)+'”'};
+  const working=task=>name(task)+(task.state==='needs input'?' needs your OK. It’s in the terminal tray.'
+   // A conversation that has answered before is on a follow-up: its age is not how long this turn has run.
+   :task.turns?.length&&!task.workflow?' is still working on your follow-up.':' is still running, '+since(task.workflow?.startedAt||task.created)+' min in.')
+   +(task.queuedFollowups?(task.queuedFollowups===1?' One more request is':' '+task.queuedFollowups+' more requests are')+' waiting behind it.':'');
+  const finished=task=>name(task)+(task.state==='error'||task.workflowStatus==='error'?' didn’t finish.':task.turns?.length||task.workflowStatus==='ok'?' is done.':' was stopped.');
+  return {reply:[...active.slice(0,4).map(working),...ended.slice(0,3).map(finished)].join(' ')};
+ }
  const tasks=readTasks(),byId=new Map(tasks.map(task=>[task.id,task]));
  const recent=[...callIds].reverse().map(id=>byId.get(id)).filter(Boolean);
  const running=tasks.filter(taskRunning).sort((a,b)=>(b.created||0)-(a.created||0));

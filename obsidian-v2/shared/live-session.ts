@@ -319,7 +319,7 @@ export class LiveSession {
    this.stageTimer=setTimeout(()=>this.publish({staged:null}),Math.min(2147483647,event.expiresAt-Date.now()));
   }else if(['staged-cleared','staged-cancelled','staged-expired'].includes(event.type)){clearTimeout(this.stageTimer);this.publish({staged:null})}
   else if(event.type==='activity'){
-   if(typeof event.key==='string'&&LIVE_ACTIVITY_PHASES.includes(event.phase)&&this.active(call))this.onActivity({key:event.key,phase:event.phase,label:typeof event.label==='string'?event.label:''});
+   if(typeof event.key==='string'&&LIVE_ACTIVITY_PHASES.includes(event.phase)&&this.active(call))this.onActivity({key:event.key,phase:event.phase,label:typeof event.label==='string'?event.label:'',...(Array.isArray(event.taskIds)?{taskIds:event.taskIds.filter((id:unknown):id is string=>typeof id==='string').slice(0,4)}:{})});
   }else{
    const effect=event.reply&&typeof event.reply==='object'?event.reply:event;
    if(event.type==='effect'||event.type==='reply'||effect.panels||effect.reveals||effect.deliverable||effect.obsidian||effect.workIds){
@@ -435,4 +435,4 @@ export class LiveSession {
 }
 
 export const LIVE_ACTIVITY_PHASES=['handoff','starting','answered','started','dropped'] as const;
-export interface LiveActivity {key:string;phase:typeof LIVE_ACTIVITY_PHASES[number];label:string}
+export interface LiveActivity {key:string;phase:typeof LIVE_ACTIVITY_PHASES[number];label:string;taskIds?:string[]}

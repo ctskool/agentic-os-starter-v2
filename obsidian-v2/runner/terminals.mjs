@@ -5,7 +5,7 @@ import {createRequire} from 'node:module';
 import {projectRoot} from './runtime.mjs';
 import {findCli,executeCli} from './adapters.mjs';
 import {startHeadlessWorkflow} from './headless-workflows.mjs';
-import {validateSelection,validateIntent,SKILLS,modelFamily} from '../shared/contract.mjs';
+import {validateSelection,validateIntent,SKILLS,modelFamily,CLAUDE_WORKER_EFFORT} from '../shared/contract.mjs';
 import {resolveCodexModel} from './codex-models.mjs';
 import {atomicRename,writeJson,vaultPath} from './core.mjs';
 import {prepareWorkflow,saveWorkflowResult} from './terminal-workflows.mjs';
@@ -14,6 +14,7 @@ import {windowsArguments,TerminalPromptDetector,TerminalInputBoundary,stopOwnedP
 import {TaskRetention,migrateTaskRetention,TASK_SWEEP_MS} from './task-retention.mjs';
 import {withoutOpenAIKey} from './child-env.mjs';
 import {workerSignInEnv} from './claude-stored-signin.mjs';
+import {claudeSessionTitle} from './session-title.mjs';
 // Idle close: default 30 minutes; AOS_V2_TERMINAL_IDLE_MINUTES overrides, 0 or "off" disables it.
 export const IDLE_STOP_MS=30*60*1000,IDLE_SWEEP_MS=60*1000;
 // A one-click close is refused while the CLI's screen changed this recently: a working CLI keeps redrawing, also
@@ -58,7 +59,7 @@ export function terminalSpec(root,record,cli=findCli(record.provider),{resumePro
  }else{
   const command=`"${process.execPath.replaceAll('\\','/')}" "${hook.replaceAll('\\','/')}"`;
   const hooks=Object.fromEntries(['SessionStart','UserPromptSubmit','Stop','StopFailure','PermissionRequest'].map(event=>[event,[{hooks:[{type:'command',command,timeout:5}]}]]));
-  args=['--model',modelFamily('claude',record.model),'--settings',JSON.stringify({hooks}),...(record.sessionId?['--resume',record.sessionId]:['--session-id',record.id])];
+  args=['--model',modelFamily('claude',record.model),'--effort',CLAUDE_WORKER_EFFORT,'--settings',JSON.stringify({hooks}),...(record.sessionId?['--resume',record.sessionId]:['--session-id',record.id])];
  }
  // New sessions receive their initial prompt as a process argument, not shell code.
  const request=record.sessionId?(resumePrompt===undefined?'Resume this conversation without using tools or taking actions. Briefly confirm you are ready for a follow-up.':cleanPrompt(resumePrompt)):record.prompt;
@@ -71,9 +72,13 @@ export function terminalSpec(root,record,cli=findCli(record.provider),{resumePro
 // turn ends. It is never typed into a working CLI: the CLI could be showing an approval prompt that would take the
 // words as its answer. Held in memory with the live session, so a conversation that stops drops what was waiting.
 export const MAX_QUEUED_FOLLOWUPS=3;
+// How often a working task's session is looked at for its title: often until it has one, rarely after.
+export const TITLE_CHECK_MS=3000,TITLE_RECHECK_MS=30000;
 export const QUEUED_FOLLOWUP_MAX_AGE_MS=30*60*1000;
 export class TerminalManager {
- constructor(root,{directory=path.join(projectRoot,'.runtime','terminals'),spawn,direct=directWorkflow,execute=executeCli,stopTree=process.platform==='win32'&&!spawn,now=Date.now,schedule=setInterval,cancelSchedule=clearInterval,defer=setTimeout,cancelDeferred=clearTimeout,deliveryWatch=createCodexDeliveryWatch,idleStopMs=terminalIdleStopMs(),voiceBusy=()=>false}={}){
+ constructor(root,{directory=path.join(projectRoot,'.runtime','terminals'),spawn,direct=directWorkflow,execute=executeCli,stopTree=process.platform==='win32'&&!spawn,now=Date.now,schedule=setInterval,cancelSchedule=clearInterval,defer=setTimeout,cancelDeferred=clearTimeout,deliveryWatch=createCodexDeliveryWatch,idleStopMs=terminalIdleStopMs(),voiceBusy=()=>false,sessionTitle}={}){
+  // Tests that drive a fake terminal never read the real Claude folder.
+  this.sessionTitle=sessionTitle||(spawn?()=>null:claudeSessionTitle);
   this.root=root;this.directory=path.resolve(directory);this.spawn=spawn;this.direct=direct;this.stopTree=stopTree;this.records=new Map();this.live=new Map();this.now=now;this.cancelSchedule=cancelSchedule;this.closed=false;
   this.defer=defer;this.cancelDeferred=cancelDeferred;this.deliveryWatch=deliveryWatch;this.execute=execute;
   this.retention=new TaskRetention(this.directory,root);
@@ -170,7 +175,22 @@ export class TerminalManager {
   fs.writeFileSync(metadata+'.tmp',JSON.stringify({taskId:r.id,requestKey:r.artifactRequestKey,outbox,vault:this.root}));atomicRename(metadata+'.tmp',metadata);
  }
  save(r){if(this.records.get(r.id)!==r||this.retention.retired.has(r.id))return;const file=path.join(this.folder(r.id),'session.json');fs.writeFileSync(file+'.tmp',JSON.stringify(r,null,2));atomicRename(file+'.tmp',file);this.onChange?.(r)}
- list(){return [...this.records.values()].sort((a,b)=>b.created-a.created).map(r=>({...r,queuedFollowups:this.live.get(r.id)?.queued?.length||0,expiresAt:this.retention.expiresAt(r,this.live.has(r.id)),prompt:undefined,vault:undefined,native:undefined,activeLiveCallId:undefined,pendingArtifacts:undefined,artifactRequestKey:undefined,workflowHistory:undefined,completedTurnIds:undefined,workflow:r.workflow?{skill:r.workflow.job.skill,destination:r.workflow.destination,startedAt:r.workflow.startedAt}:undefined}))}
+ // A task asked for in words is first named after those words ("Yeah, can you do some research on…"). Claude Code
+ // writes a short title for the session a second or two later ("Riemann hypothesis one-pager"), and that becomes
+ // the task's name: in its tab, on its card, and when its status is spoken (session-title.mjs). Looked for while
+ // the task works and once more when a turn ends. Workflows and slash skills already have names, and a Codex
+ // session has no such title, so those keep theirs.
+ refreshTitle(r,{force=false}={}){
+  if(r.provider!=='claude'||r.workflow||r.slashSkill||['headless','script'].includes(r.execution))return false;
+  const live=this.live.get(r.id),now=this.now();
+  if(!force&&(!live||!['starting','working','needs input'].includes(r.state)||now-(live.titleCheckedAt??-Infinity)<(r.titleSource==='session'?TITLE_RECHECK_MS:TITLE_CHECK_MS)))return false;
+  if(live)live.titleCheckedAt=now;
+  let title=null;try{title=this.sessionTitle(r.sessionId||r.id,this.root)}catch{}
+  if(typeof title!=='string'||!title.trim()||title===r.title)return false;
+  // The words it was asked in are kept: they are still the request.
+  r.requestTitle??=r.title;r.title=title.trim().slice(0,70);r.titleSource='session';this.save(r);return true;
+ }
+ list(){for(const r of this.records.values())this.refreshTitle(r);return [...this.records.values()].sort((a,b)=>b.created-a.created).map(r=>({...r,queuedFollowups:this.live.get(r.id)?.queued?.length||0,expiresAt:this.retention.expiresAt(r,this.live.has(r.id)),prompt:undefined,vault:undefined,native:undefined,activeLiveCallId:undefined,pendingArtifacts:undefined,artifactRequestKey:undefined,workflowHistory:undefined,completedTurnIds:undefined,workflow:r.workflow?{skill:r.workflow.job.skill,destination:r.workflow.destination,startedAt:r.workflow.startedAt}:undefined}))}
  setKeep(id,keep){if(typeof keep!=='boolean')throw new Error('Keep must be true or false');const r=this.get(id);if(r.keep!==keep){r.keep=keep;if(!keep)this.touch(r);this.save(r)}return {...r,expiresAt:this.retention.expiresAt(r,this.live.has(id))}}
  prune(){
   if(this.closed)return;
@@ -502,6 +522,7 @@ export class TerminalManager {
   if(event.type==='PermissionRequest'){this.cancelSubmit(live);r.state='needs input';r.error='Claude is waiting for your approval. Review the requested action in its terminal.'}
   if(event.type==='StopFailure'){this.clearDelivery(live);r.state='error';r.error='The provider reported a failed turn. See the terminal.'}
   if(completion){
+   this.refreshTitle(r,{force:true});
    this.finishDelivery(r,live);
    this.touch(r,{conversation:true});
    if(typeof event.turnId==='string')r.completedTurnIds=[...(r.completedTurnIds||[]),event.turnId];

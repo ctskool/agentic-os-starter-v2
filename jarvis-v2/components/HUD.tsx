@@ -16,7 +16,7 @@ import {useAgentWork} from '@/lib/useAgentWork';
 import {localTaskSpeech} from '../../obsidian-v2/shared/task-activity';
 import {getWorkSelection,openWork,setWorkProvider,type WorkTask} from '@/lib/work';
 import {dashboardEntries,dashboardSkillsStore,launchInstalledSkill,skillUnavailable,type DashboardProvider,type DashboardState} from '@/lib/dashboard-skills';
-import {isPendingCallout,liveActivityCallout,queueWorkflowCallout,reconcileWorkflowCallouts,type WorkflowCallout} from '@/lib/workflow-callouts';
+import {isPendingCallout,liveActivityCallout,queueWorkflowCallout,reconcileTaskCallouts,reconcileWorkflowCallouts,type WorkflowCallout} from '@/lib/workflow-callouts';
 import {shortConversationTitle} from '../../obsidian-v2/shared/work-presentation';
 import { scrubRunSummary, humanizeFailure } from "@/lib/spokenText";
 import { BG_MODES, type BgMode, type CoreMode } from "./GraphCore";
@@ -1061,12 +1061,19 @@ export default function HUD() {
 
   // 1s re-render while a task works — elapsed + bar width derive from Date.now()
   const taskWorking = callouts.some(isPendingCallout);
-  const [, setTaskTick] = useState(0);
+  const [taskTick, setTaskTick] = useState(0);
   useEffect(() => {
     if (!taskWorking) return;
     const id = setInterval(() => setTaskTick((t) => t + 1), 1000);
     return () => clearInterval(id);
   }, [taskWorking]);
+
+  // A card for work a call started follows that conversation: it stays while the conversation works, says when it
+  // needs you, and finishes with it (Chase, 2026-11-23: "started" cleared after six seconds while the task kept going).
+  // Checked on every task-list update and once a second while a card is pending.
+  useEffect(() => {
+    setCallouts(cur => reconcileTaskCallouts(cur, work.tasks, work.loaded));
+  }, [work.tasks, work.loaded, taskTick]);
 
   // speak completions — separate from the feed diff: a run can first appear
   // as "running" (id lands in seenRunsRef), so completion is tracked by id
@@ -1177,8 +1184,15 @@ export default function HUD() {
                 <i className="br br-a" aria-hidden="true" />
                 <i className="br br-b" aria-hidden="true" />
                 <div
-                  className={`callout-box${isTask ? ` task ${c.phase === "queued" ? "working" : c.phase ?? ""}` : ""}`}
+                  className={`callout-box${isTask ? ` task ${c.phase === "queued" ? "working" : c.phase ?? ""}${c.taskId ? " linked" : ""}${c.attention ? " attention" : ""}` : ""}`}
                   title={c.detail}
+                  {...(isTask && c.taskId && {
+                    // The card is the way to its conversation: open the terminals on it.
+                    role: "button",
+                    tabIndex: 0,
+                    onKeyDown: (event: React.KeyboardEvent) => {if(event.target===event.currentTarget&&(event.key==="Enter"||event.key===" ")){event.preventDefault();openWork([c.taskId!],true)}},
+                    onClick: () => openWork([c.taskId!],true),
+                  })}
                   {...(!isTask && {
                     role: "button",
                     tabIndex: 0,

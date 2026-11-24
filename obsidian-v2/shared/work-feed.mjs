@@ -10,5 +10,6 @@ export function taskSummary(task){
  const last=task.turns.at(-1);
  return {id:task.id,title:task.title,provider:task.provider,model:task.model,state:task.state,created:task.created,workflowStatus:task.workflowStatus,completedAt:task.completedAt,summary:task.summary,keep:task.keep===true,lastActivityAt:task.lastActivityAt,expiresAt:task.expiresAt??null,
   sessionId:task.sessionId,error:task.error,pid:task.pid,idleStoppedAt:task.state==='stopped'&&Number.isFinite(task.idleStoppedAt)?task.idleStoppedAt:undefined,inputReason:task.inputReason,recoveryAvailable:task.recoveryAvailable,execution:task.execution,background:task.background===true,workflow:task.workflow?.destination?{destination:task.workflow.destination}:undefined,
+  ...(task.queuedFollowups>0?{queuedFollowups:task.queuedFollowups}:{}),
   turns:last?[{id:last.id,ts:last.ts,text:last.text.slice(0,650),truncated:last.text.length>650}]:[]};
 }

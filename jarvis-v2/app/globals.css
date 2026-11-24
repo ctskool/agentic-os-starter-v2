@@ -325,6 +325,15 @@ body {
   letter-spacing: 0.06em;
   white-space: nowrap;
 }
+/* a card for work a call started: click it to open that conversation; amber while it waits on you */
+.callout-box.task.linked { cursor: pointer; }
+/* its name is a real title ("Riemann hypothesis one-pager"), so it gets two lines instead of being cut at sixteen characters */
+.callout-box.task.linked .callout-label { white-space: normal; max-width: none; animation: none; letter-spacing: 0.16em; line-height: 1.5; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+.callout-box.task.linked:hover { background: hsl(var(--accent-h) 50% 50% / 0.12); }
+.callout-box.task.attention { border-left-color: var(--warn); }
+.callout-box.task.attention .callout-dot { border-color: var(--warn); background: oklch(0.78 0.13 80 / 0.4); }
+.callout-box.task.attention .task-bar i { background: var(--warn); box-shadow: none; width: 100%; left: 0; animation: none; }
+.callout-box.task.attention .task-time { color: var(--warn); }
 .callout-box.task.done { border-left-color: var(--ok); }
 .callout-box.task.done .callout-dot {
   border-color: var(--ok);

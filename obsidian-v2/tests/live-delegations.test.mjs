@@ -591,6 +591,9 @@ test('a hand-off reports what it is doing: handed off, then starting and started
  f.advance(2500);await f.idle();assert.equal(f.work.length,1);
  assert.deepEqual(phases(f).at(-1),{key:stage.delegation,phase:'started',label:stage.description});
  assert.equal(phases(f).length,3);
+ // The started event names the work it started, so the surface can keep its card up until that work finishes.
+ const events=f.call.updates.events.filter(event=>event.type==='activity');
+ assert.deepEqual(events.at(-1).taskIds,[f.work[0][1].id]);assert.equal(events.slice(0,-1).some(event=>'taskIds' in event),false);
 
  const cancelled=await fixture(t,{mode:'click'});await cancelled.start();
  const held=await cancelled.stage('Run morning intel');await cancelled.idle();
@@ -600,6 +603,11 @@ test('a hand-off reports what it is doing: handed off, then starting and started
  const read=await fixture(t,{route:async()=>({kind:'read',reply:'Nothing urgent came in.',briefSource:'inbox/research/morning-intel/today.md'})});await read.start();
  const id=read.turn('Any important email today');await read.say('Nothing urgent came in.',id);await read.idle();
  assert.deepEqual(phases(read),[{key:id,phase:'handoff',label:''},{key:id,phase:'answered',label:'the morning brief'}]);
+
+ // A status question answered from the tasks says so on its card, not "saved notes".
+ const status=await fixture(t,{route:async()=>({kind:'read',reply:'Inbox Brief is still working, 2 minutes in.',decision:{rule:'router.taskStatus'}})});await status.start();
+ const asked=status.turn('Why is this taking so long');await status.say('Inbox Brief is still working, 2 minutes in.',asked);await status.idle();
+ assert.deepEqual(phases(status).at(-1),{key:asked,phase:'answered',label:'task status'});
 });
 
 test('a request refused because the selected task is busy says so; any other failure keeps the short retry',async t=>{

@@ -199,3 +199,42 @@ for(const provider of ['codex','claude']){
   assert.equal(f.calls.at(-1).kind,'send');assert.equal(f.calls.at(-1).id,open.id);
  });
 }
+
+// Chase's call, 2026-11-24: "What's going on? Why is this taking so long" was handed to the working task it asked
+// about and answered "I'll add that as soon as that task is free". A status question on a call is answered from the tasks.
+for(const provider of ['codex','claude']){
+ test(`${provider}: on a call, a question about work under way is answered from the tasks and starts nothing`,async t=>{
+  const f=fixture(t,provider),live={transport:'live',liveCallId:crypto.randomUUID()},now=Date.now();
+  const page=f.add({state:'working',title:'Build me a one-pager on the Riemann hypothesis',created:now-3*60000-5000});
+  const brief=f.add({state:'ready',title:'inbox brief',workflow:{job:{skill:'inbox-brief'},destination:'brief.md'},workflowStatus:'ok',created:now-200000,turns:[{id:'t1',ts:now-1000,text:'Done.'}]});
+  const unrelated=f.add({state:'ready',title:'Something from yesterday',created:now-86400000,turns:[{id:'t0',ts:now-80000000,text:'Done.'}]});
+  const mine={...live,liveTaskIds:[page.id,brief.id]};
+  // No model is asked (the default executor fails the test), nothing is sent, queued or started.
+  const result=await f.speak("What's going on? Why is this taking so long",page.id,undefined,mine);
+  assert.equal(f.calls.length,0);assert.equal(result.action,'reply');assert.deepEqual(result.workIds,[]);
+  assert.equal(result.reply,'Your request “Build me a one-pager on the Riemann hypothesis” is still running, 3 min in. Inbox Brief is done.');
+  assert.equal(result.decision.rule,'router.taskStatus');assert.doesNotMatch(result.reply,/yesterday/,'only what is running or what this call started');
+  // Waiting for an approval comes first; a conversation on a follow-up gives no misleading age, and says what is waiting.
+  page.state='needs input';
+  const follow=f.add({state:'working',title:'Draft the launch post',created:now-3600000,turns:[{id:'t2',ts:now-120000,text:'Draft ready.'}],queuedFollowups:1});
+  const second=await f.speak('Hey, where are we at with all that',follow.id,undefined,{...mine,liveTaskIds:[page.id,brief.id,follow.id]});
+  assert.equal(second.reply,'Your request “Build me a one-pager on the Riemann hypothesis” needs your OK. It’s in the terminal tray. Your request “Draft the launch post” is still working on your follow-up. One more request is waiting behind it. Inbox Brief is done.');
+  assert.equal(f.calls.length,0);
+ });
+ test(`${provider}: a status question with nothing to report, one that also asks for something, and one off a call all go on as before`,async t=>{
+  const f=fixture(t,provider),live={transport:'live',liveCallId:crypto.randomUUID()};
+  // Nothing is running and this call started nothing: the question is the model's to answer.
+  const idle=f.add({state:'ready',turns:[{id:'t0',ts:1,text:'Done.'}]});
+  const asked=await f.speak('How are things going',null,f.output(2),live);
+  assert.equal(asked.reply,'Here is a quick answer.');assert.notEqual(asked.decision.rule,'router.taskStatus');
+  // The short forms keep their own answer.
+  assert.equal((await f.speak('Is it done yet',null,undefined,live)).reply,'Nothing is running right now.');
+  // "Is it done? Open it" asks for something, so it is a request.
+  const busy=f.add({state:'working'});
+  const both=await f.speak('Is it done? Then add a summary at the top',busy.id,f.output(),live);
+  assert.notEqual(both.decision.rule,'router.taskStatus');assert.deepEqual(f.calls.map(call=>call.kind),['queue']);
+  // Off a call nothing changed: the same words are still routed by the model.
+  await assert.rejects(f.speak('Why is this taking so long',busy.id,f.output()),/working or needs terminal input/);
+  assert.equal(idle.state,'ready');
+ });
+}

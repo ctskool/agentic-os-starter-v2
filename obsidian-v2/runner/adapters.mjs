@@ -1,7 +1,7 @@
 import {findCli} from './cli-runtime.mjs';
 export {findCli} from './cli-runtime.mjs';
 import fs from 'node:fs';import path from 'node:path';import {spawn} from 'node:child_process';import {StringDecoder} from 'node:string_decoder';
-import {ROOT,modelFamily} from '../shared/contract.mjs';
+import {ROOT,modelFamily,CLAUDE_WORKER_EFFORT} from '../shared/contract.mjs';
 import {resolveCodexModel} from './codex-models.mjs';
 import {vaultPath} from './core.mjs';
 import {workerEnv} from './workflows.mjs';
@@ -61,7 +61,7 @@ export function commandFor(root,job,cli=findCli(job.provider)){
  if(!restricted&&job.provider==='codex')args.splice(1,0,'-c','sandbox_workspace_write.network_access=true','-c','approval_policy="never"','-c','web_search="live"');
  // --effort low: MAX_THINKING_TOKENS=0 alone does not stop Haiku 5.5 from thinking (it thought on 28 of 36
  // replayed real voice requests, 2026-11-19). With low effort the median answer came 3.0 s -> 1.6 s, routing was
- // identical on all 12 questions and a blind judge scored the answers even. Full workers keep their own effort.
+ // identical on all 12 questions and a blind judge scored the answers even. Full workers run at CLAUDE_WORKER_EFFORT.
  if(restricted&&job.provider==='claude')args.push('--safe-mode','--disable-slash-commands','--effort','low','--system-prompt',classifierInstructions);
  const mcp={command:process.execPath,args:[path.join(projectRoot,'runner/vault-mcp.mjs')],env:{AOS_V2_VAULT:root}};
  if(!restricted&&job.provider==='codex')args.splice(1,0,'--output-schema',path.join(projectRoot,'runner/result-schema.json'),'-c',`mcp_servers.agentic_vault.command=${JSON.stringify(mcp.command)}`,'-c',`mcp_servers.agentic_vault.args=${JSON.stringify(mcp.args)}`,'-c',`mcp_servers.agentic_vault.env.AOS_V2_VAULT=${JSON.stringify(root)}`);
@@ -69,7 +69,7 @@ export function commandFor(root,job,cli=findCli(job.provider)){
  if(!restricted&&job.provider==='claude'){
   // Add our vault tools to the user's authenticated connectors. Only the
   // classifier strips custom configuration; a full workflow needs those tools.
-  args.push('--mcp-config',JSON.stringify({mcpServers:{agentic_vault:mcp}}),'--json-schema',resultSchema,'--permission-mode','acceptEdits','--allowedTools',['Read,Glob,Grep,WebSearch,WebFetch,mcp__agentic_vault__*,Bash(python:*),Bash(notebooklm:*),Bash(yt-dlp:*),Bash(gh:*),Bash(firecrawl:*)',...CLAUDE_WORKER_GOOGLE].join(','));
+  args.push('--effort',CLAUDE_WORKER_EFFORT,'--mcp-config',JSON.stringify({mcpServers:{agentic_vault:mcp}}),'--json-schema',resultSchema,'--permission-mode','acceptEdits','--allowedTools',['Read,Glob,Grep,WebSearch,WebFetch,mcp__agentic_vault__*,Bash(python:*),Bash(notebooklm:*),Bash(yt-dlp:*),Bash(gh:*),Bash(firecrawl:*)',...CLAUDE_WORKER_GOOGLE].join(','));
  }
  if(job.provider==='codex'&&modelFamily('codex',job.model)==='astra')args.splice(1,0,'-c','model_reasoning_effort="medium"');
  return {command:cli.command,args:[...cli.prefix,...args],final};
