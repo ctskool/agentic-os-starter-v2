@@ -168,14 +168,29 @@ for(const provider of ['codex','claude']){
   const busy=f.add({state:'working'});
   await assert.rejects(f.speak('Run the weekly review',busy.id,f.output()),/working or needs terminal input/);
   assert.equal(f.calls.length,0);
-  // On a call the free-form request is not refused either: it waits for that conversation. Still no replacement.
-  const held=await f.speak('Research RubyGems',busy.id,f.output(),live);
-  assert.deepEqual(f.calls.map(call=>call.kind),['queue']);assert.equal(f.calls[0].id,busy.id);assert.match(f.calls[0].text,/^Research RubyGems/);
+  // On a call a follow-up that points back at the busy task waits for it. Still no replacement.
+  const held=await f.speak('Make it shorter and punchier',busy.id,f.output(),live);
+  assert.deepEqual(f.calls.map(call=>call.kind),['queue']);assert.equal(f.calls[0].id,busy.id);assert.match(f.calls[0].text,/^Make it shorter and punchier/);
   assert.deepEqual(held.workIds,[busy.id]);assert.equal(held.reply,"Got it. I'll add that as soon as that task is free.");
   assert.equal(f.tasks.length,1,'no new conversation was made');
-  // One that is waiting for an approval takes nothing, on a call or off it.
+  // A follow-up to one that is waiting for an approval takes nothing, on a call or off it.
   const approval=f.add({state:'needs input'});
-  await assert.rejects(f.speak('Research RubyGems',approval.id,f.output(),live),/working or needs terminal input/);
+  await assert.rejects(f.speak('Make it shorter',approval.id,f.output(),live),/working or needs terminal input/);
+ });
+ // Chase, 2026-11-26: Live is the orchestrator. New work asked for while the selected task is busy starts beside it.
+ test(`${provider}: on a call, new work asked for while the selected task is busy starts as its own task`,async t=>{
+  const f=fixture(t,provider),live={transport:'live',liveCallId:crypto.randomUUID()};
+  for(const state of ['working','starting','needs input']){
+   const busy=f.add({state}),before=f.calls.length;
+   const result=await f.speak("And hey, while you're doing that, can you give me a quick one-pager on this Opus 5.6 stuff",busy.id,f.output(),live);
+   assert.equal(f.calls.length,before+1,state);assert.equal(f.calls.at(-1).kind,'start',state);
+   assert.notDeepEqual(result.workIds,[busy.id]);assert.equal(busy.state,state,'the busy task is left as it was');
+   assert.equal(result.reply,'Starting that on its own while that task finishes.');
+   assert.equal(f.updates.at(-1)?.id,result.workIds[0],'the new task is what the caller is now talking about');
+  }
+  // Off a call nothing changes: the busy conversation still refuses.
+  const busy=f.add({state:'working'});
+  await assert.rejects(f.speak('Research RubyGems',busy.id,f.output()),/working or needs terminal input/);
  });
 }
 

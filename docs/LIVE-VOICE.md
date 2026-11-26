@@ -54,7 +54,7 @@ If Live offers a concrete next step, say “go ahead” within a minute. An offe
 
 ## What is sent and what it costs
 
-Live sends audio, the vault snapshot, and answers to handed-off requests to OpenAI with `store:false`. At the start of every call the snapshot can include your **About me**, today’s top three priorities and schedule from the `/today` daily note, your Daily Drivers, up to five task titles with provider and status, counts of new notes in your vault’s `inbox/` folders for the last 24 hours (notes, not email), metrics and the latest video, headlines, radar, and any notes you added yourself. Task prompts, replies, and report paths stay out of the snapshot. The note counts contain no note names.
+Live sends audio, the vault snapshot, and answers to handed-off requests to OpenAI with `store:false`. At the start of every call the snapshot can include your **About me**, today’s top three priorities and schedule from the `/today` daily note, your Daily Drivers, today’s and tomorrow’s calendar events (titles and times), up to five task titles with provider and status, counts of new notes in your vault’s `inbox/` folders for the last 24 hours (notes, not email), metrics and the latest video, headlines, radar, and any notes you added yourself. Task prompts, replies, and report paths stay out of the snapshot. The note counts contain no note names.
 
 With **Share morning brief** on, the whole morning brief takes the place of the headlines: every section, including its email section, with links removed, up to 36,000 bytes. With it off, email contents stay on your computer.
 
@@ -62,7 +62,8 @@ With **Share morning brief** on, the whole morning brief takes the place of the 
 
 The snapshot is yours to shape. Run `node aos.mjs live-context show` to see what a call reads, or ask your coding agent, for example *"add my goals note to Live"* or *"stop sending the radar to Live"*.
 
-- **Turn parts off.** `node aos.mjs live-context section radar off` (or `today`, `inbox`, `numbers`, `news`). A part fed by a workflow you do not run is empty anyway.
+- **Turn parts off.** `node aos.mjs live-context section radar off` (or `today`, `calendar`, `inbox`, `numbers`, `news`). A part fed by a workflow you do not run is empty anyway.
+- **Calendar.** While Live is set up, a short background read of today’s and tomorrow’s events runs about once an hour from 7 a.m. to 10 p.m. (with Claude’s quick model, or your Codex model), so a call already knows your day; *"check my calendar"* reads it fresh. It needs Google Calendar connected in your coding tool. Turning the `calendar` part off also stops the hourly read.
 - **Add your own notes and reports.** `node aos.mjs live-context add "projects/goals.md" --label "Goals"`. Add a folder instead of a note and Live reads the newest note in it, so a report one of your skills saves each day stays current. Up to six; each is read up to about 6,000 characters, so a short summary note works better than a long one.
 - **See it exactly.** `node aos.mjs live-context show --full` prints the snapshot as it would be sent now.
 

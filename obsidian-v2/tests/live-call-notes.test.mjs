@@ -30,7 +30,7 @@ function fixture(t){
 
 test('with nothing chosen, a call reads every built-in part and no notes of the member’s own',async t=>{
  const f=fixture(t);
- assert.deepEqual(readLiveContext(f.root),{version:1,sections:{today:true,inbox:true,numbers:true,news:true,radar:true},notes:[]});
+ assert.deepEqual(readLiveContext(f.root),{version:1,sections:{today:true,calendar:true,inbox:true,numbers:true,news:true,radar:true},notes:[]});
  const text=await f.snapshot();
  for(const header of ['Today (','New vault notes (','Numbers (','News (','Radar ('])assert.ok(text.includes(header),header);
  assert.doesNotMatch(text,/added by the user to every call/);
@@ -43,7 +43,7 @@ test('a built-in part turned off is not read, and the others stay',async t=>{
  const text=await f.snapshot();
  assert.doesNotMatch(text,/^Radar \(/m);assert.doesNotMatch(text,/^Numbers \(/m);
  assert.match(text,/^Today \(/m);assert.match(text,/^News \(/m);
- assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.root,LIVE_CONTEXT_FILE),'utf8')).sections,{today:true,inbox:true,numbers:false,news:true,radar:false});
+ assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.root,LIVE_CONTEXT_FILE),'utf8')).sections,{today:true,calendar:true,inbox:true,numbers:false,news:true,radar:false});
  await f.run('section','radar','on');assert.match(await f.snapshot(),/^Radar \(/m);
  await assert.rejects(f.run('section','weather','off'),/Use: live-context section/);
  await assert.rejects(f.run('section','radar','maybe'),/Use: live-context section/);
@@ -122,7 +122,7 @@ test('a settings file that cannot be read means the starting setup, and reset re
  // A hand-edited file with junk in it keeps what makes sense.
  writeLiveContext(f.root,{sections:{today:false},notes:[]});
  f.write(LIVE_CONTEXT_FILE,JSON.stringify({sections:{today:false,radar:'no',extra:false},notes:[{path:'a.md'},{path:'a.md'},{path:7},{label:'no path'}]}));
- assert.deepEqual(readLiveContext(f.root),{version:1,sections:{today:false,inbox:true,numbers:true,news:true,radar:true},notes:[{path:'a.md',label:'a'}]});
+ assert.deepEqual(readLiveContext(f.root),{version:1,sections:{today:false,calendar:true,inbox:true,numbers:true,news:true,radar:true},notes:[{path:'a.md',label:'a'}]});
 });
 
 test('show lists every part with its state, the member’s notes, and that it all goes to OpenAI; --full prints the snapshot',async t=>{

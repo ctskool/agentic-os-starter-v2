@@ -42,6 +42,11 @@ import {speakStreamQuery} from './voice-speed.mjs';
 import {readVoicePrefs,saveVoicePrefs,speakPrefsQuery,voiceChoices} from './voice-prefs.mjs';
 import {writeVoiceWords,saveVoiceWords} from './voice-words.mjs';
 import {scheduleTick,scheduleView,editSchedule} from './schedule.mjs';
+import {refreshCalendar,calendarDue,readCalendarSnapshot} from './calendar-snapshot.mjs';
+import {liveAuthorization} from './live/key.mjs';
+import {readLiveContext} from './live/context.mjs';
+import {executeCli} from './adapters.mjs';
+import {withSignInFallback} from './claude-stored-signin.mjs';
 import {taskLabel} from './task-updates.mjs';
 import {completionLabel} from './voice-conversation-cues.mjs';
 const base=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -144,6 +149,24 @@ const scheduleTimer=setInterval(scheduleLook,30000);scheduleTimer.unref();
 // And once as soon as the bridge has finished starting, so one that comes up in the last seconds before
 // midnight still catches that day's last job.
 setImmediate(scheduleLook);
+// Today's and tomorrow's calendar for Live calls (calendar-snapshot.mjs): a look every five minutes, a read about once
+// an hour from 7 a.m. to 10 p.m., only with Live set up and its Calendar section on. Claude reads it with its quick
+// model; Codex with the model chosen. One read at a time; a failure keeps the last good reading and waits its hour.
+let calendarRunning=false;
+const calendarLook=()=>{
+ if(calendarRunning)return;
+ try{
+  if(!liveAuthorization(path.join(base,'.runtime')).ready||readLiveContext(root).sections.calendar===false)return;
+  if(!calendarDue(readCalendarSnapshot(root)))return;
+  const chosen=selection(root),model=chosen.provider==='claude'?VOICE_MODELS.claude:chosen.model;
+  calendarRunning=true;
+  withSignInFallback({provider:chosen.provider},()=>refreshCalendar(root,{execute:executeCli,provider:chosen.provider,model}))
+   .catch(error=>console.info(`[Calendar] Not read: ${String(error?.message||error).slice(0,200)}`))
+   .finally(()=>{calendarRunning=false});
+ }catch(error){calendarRunning=false;console.info(`[Calendar] Skipped: ${String(error?.message||error).slice(0,200)}`)}
+};
+const calendarTimer=setInterval(calendarLook,300000);calendarTimer.unref();
+setTimeout(calendarLook,20000).unref();
 async function speechHealth(){try{const r=await fetch(`${speech}/health`,{signal:AbortSignal.timeout(1500)});return r.ok?await r.json():null}catch{return null}}
 function providerHealth(){return Object.fromEntries(['codex','claude'].map(provider=>[provider,cliStatus(provider)]))}
 function bridgeStatus(){const providers=providerHealth();return {selection:selection(root),health:{ts:new Date().toISOString(),pid:process.pid,busy:[...terminals.live.keys()].some(id=>['working','starting'].includes(terminals.get(id).state)),active:terminals.live.size,pending:0,providers},providers,vault:root}}

@@ -8,6 +8,7 @@ import {cleanPrompt} from './terminals.mjs';
 import {classifyVoice,invalidateVoiceSnapshot} from './voice-router.mjs';
 import {deferredOpen} from './voice-targets.mjs';
 import {stopIntent,supersedeIntent,stripPleasantry} from './voice-stop.mjs';
+import {refersBack} from './follow-up-intent.mjs';
 import {newTaskIntent} from '../shared/new-task-intent.mjs';
 import {selectSpokenAnswer} from './spoken-answer.mjs';
 import {createWorkAcknowledgments} from './voice-conversation-cues.mjs';
@@ -202,12 +203,19 @@ export async function routeVoice(root,{id,transcript,selection:chosen,terminalMo
  // On a call, the task started a minute ago becomes the selected conversation. A named workflow asked for while
  // it is still working is its own job: it starts by itself instead of being refused by a busy conversation.
  // (2026-11-23: "run an inbox brief" was refused twice on one call while a one-pager was being written, and the
- // caller heard only "Say that again in a moment.") Free-form requests are not moved: a busy conversation never
- // gets a replacement made for it, on a call or off one.
- let separatedFrom=null,waitingBehind=null;
+ // caller heard only "Say that again in a moment.")
+ let separatedFrom=null,waitingBehind=null,startedBeside=null;
  if(transport==='live'&&skill&&skill!=='voice-ask'&&terminalMode&&terminals&&workTarget&&!SKILLS[skill]?.direct){
   let occupied;try{occupied=terminals.get(workTarget)}catch{}
   if(occupied&&(running(occupied)||(occupied.workflow&&!occupied.workflowCompleted))){separatedFrom=existingTitle(occupied);workTarget=null;effects.push('busy-target-separate')}
+ }
+ // The same for free-form work on a call: Live is the orchestrator. While the selected task is busy, a request that
+ // points back at it ("add a section on its history") waits for it; new work ("give me a one-pager on Opus 5.6")
+ // starts as its own task beside it and becomes what the caller is talking about (follow-up-intent.mjs).
+ // Off a call nothing changes: a busy conversation still refuses rather than getting a replacement.
+ if(transport==='live'&&skill==='voice-ask'&&terminalMode&&terminals&&workTarget&&!stopped&&!refersBack(executionAsk)){
+  let occupied;try{occupied=terminals.get(workTarget)}catch{}
+  if(occupied&&running(occupied)){startedBeside=existingTitle(occupied);workTarget=null;effects.push('busy-target-new')}
  }
  if(skill){
    if(terminalMode||slash){
@@ -261,6 +269,7 @@ export async function routeVoice(root,{id,transcript,selection:chosen,terminalMo
    if(stopped)reply=`Stopped ${shortTitle(stopped.title)}. ${reply}`;
    if(separatedFrom)reply=`Running ${SKILLS[skill].label} on its own while ${shortTitle(separatedFrom)} finishes.`;
    if(waitingBehind)reply=`Got it. I'll add that as soon as ${shortTitle(waitingBehind)} is free.`;
+   if(startedBeside)reply=`Starting that on its own while ${shortTitle(startedBeside)} finishes.`;
    if(classified.startReply)reply=classified.startReply;
   }else{
    if(newTask?.multiple&&classified.tasks?.length>1)throw new Error('Multiple terminal tasks require the work pane.');

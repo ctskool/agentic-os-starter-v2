@@ -17,6 +17,7 @@ import {clip} from './clip.mjs';
 export const LIVE_CONTEXT_FILE='system/v2/live-context.json';
 export const LIVE_SECTIONS=Object.freeze({
  today:'Today: top three, schedule and Daily Drivers from today\'s daily note (Plan Today)',
+ calendar:'Calendar: today\'s and tomorrow\'s events, read from Google Calendar about once an hour, 7 a.m. to 10 p.m.',
  inbox:'New vault notes: how many notes landed in each inbox/ folder in the last 24 hours',
  numbers:'Numbers: metrics and your latest video (Metrics Pull)',
  news:'News: the morning brief\'s top headlines (Morning Intel)',

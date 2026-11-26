@@ -15,6 +15,7 @@ import {readAboutMe} from './about.mjs';
 import {clip} from './clip.mjs';
 import {PATHWAYS} from '../lookup-fallback.mjs';
 import {readLiveContext,resolveNotes,noteSections,noteForCall,cutToBytes} from './context.mjs';
+import {readCalendarSnapshot,calendarLines} from '../calendar-snapshot.mjs';
 
 const jiti=createJiti(import.meta.url);
 // A UTF-8 byte cap is conservative even for an unusual script or input.
@@ -115,6 +116,8 @@ export async function liveSnapshot(root,{now=new Date(),usage={claude:getClaudeU
   `Daily Drivers: ${dailyDrivers(root).join(', ')}`,
   ...(daily?.isToday?[...daily.top3.slice(0,3).map(item=>`${item.done?'Done':'Open'}: ${item.text}`),...daily.schedule.slice(0,10).map(item=>`${item.time} ${item.item}`)]:[])
  ],900);
+ const reading=on.calendar?calendarLines(readCalendarSnapshot(root),now):null;
+ const calendar=on.calendar&&reading&&section('Calendar',[`Google Calendar, read ${reading.when}; "check my calendar" reads it again`],reading.lines,900);
  const work=liveShareWork?workRows(tasks(),now):[];
  const inbox=inboxCounts(root,now),metricsDate=Number.isFinite(metricsAt)?new Date(metricsAt).toISOString().slice(0,10):'unavailable',stale=now-metricsAt>2*DAY_MS&&Number.isFinite(metricsAt);
  const numbers=on.numbers&&section('Numbers',[`system/metrics/metrics.csv, ${metricsDate}${stale?', stale':''}`],
@@ -130,7 +133,7 @@ export async function liveSnapshot(root,{now=new Date(),usage={claude:getClaudeU
   [...(outliers?.top||[]).map(item=>clip(`${item.title} (${item.mult}, ${item.channel})`,175)),
    ...(trending?.repos||[]).map(repo=>trending.descriptions[repo]?`${repo}: ${clip(trending.descriptions[repo],140)}`:repo)],900);
  const own=noteSections(resolveNotes(root,context));
- return [`Vault snapshot captured ${now.toISOString()} (${today} locally)`,personal,date,...own,
+ return [`Vault snapshot captured ${now.toISOString()} (${today} locally)`,personal,date,calendar,...own,
   work.length?section('Work in progress',[`Work drawer, ${today}`],work,700):null,
   // Named for what it counts: "Inbox" read as email, and "nothing new" was said about mail (2026-11-22).
   on.inbox?section('New vault notes',[`inbox/ folders, last 24 h, ${today}; not email`],[inbox.join(', ')||'none'],250):null,numbers,news,radar].filter(Boolean).join('\n\n');
