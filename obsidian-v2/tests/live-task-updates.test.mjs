@@ -130,3 +130,13 @@ test('a line refused on its hand-off is still said, and only unanswered hand-off
  f.call.answers.acknowledge({type:'error',error:{client_event_id:refused.event_id}});
  assert.equal(f.commentary().at(-1).delegation_id,null);assert.equal(f.commentary().at(-1).content,'The page is done.');
 });
+
+test('a call hears the worker’s own opening, and a file-link hiccup is not told as a failure',async()=>{
+ const {replyOpening,taskUpdate}=await import('../runner/task-updates.mjs');
+ const text="Your calendar has six things today and nothing all-day. Tomorrow you have one: Skool Email from 4 to 4:15 p.m. Nothing else is booked.\n\n**Details:**\n- 8 a.m. Practice";
+ assert.equal(replyOpening(text),'Your calendar has six things today and nothing all-day. Tomorrow you have one: Skool Email from 4 to 4:15 p.m. Nothing else is booked.');
+ assert.equal(replyOpening('# Heading only'),'');
+ const done=taskUpdate({label:'Hooks',kind:'completion-error',failed:false,summary:'There are important limitations in the result.',reply:'I wrote three hooks and saved them.'});
+ assert.deepEqual(done,{state:'done',text:'Hooks is done: I wrote three hooks and saved them.'});
+ assert.equal(taskUpdate({label:'Hooks',kind:'completion-error',summary:'BLOCKED: no access'}).state,'failed');
+});

@@ -19,14 +19,24 @@ export function shortOutcome(value,count=1){
  return max(parts,count===1?150:260);
 }
 
+// The worker's own opening, for a Live call to put in its own words: its first paragraph, up to three sentences.
+// (2026-11-26 test calls: the two-sentence summary cut a calendar answer off at "today", and the local-voice summary
+// replaced a useful result with "There are important limitations in the result".)
+export function replyOpening(text){
+ const first=String(text||'').replace(/^BLOCKED:\s*/i,'').split(/\n\s*\n/).map(part=>part.trim()).find(part=>part&&!/^#{1,6}\s/.test(part))||'';
+ const clean=first.replace(/!?\[([^\]]+)\]\([^)]+\)/g,'$1').replace(/^[#>*-]+\s+/gm,'').replace(/[\x60*_]/g,'').replace(/\s+/g,' ').trim();
+ const plain=clean.match(/.+?(?:[.!?](?=\s|$)|$)/g)?.slice(0,3).join('').trim()||'';
+ return plain.length>=12?max(plain,450):'';
+}
 export function taskUpdate(item){
  const label=item.label||'Task';
  const value=String(item.summary||item.text||'').trim();
- const outcome=shortOutcome(value,2);
+ const outcome=item.reply||shortOutcome(value,2);
  const reason=shortOutcome(value)||'the worker stopped before returning a result';
  if(item.kind==='attention')return {state:'needs input',text:label+" needs your OK. It's in the terminal tray."};
- if(['error','completion-error'].includes(item.kind)||/^BLOCKED:/i.test(value))
-  return {state:'failed',text:label+" didn't finish: "+sentence(reason)+' Open the task to see what to try next.'};
+ // A result whose file link couldn't be checked still finished: only a real failure is told as one.
+ const failed=item.failed===false?false:['error','completion-error'].includes(item.kind)||/^BLOCKED:/i.test(value);
+ if(failed)return {state:'failed',text:label+" didn't finish: "+sentence(reason)+' Open the task to see what to try next.'};
  return {state:'done',text:label+' is done: '+sentence(outcome||'see the result on screen')};
 }
 

@@ -141,9 +141,11 @@ test('Live creation and refresh use the injected Work drawer and keep About me p
  f.prefs.liveShareWork=false;f.advance(10001);f.calls.refreshSnapshot(f.calls.call);
  await until(()=>f.api.commands.some(({command})=>command.content?.includes('Changed second paragraph')));
  const refresh=f.api.commands.find(({command})=>command.content?.includes('Changed second paragraph')).command.content;
- assert.match(refresh,/^About the user \(.*\nFirst paragraph.*\n\nNews \(a phrase in the user profile\)\nChanged second paragraph/);
+ assert.match(refresh,/^Background refresh of the snapshot, for reference only\. Don't bring it up unless the user asks about it\.\nAbout the user \(/);
  const sent=f.api.commands.filter(({command})=>command.type==="session.thinking.append").map(({command})=>command.content);
- assert.ok(sent.some(content=>/^Work in progress is no longer in the vault snapshot/.test(content)));
+ const about=sent.filter(content=>/\nAbout the user \(/.test(content)).join('\n');
+ assert.match(about,/First paragraph/);assert.match(about,/News \(a phrase in the user profile\)\nChanged second paragraph/);
+ assert.ok(sent.some(content=>/^Background refresh[^\n]*\nWork in progress is no longer in the vault snapshot/.test(content)));
  assert.ok(sent.every(content=>Buffer.byteLength(content)<=1000),"each update fits the append limit");
  assert.doesNotMatch(refresh,/Fixture work title|Original second paragraph/);
  assert.deepEqual(scopes,['native']);

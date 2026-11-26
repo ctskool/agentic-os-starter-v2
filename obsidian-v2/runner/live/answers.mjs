@@ -25,6 +25,7 @@ export class LiveAnswers {
   // Record the attempt before send, including a send which throws after the
   // frame may have gone out. A reconnect never replays an uncertain append.
   this.attempts.set(event.event_id,'unknown');
+  this.call.debugLog?.({sent:event.type.replace(/^session\.|\.append$/g,''),delegation:event.delegation_id,text:event.content});
   if(this.attempts.size>2048)this.attempts.delete(this.attempts.keys().next().value);
   try{this.call.socket.send(event)}catch{}
  }

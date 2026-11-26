@@ -7,7 +7,7 @@ import {findCli} from './adapters.mjs';
 import {cleanPrompt} from './terminals.mjs';
 import {classifyVoice,invalidateVoiceSnapshot} from './voice-router.mjs';
 import {deferredOpen} from './voice-targets.mjs';
-import {stopIntent,supersedeIntent,stripPleasantry} from './voice-stop.mjs';
+import {stopIntent,supersedeIntent,stripPleasantry,neverMindIntent} from './voice-stop.mjs';
 import {refersBack} from './follow-up-intent.mjs';
 import {newTaskIntent} from '../shared/new-task-intent.mjs';
 import {selectSpokenAnswer} from './spoken-answer.mjs';
@@ -167,7 +167,12 @@ export async function routeVoice(root,{id,transcript,selection:chosen,terminalMo
   return {action:'reply',reply:`Stopped ${existingTitle(task)}.`};
  };
  const stopping=/[\p{L}\p{N}]/u.test(ask)?stopIntent(ask)||(transport==='live'&&/^never\s*mind the report[.!?\s]*$/i.test(ask)?{provider:null}:null):null;
- const direct=/[\p{L}\p{N}]/u.test(ask)?(stopping?stopRoute(stopping.provider):slash&&!slash.found?{action:'reply',reply:`I don't see a /${slash.name} skill in ${chosen.provider==='claude'?'Claude Code':'Codex'}.`}:directVoiceRoute(ask)):{action:'reply',reply:newTask?'Ready for a new conversation. What would you like me to work on?':"I didn't catch a request. What would you like me to do?"};
+ // On a call, "never mind" within half a minute of this call starting a task takes that task back (2026-11-26 test
+ // call: said three seconds after "Starting…", it was answered "I'll leave it alone. It's still running").
+ const regretted=!stopping&&transport==='live'&&terminals&&neverMindIntent(ask)?(liveTaskIds||[]).map(id=>{try{return terminals.get(id)}catch{return null}})
+  .filter(task=>task&&running(task)&&taskInScope(task,appScope)&&Date.now()-(task.created??0)<=30000).at(-1)||null:null;
+ const takeBack=task=>{effect('stop',{taskId:task.id},`Stop “${existingTitle(task)}”`);stopped={taskId:task.id,title:existingTitle(task)};return {action:'reply',reply:'Okay, cancelled it.'}};
+ const direct=/[\p{L}\p{N}]/u.test(ask)?(stopping?stopRoute(stopping.provider):regretted?takeBack(regretted):slash&&!slash.found?{action:'reply',reply:`I don't see a /${slash.name} skill in ${chosen.provider==='claude'?'Claude Code':'Codex'}.`}:directVoiceRoute(ask)):{action:'reply',reply:newTask?'Ready for a new conversation. What would you like me to work on?':"I didn't catch a request. What would you like me to do?"};
  const routingStarted=performance.now();
  const classified=direct?{tier:2,engine:'rules',...direct,decision:{boundary:'front-door',source:'rules',rule:stopping?'frontdoor.stop':/[\p{L}\p{N}]/u.test(ask)?'frontdoor.direct':'frontdoor.empty'}}:slash?{tier:3,engine:'rules',decision:{boundary:'front-door',source:'rules',rule:'frontdoor.slashSkill'}}:await classifyVoice(root,{id,transcript:ask,chosen,terminals,workTarget,appScope,transport,liveCallId,liveTurns,liveTaskIds,planning,editDaily,separateTasks:!!newTask?.multiple,newConversation:!!newTask,signal,...(jev?{jev}:{}),...(strict?{strict}:{}),execute:async(...args)=>{
    if(!resolveCli(chosen.provider))throw new Error(`${chosen.provider} CLI is not installed. No other provider was called.`);
@@ -213,9 +218,12 @@ export async function routeVoice(root,{id,transcript,selection:chosen,terminalMo
  // points back at it ("add a section on its history") waits for it; new work ("give me a one-pager on Opus 5.6")
  // starts as its own task beside it and becomes what the caller is talking about (follow-up-intent.mjs).
  // Off a call nothing changes: a busy conversation still refuses rather than getting a replacement.
+ // Idle too (2026-11-26 test calls): "write a short one-pager comparing X" and "put together an outline for Y" were
+ // sent into the last call's finished task as a continuation, and announced under that task's name.
  if(transport==='live'&&skill==='voice-ask'&&terminalMode&&terminals&&workTarget&&!stopped&&!refersBack(executionAsk)){
   let occupied;try{occupied=terminals.get(workTarget)}catch{}
   if(occupied&&running(occupied)){startedBeside=existingTitle(occupied);workTarget=null;effects.push('busy-target-new')}
+  else if(occupied){workTarget=null;effects.push('new-work-new-task')}
  }
  if(skill){
    if(terminalMode||slash){

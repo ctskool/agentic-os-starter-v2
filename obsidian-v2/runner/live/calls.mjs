@@ -12,6 +12,7 @@ import {LiveTaskUpdates} from './task-updates.mjs';
 import {LiveAnswers} from './answers.mjs';
 import {speechBusy,speechRestarted,speechUpdate} from './speech-mode.mjs';
 import {liveCallLog} from './call-log.mjs';
+import {liveDebugLog,debugRecord} from './debug-log.mjs';
 
 const defaults={create:10000,attach:5000,ready:10000,close:5000,poll:20000,peer:15000,cooldown:120000,cleanup:7200000,backoff:2000,rollover:60000,idleForRollover:20000,forceRollover:20000,snapshotRefresh:10000};
 const positive=new Set(['session.started','session.resumed','session.paused','session.usage.updated','session.input_transcript.delta','session.output_transcript.delta','session.assistant_transcript.delta']);
@@ -48,6 +49,7 @@ export class LiveCalls {
  constructor({root,runtimeDir,ownerIsCurrent,prefs,provider,localBusy,holdAudio,releaseAudio,transport=createLiveTransport(),
   snapshot=liveSnapshot,history=liveHistory,tasks=()=>[],greeting=liveGreeting,now=Date.now,schedule=scheduleTimer,limits={},speechMode=null,authorization=()=>liveAuthorization(runtimeDir),key=()=>readLiveKey(runtimeDir),ownerDetail=null,log=runtimeDir?liveCallLog(runtimeDir):()=>{},surfaceAlive=ownerIsCurrent}){
   Object.assign(this,{root,ownerIsCurrent,prefs,provider,localBusy,holdAudio,releaseAudio,transport,snapshot,history,tasks,greeting,now,schedule,authorization,key,speechMode,ownerDetail,log,surfaceAlive});
+  this.debugLog=liveDebugLog(runtimeDir);
   this.limits={...defaults,...limits};this.gen=0;this.call=null;this.replacement=null;this.last=null;this.stopping=false;this.recoveryBusy=null;this.closing=new Set();
   try{this.recovery=new LiveRecovery(runtimeDir);this.usage=new LiveUsage(runtimeDir)}catch{this.storageError=true}
  }
@@ -86,7 +88,7 @@ export class LiveCalls {
    const now=new Date(this.now()),snapshot=await this.readSnapshot(call,now,prefs);
    call.snapshotSections=sections(snapshot);call.refreshAt=this.now()+this.limits.snapshotRefresh;
    call.turns=new LiveTurns(call.startedAt);call.answers=new LiveAnswers(call);call.taskUpdates=new LiveTaskUpdates(call);
-   call.requestWake=()=>this.wake(call);
+   call.requestWake=()=>this.wake(call);call.debugLog=record=>this.debugLog(call,record);
    const history=call.from?call.from.transcriptTail||'':prefs.liveCarryToday?this.history(this.root,call.appScope,now):'';
    if(!this.current(call))throw new Error('Live call ended before connecting.');
    // Persist the cooldown marker before sending. A bridge crash in this
@@ -244,6 +246,7 @@ export class LiveCalls {
    return;
   }
   if(call.remoteClosed)return;
+  {const record=debugRecord(event);if(record)call.debugLog?.(record)}
   call.answers?.acknowledge(event);
   if(event.type==='session.started'){
    const at=expiry(event.expires_at??event.session?.expires_at);
@@ -292,7 +295,10 @@ export class LiveCalls {
   void Promise.resolve().then(()=>this.readSnapshot(call,new Date(this.now()),this.prefs())).then(snapshot=>{
    if(!this.current(call)||call.routing||call.staged||this.localBusy())return;
    // The whole brief is too long for one update, so a change to it is reported, not resent.
-   const next=sections(snapshot),changed=next.filter(section=>!call.snapshotSections.includes(section))
+   // A section counts as changed only for what it says, not for the minutes ticking on a task's age (2026-11-26 test
+   // calls: the work list was resent every minute, each update kept the call out of standby, and Live read them out).
+   const stable=section=>section.replace(/, \d+ (?:min|h)\)/g,')'),before=new Set(call.snapshotSections.map(stable));
+   const next=sections(snapshot),changed=next.filter(section=>!before.has(stable(section)))
     .map(section=>section.startsWith('Morning brief (')?section.split('\n')[0]+'\nThis note changed during the call, so the copy from the start of the call may be out of date.':section);
    for(const name of ['About the user','Work in progress','Morning brief']){
     if(call.snapshotSections.some(section=>section.startsWith(name+' ('))&&!next.some(section=>section.startsWith(name+' (')))
@@ -300,7 +306,9 @@ export class LiveCalls {
    }
    call.snapshotSections=next;
    // One update per changed section, each within OpenAI's size limit: an update over it is rejected and Live keeps the old reading.
-   for(const part of changed.flatMap(section=>appendParts(section)))call.answers.append('thinking',null,part,APPEND_MAX_BYTES);
+   // Reference for later questions, not news: Live mentions it only if asked (it was reading these out unprompted).
+   const note="Background refresh of the snapshot, for reference only. Don't bring it up unless the user asks about it.\n";
+   for(const part of changed.flatMap(section=>appendParts(section,APPEND_MAX_BYTES-Buffer.byteLength(note))))call.answers.append('thinking',null,note+part,APPEND_MAX_BYTES);
   }).catch(()=>{}).finally(()=>{call.refreshing=false});
  }
  renewSpeech(call){

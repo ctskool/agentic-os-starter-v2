@@ -17,7 +17,8 @@ function fixture(t,provider){
  const terminals={live:new Map(),list:()=>tasks,get,
   send(id,text){const task=available(id);task.state='working';calls.push({kind:'send',id,text});return task},
   sendWhenFree(id,text){const task=get(id);if(['starting','working'].includes(task.state)){calls.push({kind:'queue',id,text});return task}return this.send(id,text)},
-  start(options){const task={id:options.id,...options.selection,title:options.title,state:'working',turns:[]};tasks.push(task);calls.push({kind:'start',...options});return task},
+  stop(id){const task=get(id);task.state='stopped';calls.push({kind:'stop',id});return task},
+  start(options){const task={id:options.id,...options.selection,title:options.title,state:'working',created:Date.now(),turns:[]};tasks.push(task);calls.push({kind:'start',...options});return task},
   startWorkflow(options){const direct=['metrics-pull','github-trending'].includes(options.skill);const task={id:options.id,...options.selection,title:options.skill,state:'working',turns:[],execution:direct?'script':'cli',workflow:{job:{skill:options.skill},destination:'fixture.md'}};tasks.push(task);calls.push({kind:'workflow',...options});return task},
   continueWorkflow(id,options){const task=available(id);assert.equal(options.selection.provider,task.provider);assert.equal(options.selection.model,task.model);task.state='working';calls.push({kind:'continue-workflow',id,options});return task}
  };
@@ -251,5 +252,29 @@ for(const provider of ['codex','claude']){
   // Off a call nothing changed: the same words are still routed by the model.
   await assert.rejects(f.speak('Why is this taking so long',busy.id,f.output()),/working or needs terminal input/);
   assert.equal(idle.state,'ready');
+ });
+}
+
+// Chase's test calls, 2026-11-26: new work went into the last call's finished task, and "never mind" right after
+// asking left the task running.
+for(const provider of ['codex','claude']){
+ test(`${provider}: on a call, new work starts its own task even when the selected one is idle; a short edit joins it`,async t=>{
+  const f=fixture(t,provider),live={transport:'live',liveCallId:crypto.randomUUID()};
+  const idle=f.add({state:'ready'});
+  const fresh=await f.speak('Put together a short outline for a ten minute YouTube video on Claude Code voice workflows, and save a note.',idle.id,f.output(),live);
+  assert.equal(f.calls.at(-1).kind,'start');assert.notDeepEqual(fresh.workIds,[idle.id]);
+  const other=f.add({state:'ready'});
+  await f.speak('Nice. Make that note shorter, like five tight bullets.',other.id,f.output(),live);
+  assert.equal(f.calls.at(-1).kind,'send');assert.equal(f.calls.at(-1).id,other.id);
+ });
+ test(`${provider}: on a call, "never mind" just after a task started takes it back; later it is ordinary talk`,async t=>{
+  const f=fixture(t,provider),live={transport:'live',liveCallId:crypto.randomUUID()};
+  const started=await f.speak('Draft a quick one pager comparing local voice models and save it to my vault.',null,f.output(),live);
+  const task=f.tasks.find(item=>item.id===started.workIds[0]);
+  const back=await f.speak('Wait, actually never mind.',task.id,undefined,{...live,liveTaskIds:[task.id]});
+  assert.equal(back.reply,'Okay, cancelled it.');assert.equal(f.calls.at(-1).kind,'stop');assert.equal(task.state,'stopped');
+  const old=f.add({state:'working',created:Date.now()-60000});const before=f.calls.length;
+  await f.speak('Wait, actually never mind.',old.id,f.output(2),{...live,liveTaskIds:[old.id]});
+  assert.equal(f.calls.slice(before).some(call=>call.kind==='stop'),false,'a task started a minute ago is not taken back');
  });
 }

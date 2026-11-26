@@ -6,6 +6,10 @@ const LEAD="(?:(?:hey|ok|okay|jarvis|astra|please|wait|hold on|hang on|actually|
 const STOP=new RegExp(`^${LEAD}(?:stop|cancel|abort|halt|kill|scratch)(?:\\s+(?:that|it|this|everything|the (?:task|job|work|run)|that (?:task|job)|working(?: on (?:that|it|this))?|what you(?:'re| are) doing|the (?:current|running) (?:task|job|work|conversation)))?(?:\\s+(?:the )?(?<provider>codex|claude)(?: (?:task|job|worker|conversation))?)?(?:\\s+(?:right )?now)?(?:[,\\s]+(?:please|jarvis|astra|thanks))*[.!?\\s]*$`,'i');
 // Returns {provider} (null when none was named) or null when this is not a stop.
 export function stopIntent(text){const match=STOP.exec(normalize(text));return match?{provider:match.groups.provider?.toLowerCase()||null}:null}
+// "Wait, actually never mind" said right after asking for something: the caller takes the request back. It only
+// counts as a stop for work this call started moments ago (bridge-core.mjs); otherwise it is ordinary talk.
+const NEVER_MIND=new RegExp(`^${LEAD}never\\s*mind(?:\\s+(?:that|it|then|about (?:that|it)))?(?:[,\\s]+(?:please|thanks|jarvis))*[.!?\\s]*$`,'i');
+export const neverMindIntent=text=>NEVER_MIND.test(normalize(text));
 
 // "What's going on? Why is this taking so long", "where are we at with that", "is it done yet": a question about work
 // already under way. It is answered from what the tasks are doing. Sent on as work, it became a new request for the

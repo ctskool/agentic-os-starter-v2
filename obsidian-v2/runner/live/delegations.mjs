@@ -15,7 +15,8 @@ const spokenFailure=error=>/working or needs terminal input|unfinished workflow/
 const readOffer=/\b(?:hear|read|tell you|go over|walk you through|what['’]s in it|the result|the summary)\b/i;
 const compoundReadAction=/\b(?:and then|(?:and|then) (?:run|start|create|draft|write|delete|send))\b/i;
 const pendingRead=/^(?:what (?:is|are|was|were|did|does|do|happened)|when (?:is|are|was|did|does|do)|how (?:many|much)|(?:check|read|show|summarize) (?:me )?(?:the |my )?(?:saved reading|report|result|summary|note|schedule|calendar|inbox))\b/i;
-const cancelWords=/^(?:no(?: thanks)?|don['’]?t|do not|(?:cancel|stop)(?: (?:it|that(?: task)?))?|wait|hold on|never\s*mind(?: the report)?|scratch that)[.!?\s]*$/i;
+// "Wait, actually never mind" too: the words people put in front of a cancel (2026-11-26 test call).
+const cancelWords=/^(?:(?:wait|actually|oh|um|uh|hold on|hang on|okay|ok|no|sorry)[,.!\s]+)*(?:no(?: thanks)?|don['’]?t|do not|(?:cancel|stop)(?: (?:it|that(?: task)?))?|wait|hold on|never\s*mind(?: (?:the report|that|it))?|scratch that)[.!?\s]*$/i;
 const immediate=action=>{
  const sites=new Set(action.effects.map(effect=>effect.site));
  const newWork=new Set(action.effects.filter(effect=>['start','startWorkflow','enqueue'].includes(effect.site)).map(effect=>effect.details.job.id));

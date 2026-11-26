@@ -140,7 +140,8 @@ export class VoiceHub {
   // Audio expiry never touches a task's written result. Retain receipts so a
   // repeated hook cannot recreate retired audio; bound receipt storage as before.
   const done=this.items.filter(i=>i.delivered).slice(-500);this.items=[...done,...this.items.filter(i=>!i.delivered)];
-  this.save(this.items);this.onPublish({...item,liveCallId:metadata.liveCallId,taskLabel:metadata.taskLabel,summary:metadata.summary,deliverable:metadata.deliverable});this.emit({type:'pending'});
+  this.save(this.items);this.onPublish({...item,liveCallId:metadata.liveCallId,taskLabel:metadata.taskLabel,summary:metadata.summary,deliverable:metadata.deliverable,
+   ...(typeof metadata.reply==='string'?{reply:metadata.reply}:{}),...(typeof metadata.failed==='boolean'?{failed:metadata.failed}:{})});this.emit({type:'pending'});
  }
  ack(id,client,ok){const item=this.items.find(i=>i.id===id);if(!item||typeof client!=='string'||!client||item.lease!==client)return;
   delete item.lease;delete item.leasedAt;if(ok||item.started)this.finish(item,ok?'acknowledged':'attempted');this.save(this.items);

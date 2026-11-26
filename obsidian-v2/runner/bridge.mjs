@@ -47,7 +47,7 @@ import {liveAuthorization} from './live/key.mjs';
 import {readLiveContext} from './live/context.mjs';
 import {executeCli} from './adapters.mjs';
 import {withSignInFallback} from './claude-stored-signin.mjs';
-import {taskLabel} from './task-updates.mjs';
+import {taskLabel,replyOpening} from './task-updates.mjs';
 import {completionLabel} from './voice-conversation-cues.mjs';
 const base=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const root=assertVault(configuredVault());
@@ -115,7 +115,10 @@ terminals.onChange=r=>{
   const artifactFailure=turn.artifactErrors?.length>0;
   const spoken=outcome;
   const blocked=/^\s*BLOCKED:/i.test(turn.text);
-  hub.publish(key,spoken||run?.summary||turn.text,{appScope,kind:artifactFailure||run?.status==='error'||blocked?'completion-error':'completion',taskId:r.id,label:completionLabel(r,turn),...liveInfo,liveCallId:turn.liveCallId||liveInfo.liveCallId,summary:r.error||liveInfo.summary||(blocked?turn.text:undefined)||spoken});
+  // For a Live call: the worker's own opening, for Live to put in its words (the local-voice summary gives up on a
+  // long caveat and says only "important limitations"), and whether the work itself failed, not just a file link.
+  hub.publish(key,spoken||run?.summary||turn.text,{appScope,kind:artifactFailure||run?.status==='error'||blocked?'completion-error':'completion',taskId:r.id,label:completionLabel(r,turn),...liveInfo,liveCallId:turn.liveCallId||liveInfo.liveCallId,summary:r.error||liveInfo.summary||(blocked?turn.text:undefined)||spoken,
+   reply:replyOpening(turn.text),failed:Boolean(blocked||run?.status==='error')});
  }}
  if(dashboardOnly&&run&&!r.turns.length){
   hub.publish(runKey,run.summary,{appScope,kind:run.status==='error'?'completion-error':'completion',taskId:r.id,...liveInfo});
