@@ -75,3 +75,58 @@ test('status prefers call work, can select a named running task, and lists concu
  assert.equal(taskStatusReply('Is that done yet?',()=>[])?.reply,'Nothing is running right now.');
  assert.equal(ask('Show me the report.'),undefined);
 });
+
+// Open hand-offs (real calls, 2026-11-26): an unanswered delegation keeps GPT-Live awake, and a commentary sent on it
+// later is said in Live's own voice. Chase asked for a five-minute cap.
+test('a task started by a hand-off has its news said on that hand-off, and other lines leave it open',()=>{
+ const f=fixture();
+ f.updates.hold(['research'],'del-1',0);
+ f.receive('Review the request.',1000,{kind:'attention'});f.flush(4100);
+ assert.equal(f.commentary().at(-1).delegation_id,null,'"needs your OK" is a plain line');
+ assert.equal(f.updates.open.has('research'),true);
+ f.receive('Found three sources.',60000);f.flush(63100);
+ const news=f.commentary().at(-1);
+ assert.equal(news.delegation_id,'del-1');assert.match(news.content,/^Research is done: Found three sources/);
+ assert.equal(f.updates.open.size,0);
+ f.receive('Another result.',70000);f.flush(73100);assert.equal(f.commentary().at(-1).delegation_id,null,'once said, later news is a plain line');
+});
+
+test('an open hand-off is closed in Live’s voice after five minutes, or soon after its task was stopped',()=>{
+ const f=fixture();
+ f.tasks.push({id:'research',title:'Research',state:'working',created:0});
+ f.updates.hold(['research'],'del-1',0);
+ f.flush(299999);assert.equal(f.commentary().length,0);
+ f.flush(300000);
+ assert.equal(f.commentary()[0].delegation_id,'del-1');assert.equal(f.commentary()[0].content,"Research is still working. I'll tell you when it's done.");
+ assert.equal(f.updates.open.size,0);
+ const g=fixture();g.tasks.push({id:'report',title:'Report',state:'stopped',created:0});
+ g.updates.hold(['report'],'del-2',0);
+ g.flush(1000);assert.equal(g.commentary().length,0,'a short grace in case its news is on the way');
+ g.flush(11000);assert.equal(g.commentary()[0].content,'Report was stopped.');assert.equal(g.commentary()[0].delegation_id,'del-2');
+});
+
+test('news in standby renews the call so Live says it; if no renewal can start, the screen says it',()=>{
+ const f=fixture();let wakes=0;f.call.paused=true;f.call.requestWake=()=>{wakes++;return true};
+ f.receive('Saved the page.',100);f.flush(3200);
+ assert.equal(wakes,1);assert.equal(f.cards.some(card=>card.type==='announce'),false);
+ assert.equal(f.call.answers.held.length,1,'held for the fresh session');assert.match(f.call.answers.held[0].content,/Research is done/);
+ f.updates.wakeFailed();
+ assert.equal(f.call.answers.held.length,0);
+ const announce=f.cards.find(card=>card.type==='announce');assert.ok(announce);
+ assert.match(f.updates.takeAnnouncement(announce.say),/Research is done/);
+ const g=fixture();g.call.paused=true;g.call.requestWake=()=>false;g.receive('Saved.',100);g.flush(3200);
+ assert.ok(g.cards.some(card=>card.type==='announce'));
+});
+
+test('a line refused on its hand-off is still said, and only unanswered hand-offs count as open',()=>{
+ const f=fixture();
+ assert.equal(f.call.answers.isOpen('del-1'),true);
+ f.call.answers.result('del-1',{reply:'Working on that.'},undefined,{keepOpen:true});
+ assert.equal(f.call.answers.isOpen('del-1'),true,'a task result leaves the hand-off open');
+ assert.equal(f.frames.find(frame=>frame.delegation_id==='del-1').type,'session.thinking.append');
+ assert.equal(f.commentary().at(-1).delegation_id,null);
+ f.call.answers.speak('del-1','The page is done.');assert.equal(f.call.answers.isOpen('del-1'),false);
+ const refused=f.commentary().at(-1);
+ f.call.answers.acknowledge({type:'error',error:{client_event_id:refused.event_id}});
+ assert.equal(f.commentary().at(-1).delegation_id,null);assert.equal(f.commentary().at(-1).content,'The page is done.');
+});

@@ -529,3 +529,34 @@ test('registered surfaces protect presence, focus, leave, artifacts, announcemen
  assert.ok((await request('/voice/live/start',{payload:{surfaceId:legacy,sdp:'offer'}})).status>=400);
  legacyStream.emit('close');
 });
+
+// Chase, 2026-11-26: task news that lands in standby is said in Live's own voice. Only the caller's voice wakes a
+// paused session, so the call is renewed and the fresh, awake session says the held news.
+test('task news in standby renews the call, the fresh session says it, and a renewal that never comes falls back',async t=>{
+ const f=await fixture(t);await f.start();const old=f.calls.call;
+ f.api.event('session.started',{expires_at:new Date(f.now()+3*3600000).toISOString()});
+ await until(()=>old.ready);f.calls.peerConnected(old);
+ f.api.event('session.paused');await until(()=>old.paused);
+ assert.equal(old.requestWake(),true);
+ assert.ok((await old.updates.poll(0)).events.some(event=>event.type==='rollover'));
+ old.answers.speak(null,'Research is done.');assert.equal(old.answers.held.length,1);
+ assert.equal(old.requestWake(),false,'one renewal at a time');
+ await f.calls.rollover(old,'replacement offer');const next=f.calls.replacement;
+ assert.equal(old.requestWake(),true,'a renewal on its way will carry the news');
+ f.api.event('session.resumed',{},next.sessionId);await until(()=>next.ready);f.calls.peerConnected(next);
+ await until(()=>f.calls.call===next);
+ assert.deepEqual(next.answers.held.map(event=>event.content),['Research is done.']);
+ f.calls.sweep();
+ await until(()=>f.api.commands.some(({id,command})=>id===next.sessionId&&command.type==='session.commentary.append'&&command.content==='Research is done.'));
+ await f.calls.invalidate('Finished test.');
+ // The window never answered the renewal: after 15 seconds the screen says the news.
+ const g=await fixture(t);await g.start();const call=g.calls.call;
+ g.api.event('session.started',{expires_at:new Date(g.now()+3*3600000).toISOString()});
+ await until(()=>call.ready);g.calls.peerConnected(call);g.api.event('session.paused');await until(()=>call.paused);
+ assert.equal(call.requestWake(),true);call.answers.speak(null,'Report is done.');
+ g.advance(15000);g.calls.sweep();
+ const events=(await call.updates.poll(0)).events;
+ assert.ok(events.some(event=>event.type==='announce'));assert.equal(call.answers.held.length,0);
+ assert.equal(call.rolloverSent,false,'the 2-hour renewal can still run later');
+ await g.calls.invalidate('Finished test.');
+});

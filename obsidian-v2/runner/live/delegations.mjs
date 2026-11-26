@@ -23,6 +23,8 @@ const immediate=action=>{
   !['send','continueWorkflow','stop','editDaily','reopenArtifact'].some(site=>sites.has(site))&&
   !action.effects.some(effect=>effect.site==='updateCurrent'&&!newWork.has(effect.details.id));
 };
+// Work whose news comes later: a new task, a workflow, or a request sent to (or queued for) an existing one.
+const startsWork=action=>Array.isArray(action?.effects)&&action.effects.some(effect=>['start','startWorkflow','enqueue','send','queueFollowup','continueWorkflow'].includes(effect.site));
 const scheduleTimer=(fn,ms)=>{const handle=setTimeout(fn,ms);handle.unref?.();return ()=>clearTimeout(handle)};
 
 export class LiveDelegations {
@@ -190,7 +192,10 @@ export class LiveDelegations {
   // Two cases need their own sentence, because "Starting…" would say the wrong thing: a workflow that runs on its
   // own while the selected task works, and a follow-up that waits for that task.
   const explained=receipt?.reply&&receipt.decision?.effects?.some(effect=>effect==='busy-target-separate'||effect==='queueFollowup');
-  call.answers.speak(delegation,slash||explained?receipt.reply:`Starting ${stage.spokenDescription.replace(/^Start /i,'')}…`);
+  // Work that starts a task keeps its hand-off open for that task's news, so this line goes as a plain one.
+  const keepOpen=startsWork(stage.action)&&call.answers.isOpen(delegation);
+  if(keepOpen)stage.heldOpen=delegation;
+  call.answers.speak(keepOpen?null:delegation,slash||explained?receipt.reply:`Starting ${stage.spokenDescription.replace(/^Start /i,'')}…`);
  }
  view(result,call){return this.requestContext().liveView?.(result,call.appScope)??result}
  async route(call,pending,request,delegation,phase,stage){
@@ -220,7 +225,9 @@ export class LiveDelegations {
   this.activity(call,stage.activity,'started',stage.description,started);
   if(this.isCurrent(call)){
    call.taskUpdates?.started(started,this.now());
-   call.answers.result(delegation,result,this.view(result,call),{speak:!(stage.undo&&result.action==='task')});
+   const keepOpen=started.length>0&&call.answers.isOpen(delegation);
+   call.answers.result(delegation,result,this.view(result,call),{speak:!(stage.undo&&result.action==='task'),keepOpen});
+   if(keepOpen)call.taskUpdates?.hold(started,delegation,this.now());
   }
  }
  async confirm(call,id,mode='click',delegation){
@@ -246,7 +253,11 @@ export class LiveDelegations {
  clear(call,type='staged-cleared'){
   const stage=call.staged;if(!stage)return;
   call.staged=null;stage.undo?.();stage.expiry?.();
-  if(!stage.consumed){stage.finish?.();this.activity(call,stage.activity,'dropped')}
+  if(!stage.consumed){
+   stage.finish?.();this.activity(call,stage.activity,'dropped');
+   // Cancelled in the undo window: the hand-off left open for the task's news is answered now.
+   if(stage.heldOpen&&call.answers?.isOpen(stage.heldOpen)&&call.state!=='closing')call.answers.speak(stage.heldOpen,'Cancelled.');
+  }
   call.answers.held=call.answers.held.filter(event=>event.delegation_id!==stage.delegation&&event.delegation_id!==stage.undoDelegation);
   if(call.state!=='closing')call.updates.push({type});
  }

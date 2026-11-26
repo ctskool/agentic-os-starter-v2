@@ -163,7 +163,7 @@ test('voice affirmation waits for its undo window, commits once, and never accep
  const staged=await f.stage('Run morning intel');assert.equal(staged.mode,'voice');
  assert.match((await f.say('Say yes to go ahead.')).content,/^Just to check/);assert.equal(f.work.length,0);
  const affirmedAt=f.now();
- id=f.turn('Yes please');await f.say('Starting ',id);assert.equal(f.work.length,0);
+ id=f.turn('Yes please');await f.say('Starting ');assert.equal(f.work.length,0);
  await f.idle();
  assert.equal(f.call.staged.undoUntil,affirmedAt+1500);
  f.advance(affirmedAt+1499-f.now());assert.equal(f.work.length,0);
@@ -194,7 +194,7 @@ test('auto announces and stages a cancel-only action, then commits once at 2500 
 for(const mode of ['auto','voice']){
  async function arm(f){
   const stage=await f.stage('Run morning intel');await f.idle();
-  if(mode==='voice'){const id=f.turn('Yes');await f.say('Starting ',id);await f.idle()}
+  if(mode==='voice'){const id=f.turn('Yes');await f.say('Starting ');await f.idle()}
   return stage;
  }
  test(`${mode} keeps the action armed during thanks and routes an independent inbox request`,async t=>{
@@ -244,7 +244,7 @@ for(const mode of ['auto','voice']){
   const cancel=f.delegate();f.advance(200);await f.say('Cancelled.',cancel);await f.idle();
   assert.equal(f.call.staged,null);assert.equal(f.work.length,0);
   const id=await requestWhileSettling(['great thanks']);
-  await f.say('Starting ',id);
+  await f.say('Starting ');
   f.advance(f.call.staged.undoUntil-f.now());await f.idle();assert.equal(f.work.length,1);
  });
 }
@@ -260,7 +260,7 @@ test('a follow-up using the shared router at the undo deadline cannot discard th
  const first=await f.stage('Run morning intel');await f.idle();
  const id=f.turn('Check my inbox');await until(()=>f.active.size);
  f.advance(first.undoUntil-f.now());assert.equal(f.call.staged,null);
- gate.resolve();await f.say('Starting Check my inbox',id);await f.idle();
+ gate.resolve();await f.say('Starting Check my inbox');await f.idle();
  assert.deepEqual(commits,['Run morning intel']);
  f.advance(2500);await f.idle();assert.deepEqual(commits,['Run morning intel','Check my inbox']);
 });
@@ -285,11 +285,14 @@ test('Live auto starts a literal slash skill once and answers status without a c
  const existing={id:randomUUID(),...chosen,title:'Separate task',state:'working',created:Date.now(),turns:[]};
  f.tasks.set(existing.id,existing);setCurrent(f.root,{get:id=>f.tasks.get(id)},{provider:'claude',id:existing.id});
  await f.post('/voice/live/context',f.saved());
- const start=f.turn('slash today');await f.say('Starting /today…',start);await f.idle();
+ const start=f.turn('slash today');await f.say('Starting /today…');await f.idle();
  existing.state='ready';
  assert.equal(f.work.length,0);f.advance(2500);await until(()=>f.work.length===1);await f.idle();
  assert.equal(f.work[0][0],'start');assert.equal(f.work[0][1].prompt,'/today');assert.equal(f.work[0][1].liveCallId,f.call.callId);
- assert.equal(f.appends().filter(event=>event.delegation_id===start&&event.type==='session.commentary.append').length,1);
+ // The hand-off stays open for the task's news: nothing is said on it yet, only a silent note.
+ assert.equal(f.appends().filter(event=>event.delegation_id===start&&event.type==='session.commentary.append').length,0);
+ assert.ok(f.appends().some(event=>event.delegation_id===start&&event.type==='session.thinking.append'));
+ assert.equal(f.call.taskUpdates.open.get(f.work[0][1].id)?.delegation,start);
  await f.post('/voice/live/context',f.saved());
  const status=f.turn('How’s that going?');await f.say('/today is still running, 0 min in.',status);await f.idle();
  const work=f.tasks.get(f.work[0][1].id);work.state='ready';work.turns.push({id:'done',ts:Date.now(),text:'Saved the daily note.'});
@@ -346,7 +349,7 @@ test('a correction or delayed negation cancels an affirmed action; corrections a
  const f=await fixture(t);await f.start();
  for(const fragment of ['use the other one instead',"No, don't do that"]){
   await f.stage('Run morning intel');await f.idle();
-  const id=f.turn('Yes');await f.say('Starting ',id);await f.idle();
+  const id=f.turn('Yes');await f.say('Starting ');await f.idle();
   f.advance(f.call.staged.undoUntil-f.now()-1);f.input(fragment);
   f.advance(1);await f.idle();assert.equal(f.call.staged,null);assert.equal(f.work.length,0);
  }
@@ -632,7 +635,7 @@ test('on a call, a follow-up for a working task waits for it; if the task frees 
  const first=f.saved().workTarget;assert.equal(f.tasks.get(first).state,'working');
  let id=f.turn('Make the second half shorter and punchier');
  const stage=await until(()=>f.call?.staged);await f.idle();
- assert.match((await f.say('add that as soon as',id)).content,/^Got it\. I'll add that as soon as that task is free\.$/);
+ assert.match((await f.say('add that as soon as')).content,/^Got it\. I'll add that as soon as that task is free\.$/);
  f.advance(2500);await f.idle();
  assert.equal(f.work.length,2);assert.deepEqual(f.work[1].slice(0,2),['queue',first]);assert.match(f.work[1][2],/Make the second half shorter and punchier/);
  assert.equal(f.appends().some(event=>/Say that again|still working/.test(event.content)),false);

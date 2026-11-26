@@ -86,6 +86,7 @@ export class LiveCalls {
    const now=new Date(this.now()),snapshot=await this.readSnapshot(call,now,prefs);
    call.snapshotSections=sections(snapshot);call.refreshAt=this.now()+this.limits.snapshotRefresh;
    call.turns=new LiveTurns(call.startedAt);call.answers=new LiveAnswers(call);call.taskUpdates=new LiveTaskUpdates(call);
+   call.requestWake=()=>this.wake(call);
    const history=call.from?call.from.transcriptTail||'':prefs.liveCarryToday?this.history(this.root,call.appScope,now):'';
    if(!this.current(call))throw new Error('Live call ended before connecting.');
    // Persist the cooldown marker before sending. A bridge crash in this
@@ -151,6 +152,20 @@ export class LiveCalls {
   catch{await this.end(next,'The Live connection could not be renewed.',key);throw new Error('The Live connection could not be renewed.')}
   finally{next.done.resolve()}
  }
+ // A task's news arrived while the call was in standby, which only the caller's voice wakes. Renew the call: the
+ // fresh session starts awake and says the held news in Live's voice (task-updates.mjs). True when a renewal is
+ // on its way; false sends the news to the caller's screen instead.
+ wake(call){
+  if(this.replacement?.from===call)return true;
+  if(!this.current(call)||this.call!==call||!call.ready||!call.peerConnected||call.rolloverSent||call.from)return false;
+  call.rolloverSent=true;call.wakeRollover=this.now();call.updates.push({type:'rollover'});return true;
+ }
+ // That renewal never came or failed: say the held news on screen, and let the 2-hour renewal run later as usual.
+ wakeFailed(call){
+  if(!call.wakeRollover)return;
+  call.wakeRollover=null;call.rolloverSent=false;call.rolloverAttempted=false;
+  call.taskUpdates?.wakeFailed();
+ }
  routeGeneration(call,gen){
   if(gen===undefined||gen===call.gen)return call;
   const next=this.replacement;
@@ -169,7 +184,7 @@ export class LiveCalls {
   next.localHeld=true;old.localHeld=false;
   next.speechLease=old.speechLease;old.speechLease=null;
   for(const path of old.answers.reports)next.answers.reports.add(path);
-  next.taskUpdates=old.taskUpdates;next.taskUpdates.call=next;next.taskUpdates.endTurn({});
+  next.taskUpdates=old.taskUpdates;next.taskUpdates.call=next;next.taskUpdates.endTurn({});next.taskUpdates.release();
   next.taskUpdates.inputOffset=-Infinity;
   next.answers.held.push(...old.answers.held.filter(event=>event.delegation_id===null));
   next.leaseStartedAt=old.leaseStartedAt??old.startedAt;next.greeted=true;
@@ -358,7 +373,7 @@ export class LiveCalls {
    call.socket?.close();
    if(this.replacement===call){
     this.replacement=null;
-    if(this.call===call.from&&this.current(call.from))call.updates.push({type:'rollover-failed'});
+    if(this.call===call.from&&this.current(call.from)){call.updates.push({type:'rollover-failed'});this.wakeFailed(call.from)}
    }
    if(this.call===call){this.call=null;this.last={call,until:this.now()+60000}}
   }
@@ -414,6 +429,8 @@ export class LiveCalls {
     call.rolloverSent=true;call.updates.push({type:'rollover'});
    }
    if(this.current(call)){
+    // A renewal asked for to say task news must be under way within 15 seconds, or the screen says it.
+    if(call.wakeRollover&&!this.replacement&&now-call.wakeRollover>=15000)this.wakeFailed(call);
     if(call.ready)call.taskUpdates?.flush(prefs,now,()=>this.tasks(call.appScope));
     this.renewSpeech(call);this.refreshSnapshot(call);
    }

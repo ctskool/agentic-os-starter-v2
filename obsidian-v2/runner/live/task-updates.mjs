@@ -1,11 +1,34 @@
 import {taskLabel,taskUpdate,shortOutcome} from '../task-updates.mjs';
 
 const SILENCE=1200,BATCH=3000,RECENT=10000,CHECK_IN=180000;
+// How long a hand-off may stay open for its task (Chase, 2026-11-26: "five minute cap"). Open, the call stays awake
+// (no standby; about 3 cents a minute more) and Live says the result in its own voice when it lands.
+export const HANDOFF_CAP_MS=300000;
+const STOPPED_GRACE_MS=10000;
 
 export class LiveTaskUpdates {
- constructor(call){this.call=call;this.jobs=new Map();this.pending=[];this.lastInput=-Infinity;this.inputOpen=false;this.lastResult=null;this.announcements=new Map();this.announced=0}
+ constructor(call){this.call=call;this.jobs=new Map();this.pending=[];this.lastInput=-Infinity;this.inputOpen=false;this.lastResult=null;this.announcements=new Map();this.announced=0;this.open=new Map()}
  // The text of a standby announcement, once, for the screen that plays it.
  takeAnnouncement(seq){const text=this.announcements.get(seq);this.announcements.delete(seq);return text||null}
+ // Open hand-offs (real calls, 2026-11-26): GPT-Live does not go to standby while a client delegation is unanswered,
+ // and a commentary sent later on that delegation is spoken in Live's own voice and completes it. Lines sent with
+ // delegation_id null meanwhile ("needs your OK") leave it open. So a hand-off that starts a task stays open until
+ // that task's news is said on it, up to HANDOFF_CAP_MS.
+ hold(taskIds,delegation,now){if(typeof delegation==='string'&&delegation)for(const id of taskIds)this.open.set(id,{delegation,at:now})}
+ // A renewed session does not know the old session's delegations.
+ release(){this.open.clear()}
+ // News held for a fresh session that could not be started: the caller's screen says it instead (see flush).
+ wakeFailed(){
+  const answers=this.call.answers,held=answers.held.filter(event=>event.delegation_id===null);
+  answers.held=answers.held.filter(event=>event.delegation_id!==null);
+  for(const event of held)this.announce(event.content);
+ }
+ announce(text){
+  const seq=++this.announced;this.announcements.set(seq,text);
+  for(const key of this.announcements.keys())if(this.announcements.size>5)this.announcements.delete(key);
+  this.call.answers.append('thinking',null,`Already said out loud on the user's screen while the call was in standby, so don't repeat it unless asked: ${text}`);
+  this.call.updates.push({type:'announce',say:seq});
+ }
  taskIds(){return [...this.jobs.keys()]}
  started(ids,at){for(const id of ids){this.jobs.delete(id);this.jobs.set(id,at)}}
  transcript(row){
@@ -58,10 +81,34 @@ export class LiveTaskUpdates {
   }else this.pending=this.pending.filter(entry=>entry.state!=='progress');
   if(this.inputOpen||now-this.lastInput<SILENCE)return;
   if(!this.call.paused)answers.resume({recentInput:now-this.lastInput<=RECENT});
+  // An open hand-off past the cap, or whose task was stopped, is closed by Live in its own voice. The call can then
+  // go to standby; that task's news comes later through a fresh session (see below).
+  if(this.open.size&&!this.call.paused){
+   let tasks=null;
+   for(const [id,entry] of [...this.open]){
+    if(this.pending.some(item=>item.taskId===id&&!['needs input','progress'].includes(item.state)))continue;
+    const task=(tasks??=new Map(readTasks().map(task=>[task.id,task]))).get(id);
+    if(task&&['stopped','closed'].includes(task.state))entry.stoppedAt??=now;else delete entry.stoppedAt;
+    const stopped=entry.stoppedAt!==undefined&&now-entry.stoppedAt>=STOPPED_GRACE_MS;
+    if(!stopped&&now-entry.at<HANDOFF_CAP_MS)continue;
+    this.open.delete(id);
+    const label=task?taskLabel(task):'That task';
+    answers.speak(entry.delegation,stopped?`${label} was stopped.`:`${label} is still working. I'll tell you when it's done.`);
+   }
+  }
   while(this.pending.length&&now-this.pending[0].at>=BATCH){
    const boundary=this.pending[0].at+BATCH;
-   const batch=this.pending.filter(item=>item.at<=boundary);
-   this.pending=this.pending.slice(batch.length);
+   const all=this.pending.filter(item=>item.at<=boundary);
+   this.pending=this.pending.slice(all.length);
+   // A task whose hand-off is still open: its news goes on that hand-off, one each, so Live says it in its own voice.
+   const batch=[];
+   for(const item of all){
+    const entry=!this.call.paused&&!['needs input','progress'].includes(item.state)?this.open.get(item.taskId):null;
+    if(!entry){batch.push(item);continue}
+    this.open.delete(item.taskId);
+    answers.speak(entry.delegation,item.text);
+   }
+   if(!batch.length)continue;
    const prefix=now-this.lastInput<=RECENT?'By the way, ':'';
    const parts=batch.map(item=>{
     const outcome=item.outcome?.replace(/[.!?]$/,'');
@@ -73,12 +120,11 @@ export class LiveTaskUpdates {
    const text=prefix+(batch.length===1?batch[0].text:new Intl.ListFormat('en').format(parts)+'.');
    if(this.call.paused){
     // Standby only wakes on the caller's voice: an update sent to Live now is held until they speak (tested on
-    // real calls, 2026-11-26: no append, response.create or setting wakes it). So the caller's own screen says it,
-    // in the local voice, and Live is told silently that it has been said.
-    const seq=++this.announced;this.announcements.set(seq,text);
-    for(const key of this.announcements.keys())if(this.announcements.size>5)this.announcements.delete(key);
-    answers.append('thinking',null,`Already said out loud on the user's screen while the call was in standby, so don't repeat it unless asked: ${text}`);
-    this.call.updates.push({type:'announce',say:seq});
+    // real calls, 2026-11-26: no append, response.create or setting wakes it). A fresh session starts awake, so the
+    // call is renewed and the held news is said there, in Live's voice (the renewal carries held lines over).
+    // If no renewal can start, the caller's own screen says it in the local voice.
+    if(this.call.requestWake?.()){answers.speak(null,text);continue}
+    this.announce(text);
     continue;
    }
    answers.append('thinking',null,text);
