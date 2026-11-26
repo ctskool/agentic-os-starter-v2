@@ -286,7 +286,9 @@ export async function routeVoice(root,{id,transcript,selection:chosen,terminalMo
   // A workflow started on its own because the selected task was busy does not take the selection with it: the
   // caller is still talking about the task they were on. (2026-11-23: after "run an inbox brief" started
   // separately, "add a section on its history" was aimed at the inbox brief instead of the one-pager.)
-  if(separatedFrom)return;
+  // The same for a calendar check: it answers one question and is done. (2026-11-26: "give me a one-pager" right
+  // after a calendar question was queued behind the check and then written inside it.)
+  if(separatedFrom||classified.ownTask)return;
   if(sameConversation&&cliWork){
    if(!selectionChanged||newTask)return {pending:effect('updateCurrent',{scope:appScope,provider:chosen.provider,id:workIds[0],...(newTask?{resetContext:true}:{})},null,true)};
   }else if(sameConversation&&currentReset){

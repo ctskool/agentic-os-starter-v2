@@ -81,6 +81,16 @@ test('Claude confirms only the exact current request hook, ignores stale hooks a
  for(const changed of [{prompt:'Other request'},{requestKey:crypto.randomUUID()},{ts:f.now()-1}]){f.manager.accept(f.task.id,{...event,...changed});assert.equal(f.pending(),pending)}
  f.manager.accept(f.task.id,event);f.advance(TERMINAL_DELIVERY_TIMEOUT_MS);assert.equal(f.pending(),null);assert.equal(f.task.state,'working');assert.equal(f.processes[0].writes.length,1);
 });
+test('Claude confirms a request it recorded inside a pasted_content wrapper, and only that request',t=>{
+ // Claude Code 2.1.332 (2026-11-26) reports a pasted follow-up as <pasted_content id="…">…</pasted_content id="…">.
+ const f=fixture(t,'claude');f.manager.send(f.task.id,'Give me a one-pager on the rumor');const pending=f.pending();
+ const wrap=(text,id='d5f5')=>`\n\n<pasted_content id="${id}">\n${text}\n</pasted_content id="${id}">\n`;
+ const event={type:'UserPromptSubmit',sessionId:session,requestKey:pending.key,ts:f.now()};
+ for(const prompt of [wrap('Other request'),wrap(pending.text,'a1')+'extra',`<pasted_content id="a1">\n${pending.text}\n</pasted_content id="b2">`]){f.manager.accept(f.task.id,{...event,prompt});assert.equal(f.pending(),pending,prompt.slice(0,40))}
+ f.manager.accept(f.task.id,{...event,prompt:wrap(pending.text)});
+ f.advance(TERMINAL_DELIVERY_TIMEOUT_MS);assert.equal(f.pending(),null);assert.equal(f.task.state,'working');assert.equal(f.task.error,null);
+ assert.equal(f.manager.live.get(f.task.id).inputBoundary.hasDraft,false,'the box is not left marked as holding a draft');
+});
 test('Claude queued approval events cancel Enter before it reaches the CLI',t=>{
  const f=fixture(t,'claude');f.manager.send(f.task.id,'Update it');const file=path.join(f.manager.folder(f.task.id),'events','approval.json');
  fs.writeFileSync(file,JSON.stringify({type:'PermissionRequest',sessionId:session,ts:f.now()}));f.advance(TERMINAL_PASTE_SETTLE_MS);

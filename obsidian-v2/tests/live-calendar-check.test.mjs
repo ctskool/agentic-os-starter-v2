@@ -47,7 +47,7 @@ test('today’s own note answers a loose schedule question; another day or the c
 
 function fixture(t) {
  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'calendar-route-')); t.after(() => fs.rmSync(root, {recursive: true, force: true}));
- const selection = {provider: 'claude', model: 'opus'}, calls = [], tasks = [];
+ const selection = {provider: 'claude', model: 'opus'}, calls = [], tasks = [], updates = [];
  const get = id => { const task = tasks.find(task => task.id === id); if (!task) throw new Error('Task not found'); return task; };
  const terminals = {live: new Map(), list: () => tasks, get,
   send(id, text) { calls.push({kind: 'send', id, text}); return get(id); },
@@ -55,8 +55,8 @@ function fixture(t) {
   start(options) { const task = {id: options.id, ...options.selection, title: options.title, state: 'working', turns: []}; tasks.push(task); calls.push({kind: 'start', ...options}); return task; },
  };
  const speak = (transcript, workTarget = null, extra = {}) => routeVoice(root, {id: crypto.randomUUID(), transcript, selection, terminalMode: true, workTarget, ...extra}, undefined,
-  () => assert.fail('A calendar question needs no model'), terminals, {resolveCli: () => ({command: 'unused-test-cli', prefix: []}), updateCurrent: () => {}});
- return {calls, tasks, speak};
+  () => assert.fail('A calendar question needs no model'), terminals, {resolveCli: () => ({command: 'unused-test-cli', prefix: []}), updateCurrent: value => updates.push(value)});
+ return {calls, tasks, updates, speak};
 }
 
 test('on a call, a calendar question starts its own Calendar check, even while another task is working', async t => {
@@ -72,4 +72,5 @@ test('on a call, a calendar question starts its own Calendar check, even while a
  assert.match(started[0].prompt, /Google Calendar/);
  assert.equal(f.calls.some(call => call.id === busy.id), false, 'the busy task is left alone');
  assert.notDeepEqual(result.workIds, [busy.id]);
+ assert.equal(f.updates.some(update => update.id === result.workIds[0]), false, 'the check does not become the conversation the next request goes to');
 });

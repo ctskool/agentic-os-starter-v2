@@ -31,7 +31,11 @@ const require=createRequire(import.meta.url);
 export const TERMINAL_PASTE_SETTLE_MS=750;
 export const TERMINAL_DELIVERY_TIMEOUT_MS=10000;
 const DELIVERY_WARNING="The terminal hasn't confirmed this request. Check its input box; if the request is still there, press Enter once.";
-const normalizedPrompt=text=>String(text||'').replace(/\r\n?/g,'\n').trim();
+// Claude Code 2.1.3xx records a pasted message wrapped as <pasted_content id="…">…</pasted_content id="…">. That
+// wrapper is not the request: without removing it every follow-up looked unconfirmed, the task showed "needs your
+// input" ten seconds in while it was already working, and its input box stayed marked as holding a draft (2026-11-26).
+const PASTED=/^<pasted_content(?: id="([^"]*)")?>\n?([\s\S]*?)\n?<\/pasted_content(?: id="\1")?>$/;
+const normalizedPrompt=text=>{const plain=String(text||'').replace(/\r\n?/g,'\n').trim();return (PASTED.exec(plain)?.[2]??plain).trim()};
 // xterm answers cursor/device/color queries without any human keypress. These
 // complete reports must not cancel the only pending submission or create a draft.
 const terminalReport=data=>/^(?:\x1b\[(?:\??\d+;\d+R|[?>]?\d+(?:;\d+)*c)|\x1b\](?:10|11|12);rgb:[\da-f]{1,4}\/[\da-f]{1,4}\/[\da-f]{1,4}(?:\x07|\x1b\\))+$/i.test(data);
