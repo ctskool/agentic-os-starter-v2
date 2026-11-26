@@ -1269,8 +1269,8 @@ export default function HUD() {
         </div>
 
         <div className="hud-bottom v2-core-caption">
-          <h1>{provider === "codex" ? "ASTRA" : "CLAUDE"}</h1>
-          <p>{provider === "codex" ? "GPT-6 Astra · Codex mode" : "Original Jarvis core · Claude Code mode"}</p>
+          <h1>{provider === "codex" ? "CODEX" : "CLAUDE"}</h1>
+          <p>{provider === "codex" ? "Original Jarvis core · Codex mode" : "Original Jarvis core · Claude Code mode"}</p>
           <div className="state-preview" role="group" aria-label="Preview animation state">
             {(["idle", "listening", "working", "speaking", "error"] as CoreMode[]).map(value => <button key={value} aria-pressed={mode === value} onClick={() => setModeOverride(value)}>{value}</button>)}
             <button aria-pressed={modeOverride === null} onClick={() => setModeOverride(null)}>Auto</button>
