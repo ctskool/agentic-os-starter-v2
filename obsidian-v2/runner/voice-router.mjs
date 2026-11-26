@@ -18,6 +18,7 @@ import {resolveOpenTarget,openIntent,searchTargets,describeCandidates,uniqueLabe
 import {hedgeClassifier,jevState} from './jev.mjs';
 import {strictRules} from './voice-strict-rules.mjs';
 import {taskStatusReply} from './task-updates.mjs';
+import {calendarCheck} from './calendar-check.mjs';
 import {voiceReceiptTransport} from './voice-receipts.mjs';
 // Which stage decided, recorded beside the result. Receipts keep their existing
 // tier/engine/model meaning; provenance never travels through those fields.
@@ -253,6 +254,10 @@ async function classify(root,{id,transcript,chosen,terminals,workTarget,appScope
   const exchanges=newConversation?[]:conversationExchanges(memory(),workTarget);
   return via('router.compoundWork',{tier:3,engine:'rules',reply:'Working on that.',context:exchanges.map(e=>`User: ${e.you}\nAssistant: ${e.jarvis}${e.deliverable?`\nReferenced report: ${e.deliverable}`:''}`).join('\n').slice(-6500)});
  }
+ // On a call, a calendar question the saved notes can't answer is read from the calendar by its own short task
+ // (runner/calendar-check.mjs). It never joins the selected conversation, which may be busy with other work.
+ const calendar=live&&!separateTasks&&!newConversation&&calendarCheck(root,transcript);
+ if(calendar)return via('router.calendarCheck',{tier:3,engine:'rules',reply:'Checking your calendar.',resolvedRequest:calendar.prompt,resolvedTitle:calendar.title,ownTask:true,startReply:'Checking your calendar.',context:''});
  // A question that also carries work is never answered by a reader: the
  // classifier sees the whole sentence, so neither half can be dropped.
  const compound=!separateTasks&&compoundHint(transcript);

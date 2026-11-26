@@ -184,6 +184,8 @@ export async function routeVoice(root,{id,transcript,selection:chosen,terminalMo
  const skill=classified.tier===1?classified.skill:classified.tier===3?'voice-ask':null;
  const context=classified.context||'';
  const executionAsk=classified.resolvedRequest||ask,executionTitle=classified.resolvedTitle||executionAsk;
+ // A self-contained check (the calendar read) is its own short task, never a turn in the selected conversation.
+ if(classified.ownTask)workTarget=null;
  // The worker gets the words as spoken: a stripped pleasantry may be content
  // there ("Nice! Create a poster using that word as its only text").
  const originalAsk=classified.resolvedRequest||spokenAsk;
@@ -259,6 +261,7 @@ export async function routeVoice(root,{id,transcript,selection:chosen,terminalMo
    if(stopped)reply=`Stopped ${shortTitle(stopped.title)}. ${reply}`;
    if(separatedFrom)reply=`Running ${SKILLS[skill].label} on its own while ${shortTitle(separatedFrom)} finishes.`;
    if(waitingBehind)reply=`Got it. I'll add that as soon as ${shortTitle(waitingBehind)} is free.`;
+   if(classified.startReply)reply=classified.startReply;
   }else{
    if(newTask?.multiple&&classified.tasks?.length>1)throw new Error('Multiple terminal tasks require the work pane.');
    const args=skill==='voice-ask'?{prompt:originalAsk,...(context?{context:context.slice(-12000)}:{})}:classified.args||{};

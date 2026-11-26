@@ -84,6 +84,20 @@ test('a stray <markdown> wrapper tag around a new plan is dropped, not rejected'
  }
 });
 
+test('spoken lines a Live worker says before the note are dropped; the note itself is saved',t=>{
+ // Real answer from a Live call on 2026-11-26: two spoken sentences, a blank line, then the note.
+ const lead='Calendar read is done. I\'m writing the note now.\n\nTomorrow\'s plan for Friday is ready. Two sponsor deadlines land tomorrow.\n\n';
+ for(const skill of ['plan-today','plan-tomorrow']){
+  const f=fixture(t,skill),run=saveWorkflowResult(f.root,f.record,lead+note(f.date));
+  assert.equal(run.status,'ok',run.summary);
+  assert.equal(fs.readFileSync(f.file,'utf8'),note(f.date).trim());
+  assert.equal(fs.readFileSync(path.join(f.root,run.artifact_path),'utf8'),lead+note(f.date));
+ }
+ // Only a block that starts the note for this date counts; a note for another date is still refused.
+ const f=fixture(t),run=saveWorkflowResult(f.root,f.record,lead+note('2020-01-01').replace('# 2020-01-01',`# ${f.date}`)+`\ndate: ${f.date}`);
+ assert.equal(run.status,'error');assert.equal(fs.existsSync(f.file),false);
+});
+
 test('invalid frozen fields, duplicate YAML, section order and automatic completion cannot create a daily note',t=>{
  const mutations=[
   text=>text.replace('focus: "A concrete focus"\n',''),

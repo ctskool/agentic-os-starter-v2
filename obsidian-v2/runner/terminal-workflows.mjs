@@ -17,6 +17,15 @@ function unchangedDailyTargets(before,current){
  return JSON.stringify(fields(before))===JSON.stringify(fields(current));
 }
 
+// A worker started from a Live call answers out loud first ("Calendar read is done. Tomorrow's plan is
+// ready…") and then gives the note. Those spoken lines are for the call, not the note, which begins at its
+// own frontmatter for that date. Anything else in front stays and is refused below.
+export function dropSpokenLead(text,date){
+ if(/^﻿?---\r?\n/.test(text))return text;
+ const at=text.search(new RegExp(`^---\\r?\\ndate:[^\\S\\r\\n]*["']?${date}["']?[^\\S\\r\\n]*\\r?$`,'m'));
+ return at>0?text.slice(at):text;
+}
+
 function validateNewPlannedNote(text,date,driverLabels=DEFAULT_DRIVERS){
  const front=/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
  if(!front)throw new Error('New daily plan is missing its frozen frontmatter; proposed output saved for review.');
@@ -80,7 +89,7 @@ export function saveWorkflowResult(root,record,text,{ownsDestination=false,summa
    const picks=[...priorities.matchAll(/^\d+\. \[ \]\s+(.+)$/gm)].map(m=>m[1].trim()).slice(0,3);
    dailyResult={date:path.basename(destination,'.md'),schedule,picks};
    if(!summary)run.summary=`Saved the daily note for ${dailyResult.date} with the calendar schedule.`;
-   output=before===null&&job.skill!=='refresh-schedule'?validateNewPlannedNote(content,dailyResult.date,dailyDrivers(root)):mergeDaily(before,dailyResult.date,schedule,picks,dailyDrivers(root));
+   output=before===null&&job.skill!=='refresh-schedule'?validateNewPlannedNote(dropSpokenLead(content,dailyResult.date),dailyResult.date,dailyDrivers(root)):mergeDaily(before,dailyResult.date,schedule,picks,dailyDrivers(root));
   }
   const file=vaultPath(root,destination),current=fs.existsSync(file)?fs.readFileSync(file,'utf8'):null;
   if(ownsDestination){
