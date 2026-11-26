@@ -174,7 +174,7 @@ test('Live create persists the ID before bearer-authenticated attach and waits f
  assert.equal(answer.answerSdp,'fixture answer');assert.equal(answer.callSecret.length,64);
  const payload=f.api.requests[0];assert.deepEqual(payload.transport,{type:'webrtc',sdp:'fixture offer'});
  assert.equal(payload.session.store,false);assert.deepEqual(payload.session.client.data_channel.allowed_client_events,[]);
- assert.deepEqual(payload.session.wake_policy,{type:'speech'});assert.equal(payload.session.idle_timeout_s,20);
+ assert.deepEqual(payload.session.wake_policy,{type:'speech'});assert.equal(payload.session.idle_timeout_s,60);
  assert.equal(payload.session.delegation.acknowledgement_delay_ms,700);
  assert.equal(payload.session.audio.output.voice,'cedar');assert.match(payload.session.instructions,/Fixture snapshot/);assert.equal(payload.session.input,undefined);assert.match(payload.session.instructions,/Fixture history/);
  const call=f.calls.owner('fixture-surface','native',answer.callSecret);

@@ -13,6 +13,7 @@ interface LivePrefs {
  liveConfirm: 'auto'|'voice'|'click'|'destructive';
  liveIdleMic: 'open'|'muted';
  liveIdleHangupMin: 15|30|60;
+ liveStandbySec: 20|30|60;
  liveCarryToday: boolean;
  liveShareWork: boolean;
  liveShareBrief: boolean;

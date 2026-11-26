@@ -15,6 +15,7 @@ export const VOICE_HELP = `Voice settings
   voice use <name>            choose the voice, for example: voice use af_heart   (voice use default = the usual one)
   voice speed <0.8-1.4>       how fast it speaks (1 = normal)
   voice live-idle open|muted  whether the Live mic stays open in standby
+  voice live-standby 20s|30s|1m  how long a quiet Live call waits before standby (1m by default, OpenAI's longest)
   voice teach "<word>" ...    a name voice should listen for, in your spelling
   voice forget "<word>" ...   stop listening for a word (yours or a learned one)
   voice learn on | off        learn names from your notes' titles (on by default)
@@ -48,6 +49,12 @@ export async function voiceCommand({words = [], flags = {}, log = console.log, r
       if (rest.length !== 1 || !Number.isFinite(rate)) throw new Error(`Use: voice speed <number between ${VOICE_RATE.min} and ${VOICE_RATE.max}>   (1 = normal)`);
       log(`Speaking speed is now ${saveVoicePrefs(vault, {rate}).rate}.`); return 0;
     }
+    case 'live-standby':{
+      const seconds={'20s':20,'20':20,'30s':30,'30':30,'1m':60,'60s':60,'60':60}[String(rest[0]||'').toLowerCase()];
+      if(rest.length!==1||!seconds)throw new Error('Use: voice live-standby 20s|30s|1m (OpenAI allows at most 1 minute)');
+      saveVoicePrefs(vault,{liveStandbySec:seconds});
+      log(`A quiet Live call now waits ${seconds<60?seconds+' seconds':seconds/60+(seconds===60?' minute':' minutes')} before standby. It applies from the next call.`);return 0;
+    }
     case 'live-idle':
       if(rest.length!==1||!['open','muted'].includes(rest[0]))throw new Error('Use: voice live-idle open|muted');
       saveVoicePrefs(vault,{liveIdleMic:rest[0]});log(`Live standby microphone will be ${rest[0]}.`);return 0;
@@ -73,6 +80,7 @@ export async function voiceCommand({words = [], flags = {}, log = console.log, r
   log(`Voice:           ${prefs.voice ? voiceLabel(prefs.voice) : 'the usual one'}`);
   log(`Speaking speed:  ${prefs.rate === 1 ? 'normal' : prefs.rate}`);
   log(`Language:        ${SPEECH_LANGUAGES[language.code].name}${language.known ? '' : ` ("${language.asked}" is not supported)`}`);
+  log(`Live standby:    after ${prefs.liveStandbySec < 60 ? prefs.liveStandbySec + ' seconds' : prefs.liveStandbySec / 60 + ' min'} of quiet; mic ${prefs.liveIdleMic === 'muted' ? 'muted' : 'open'} in standby`);
   log(`Answers sooner:  start the model's program early ${speed.prestart ? 'on' : 'off'}, take the answer as it arrives ${speed.earlyAnswer ? 'on' : 'off'}, speak after the first sentence ${speed.streamSpeech ? 'on' : 'off'}`);
   log(`Listens for:     ${list.words.length} word(s)${list.learn ? '' : ' (learning from note titles is off)'}`);
   if (list.yours.length) log(`  yours:   ${list.yours.join(', ')}`);

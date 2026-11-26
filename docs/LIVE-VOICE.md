@@ -27,6 +27,7 @@ If a call will not start, the message on screen says why and what to do: a key O
 
 - **Just do it** is the default. Live announces the action right away. Say “stop” or “wait”, or select **Cancel**, within about 2.5 seconds to cancel before V2 carries it out. You can choose another mode in **Live settings → Confirm actions**.
 - **Say yes** asks before V2 acts. After you say yes, you have 1.5 seconds to say “wait”, correct the request, or tap **Cancel**. **Tap to confirm** waits for a click. **Ask only for stops & edits** starts new work immediately and asks for a click before stops, replacements, note edits, and conversation switches.
+- **Standby after** is how long a quiet call waits before standby: 1 minute by default (the longest OpenAI allows), or 20 or 30 seconds (`node aos.mjs voice live-standby 30s`). Awake, Live tells you task news in its own voice; standby costs less per minute. It applies from the next call.
 - **Wake on voice** leaves the mic open in standby by default. Turn it off to mute the mic in standby. Click to wake it, or press **Ctrl+Alt+J** on Windows.
 - **End call after idle** defaults to 30 minutes without speech. You can choose 15 or 60 minutes. Calls renew themselves before OpenAI's 2-hour session limit. **Remember today’s calls** is off by default. Turning it on can send a short summary of earlier Live exchanges from the same app when a new call begins.
 - **Share task titles** is on by default. Turn it off to leave work in progress out of the snapshot.
@@ -38,7 +39,7 @@ Live acknowledges a task once, then you can keep talking while it runs. Ask “H
 
 In Jarvis, each request Live hands off shows a card beside the core: **Handing off** while V2 works out the request, then the name of the task it started or the note it answered from. The card clears by itself after a few seconds.
 
-Live waits for a pause before saying what finished, what failed, or which task needs your input. Tasks that finish close together are announced together. In standby, a short chime and a card signal an update. Live speaks it when the call wakes and there’s a pause. After hangup, results stay on screen. In Jarvis, select a task chip in **Terminals** or **View** in the toast to inspect it. In Obsidian, check the work list or select **View** in its notice.
+Live waits for a pause before saying what finished, what failed, or which task needs your input. Tasks that finish close together are announced together. In standby, only your voice wakes Live, so your screen says the update itself in the local voice, with the mic off for those few seconds, and Live knows it was said when you speak next. A file a task makes on a call opens on screen when it finishes. After hangup, results stay on screen. In Jarvis, select a task chip in **Terminals** or **View** in the toast to inspect it. In Obsidian, check the work list or select **View** in its notice.
 
 Use **Live settings → Task updates** to choose **Done & blockers** (default), **Screen only**, or **Check in on long tasks**, which adds a check-in every three minutes for tasks started in the call.
 
@@ -73,6 +74,6 @@ Your Claude and Codex agents read **About me** from the vault’s `AGENTS.md`. L
 
 Typed requests use the regular V2 route and stay out of GPT-Live. Live receives short outcomes from the work it hands off. With Live selected, task updates stay on screen after hangup.
 
-The call bar estimates **$0.05 per active minute** and **$0.02 per standby minute**. When OpenAI does not report a breakdown, the meter uses the active rate for all reported seconds. Pro and Business API credits require eligibility and activation on the linked OpenAI API organization. Check that organization's API usage page for actual charges.
+The call bar estimates **$0.05 per active minute** and **$0.02 per standby minute**. A call goes to standby after **Standby after** of quiet (1 minute by default), so each quiet stretch costs at most about 3 cents more than going to standby at once. When OpenAI does not report a breakdown, the meter uses the active rate for all reported seconds. Pro and Business API credits require eligibility and activation on the linked OpenAI API organization. Check that organization's API usage page for actual charges.
 
 For setup and playback errors, see [Live voice troubleshooting](TROUBLESHOOTING.md#live-voice).
