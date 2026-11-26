@@ -32,16 +32,23 @@ test('outcome cards appear immediately and batch speech waits for turn end and 1
  assert.doesNotMatch(JSON.stringify(f.frames),/want to hear/i);
 });
 
-test('standby chimes on the card and holds commentary until wake and a pause',()=>{
+test('in standby the caller’s screen says the update, once, and Live is told silently that it was said',()=>{
+ // Chase's call, 2026-11-26: the one-pager finished in standby and nothing was said. Standby wakes only on speech.
  const f=fixture();f.call.paused=true;
  f.receive('Review the request.',100,{kind:'attention'});
  assert.equal(f.cards[0].chime,true);
  assert.equal(f.cards[0].text,"Research needs your OK. It's in the terminal tray.");
- f.flush(3100);assert.equal(f.call.answers.held.length,1);assert.equal(f.commentary().length,0);
- f.call.paused=false;f.updates.transcript({user:true,text:'Hello',at:4000,offset:4000,turnId:'wake'});
- f.call.answers.resume({tasks:false});f.flush(5300);assert.equal(f.commentary().length,0);
- f.updates.endTurn({turn_id:'wake'});f.flush(5301);
- assert.equal(f.commentary().length,1);assert.equal(f.call.answers.held.length,0);
+ f.flush(3100);
+ assert.equal(f.commentary().length,0);assert.equal(f.call.answers.held.length,0,'nothing waits to be said by Live later');
+ const announce=f.cards.find(card=>card.type==='announce');assert.ok(announce);
+ assert.equal(f.updates.takeAnnouncement(announce.say),"Research needs your OK. It's in the terminal tray.");
+ assert.equal(f.updates.takeAnnouncement(announce.say),null,'each one is played once');
+ const told=f.frames.filter(frame=>frame.type==='session.thinking.append');
+ assert.equal(told.length,1);assert.match(told[0].content,/^Already said out loud on the user's screen.*don't repeat it unless asked: Research needs your OK/);
+ // Awake, the same update is Live's to say, as before.
+ f.call.paused=false;f.receive('Saved the page.',4000);f.flush(7100);
+ assert.equal(f.commentary().length,1);assert.match(f.commentary()[0].content,/Research is done: Saved the page/);
+ assert.equal(f.cards.filter(card=>card.type==='announce').length,1);
 });
 
 test('screen-only stays quiet and chatty checks in every three minutes for this call’s tasks',()=>{

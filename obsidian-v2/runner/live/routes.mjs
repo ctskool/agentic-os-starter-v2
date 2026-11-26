@@ -64,6 +64,19 @@ export function createLiveBridge({hub,listeners,active,stopLocalAudio=()=>{},rea
     const {sdp}=JSON.parse((await body(req,110000)).toString());
     return json(await calls.rollover(call,sdp));
    }
+   // A task update that came in while the call was in standby, spoken by the caller's own screen in the local
+   // voice (task-updates.mjs). Only text the bridge queued for this call, each once; never text from the request.
+   if(route==='/voice/live/say'&&method==='POST'){
+    const {seq}=JSON.parse((await body(req,2000)).toString()||'{}');
+    const text=Number.isSafeInteger(seq)&&calls.current(call)?call.taskUpdates?.takeAnnouncement(seq):null;
+    if(!text||typeof options.speakAudio!=='function')return json({error:'Nothing to say.'},404);
+    const stop=new AbortController();res.on('close',()=>stop.abort());
+    let audio;
+    try{const out=await options.speakAudio(text,AbortSignal.any([stop.signal,AbortSignal.timeout(30000)]));if(out?.ok)audio=Buffer.from(await out.arrayBuffer())}catch{}
+    if(!audio?.length)return json({error:'Local speech is unavailable.'},503);
+    if(!res.destroyed){res.writeHead(200,{'Content-Type':'audio/wav','Content-Length':String(audio.length),'Cache-Control':'no-store'});res.end(audio)}
+    return;
+   }
    if(route==='/voice/live/mute'&&method==='POST'){
     const {muted}=JSON.parse((await body(req)).toString());calls.mute(call,muted);
     return json({ok:true});

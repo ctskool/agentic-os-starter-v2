@@ -286,6 +286,9 @@ export class TerminalManager {
   if(this.records.has(id)){const r=this.get(id);if(r.provider!==chosen.provider||r.prompt!==prompt||(r.execution==='native')!==(execution==='native'))throw new Error('Task ID already used');return r}
   this.retention.assertNew(id);
   if(!this.spawn&&!findCli(chosen.provider))throw new Error(`${chosen.provider} CLI is not installed`);
+  // Work asked for on a Live call opens its finished file on screen without being asked to (Chase, 2026-11-26:
+  // the one-pager finished during standby and nothing came up). A workflow's report keeps its own handling.
+  if(liveCallId&&!workflow)openWhenDone=true;
   const r={id,vault:this.root,...chosen,prompt,title:String(title||prompt).replace(/\s+/g,' ').slice(0,70),created:this.now(),lastActivityAt:this.now(),keep:false,state:'starting',sessionId:null,pid:null,turns:[],error:null,workflow,...(execution?{execution}:{}),...(spoken?{spoken:true}:{}),...(slashSkill?{slashSkill:true}:{}),...(!reveal?{reveal:false}:{}),...(openWhenDone?{openWhenDone:true}:{})};
   fs.mkdirSync(path.join(this.folder(id),'events'),{recursive:true});this.records.set(id,r);this.save(r);
   try{this.launch(r,{liveCallId})}catch(e){r.state='error';r.error=e.message;r.recoveryAvailable=!r.sessionId;this.save(r);throw e}return r;
@@ -405,7 +408,7 @@ export class TerminalManager {
  send(id,text,{resumeStopped=false,spoken=false,openWhenDone=false,liveCallId}={}){const r=this.get(id);text=cleanPrompt(text);
   this.assertFollowup(id,{resumeStopped});this.collect(id);this.assertFollowup(id,{resumeStopped});
   // A promised open stays with the conversation until a turn produces a file.
-  if(openWhenDone&&!r.openWhenDone){r.openWhenDone=true;this.save(r)}
+  if((openWhenDone||liveCallId)&&!r.openWhenDone){r.openWhenDone=true;this.save(r)}
   if(!this.live.has(id)){
    // A fresh user request authorizes this resume. Submit it as the CLI's
    // startup argument so it cannot be pasted into a trust/approval screen.

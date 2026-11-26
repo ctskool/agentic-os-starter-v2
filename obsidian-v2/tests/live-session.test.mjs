@@ -36,7 +36,7 @@ class Peer extends EventTarget {
  data(type){this.channel.onmessage?.({data:JSON.stringify({type})})}
  close(){this.closed=true}
 }
-function renderer(t,{prefs={},rejectFirstStream=false,pollFailure=false,denyMic=false,blockAudio=false}={}){
+function renderer(t,{prefs={},rejectFirstStream=false,pollFailure=false,denyMic=false,blockAudio=false,context=null}={}){
  const mediaStream=Object.getOwnPropertyDescriptor(globalThis,'MediaStream');
  Object.defineProperty(globalThis,'MediaStream',{configurable:true,value:Stream});
  t.after(()=>{if(mediaStream)Object.defineProperty(globalThis,'MediaStream',mediaStream);else delete globalThis.MediaStream});
@@ -64,6 +64,7 @@ function renderer(t,{prefs={},rejectFirstStream=false,pollFailure=false,denyMic=
    return json({answerSdp:'answer-'+gen,callSecret:'private-call',gen});
   }
   if(path==='/voice/live/context'&&!body)return json({conversationEpoch:7});
+  if(path==='/voice/live/say')return new Response(new Uint8Array([82,73,70,70]),{headers:{'Content-Type':'audio/wav'}});
   if(path.startsWith('/voice/live/updates?')){
    assert.equal(headers.get('X-V2-Call'),'private-call');
    const cursor=Number(path.split('=')[1]);cursors.push(cursor);
@@ -87,7 +88,7 @@ function renderer(t,{prefs={},rejectFirstStream=false,pollFailure=false,denyMic=
   },
   peer:()=>{const peer=new Peer(peers.length+1);peers.push(peer);return peer},
   audio:()=>({autoplay:false,srcObject:null,setAttribute(){},pause(){},play:async()=>{if(blockAudio)throw new DOMException('Forbidden','NotAllowedError')}}),
-  audioContext:()=>({resume:async()=>{},close:async()=>{closedAudio=true}}),
+  audioContext:()=>context??{resume:async()=>{},close:async()=>{closedAudio=true}},
   heartbeat:callback=>{tick=callback;return ()=>{}},visible:()=>visible,wait:flush,
   getSelection:async()=>{await pending;return selection}
  });
@@ -237,4 +238,20 @@ test('hanging up tells the bridge first, then closes the event stream, so the ca
  await until(()=>f.order.includes('stream closed'));
  assert.deepEqual(f.order,['stop sent','stream closed']);
  assert.deepEqual(f.get('/voice/live/stop')[0].body,{});
+});
+
+test('a task update in standby is played by this screen in the local voice, with the microphone off while it plays',async t=>{
+ const sources=[];
+ const context={state:'running',destination:{},resume:async()=>{},close:async()=>{},
+  decodeAudioData:async bytes=>{assert.equal(bytes.byteLength,4);return {duration:1.5}},
+  createBufferSource:()=>{const source={connect(){},disconnect(){},start(){source.started=true},stop(){source.onended?.()}};sources.push(source);return source}};
+ const f=renderer(t,{context}),peer=await f.start();await f.ready();
+ peer.data('session.paused');await until(()=>f.session.getSnapshot().state==='standby');
+ assert.equal(peer.track.enabled,true,'the standby microphone stays open to wake on speech');
+ f.emit('announce',{say:4});
+ await until(()=>sources[0]?.started);
+ const [request]=f.get('/voice/live/say');
+ assert.deepEqual(request.body,{seq:4});assert.equal(request.headers.get('X-V2-Call'),'private-call');
+ await until(()=>!peer.track.enabled);
+ sources[0].onended();await until(()=>peer.track.enabled);
 });

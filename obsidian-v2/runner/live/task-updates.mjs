@@ -3,7 +3,9 @@ import {taskLabel,taskUpdate,shortOutcome} from '../task-updates.mjs';
 const SILENCE=1200,BATCH=3000,RECENT=10000,CHECK_IN=180000;
 
 export class LiveTaskUpdates {
- constructor(call){this.call=call;this.jobs=new Map();this.pending=[];this.lastInput=-Infinity;this.inputOpen=false;this.lastResult=null}
+ constructor(call){this.call=call;this.jobs=new Map();this.pending=[];this.lastInput=-Infinity;this.inputOpen=false;this.lastResult=null;this.announcements=new Map();this.announced=0}
+ // The text of a standby announcement, once, for the screen that plays it.
+ takeAnnouncement(seq){const text=this.announcements.get(seq);this.announcements.delete(seq);return text||null}
  taskIds(){return [...this.jobs.keys()]}
  started(ids,at){for(const id of ids){this.jobs.delete(id);this.jobs.set(id,at)}}
  transcript(row){
@@ -69,6 +71,16 @@ export class LiveTaskUpdates {
     return item.text.replace(/[.!?]$/,'');
    });
    const text=prefix+(batch.length===1?batch[0].text:new Intl.ListFormat('en').format(parts)+'.');
+   if(this.call.paused){
+    // Standby only wakes on the caller's voice: an update sent to Live now is held until they speak (tested on
+    // real calls, 2026-11-26: no append, response.create or setting wakes it). So the caller's own screen says it,
+    // in the local voice, and Live is told silently that it has been said.
+    const seq=++this.announced;this.announcements.set(seq,text);
+    for(const key of this.announcements.keys())if(this.announcements.size>5)this.announcements.delete(key);
+    answers.append('thinking',null,`Already said out loud on the user's screen while the call was in standby, so don't repeat it unless asked: ${text}`);
+    this.call.updates.push({type:'announce',say:seq});
+    continue;
+   }
    answers.append('thinking',null,text);
    answers.speak(null,text);
   }

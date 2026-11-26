@@ -31,7 +31,7 @@ type Options={
 type Call={abort:AbortController;stream:AbortController;lease:LiveSurfaceLease|null;reader:ReadableStreamDefaultReader<Uint8Array>|null;
  secret:string|null;gen:number|null;peer:PeerStage|null;next:PeerStage|null;audio:HTMLAudioElement|null;audioContext:AudioContext|null;
  cursor:number;muted:boolean;standbyMuted:boolean;standbyWake:boolean;muteRevision:number;mutePending:boolean;dirty:boolean;context:Promise<void>|null;lastContext:string|null;lastBeat:number;
- artifacts?:ArtifactDelivery;artifactBusy?:boolean;speakingUntil?:number};
+ artifacts?:ArtifactDelivery;artifactBusy?:boolean;speakingUntil?:number;announcing?:boolean;announced?:Promise<void>};
 function delay(ms:number,signal:AbortSignal){
  return new Promise<void>(resolve=>{
   const done=()=>{clearTimeout(timer);signal.removeEventListener('abort',done);resolve()};
@@ -297,6 +297,7 @@ export class LiveSession {
    const card={seq:event.seq,label:event.label,text:event.text,taskId:typeof event.taskId==='string'?event.taskId:null};
    this.publish({completions:[...(this.snapshot.completions||[]).slice(-3),card]});if(event.chime===true)this.chime(call);return;
   }
+  if(event.type==='announce'&&Number.isSafeInteger(event.say)){void this.announce(call,event.say);return}
   if(event.type==='rollover'){if(!call.next)void this.rollover(call);return}
   if(event.type==='rollover-failed'){
    this.dropReplacement(call);
@@ -326,6 +327,31 @@ export class LiveSession {
     void Promise.resolve().then(()=>this.active(call)&&this.onEffect(effect)).catch(()=>this.onError('The Live reply could not be displayed.'));
    }
   }
+ }
+ // A task update that finished while the call was in standby. Live can't be woken except by the caller's voice,
+ // so this screen says it in the local voice. The microphone is off while it plays, or Live would hear it as the
+ // caller speaking and wake up to answer it. One at a time, in the order they came.
+ private announce(call:Call,seq:number){
+  const run=async()=>{
+   if(!this.active(call))return;
+   const context=call.audioContext;if(!context)return;
+   const response=await this.options.fetch('/voice/live/say',jsonPost({seq},{headers:this.auth(call),signal:AbortSignal.any([call.abort.signal,AbortSignal.timeout(35000)])}));
+   if(!response.ok||!this.active(call))return;
+   const buffer=await context.decodeAudioData(await response.arrayBuffer());
+   if(!this.active(call))return;
+   if(context.state!=='running')await context.resume().catch(()=>{});
+   call.announcing=true;this.refreshMic(call);
+   try{
+    await new Promise<void>(resolve=>{
+     const source=context.createBufferSource();source.buffer=buffer;source.connect(context.destination);
+     const done=()=>{clearTimeout(timer);call.abort.signal.removeEventListener('abort',stop);try{source.disconnect()}catch{}resolve()};
+     const stop=()=>{try{source.stop()}catch{}done()};
+     const timer=setTimeout(stop,(buffer.duration+2)*1000);
+     source.onended=done;call.abort.signal.addEventListener('abort',stop,{once:true});source.start();
+    });
+   }finally{call.announcing=false;if(this.active(call))this.refreshMic(call)}
+  };
+  call.announced=(call.announced??Promise.resolve()).then(run).catch(()=>{});
  }
  private chime(call:Call){
   const context=call.audioContext;if(!context||context.state!=='running')return;
@@ -364,7 +390,7 @@ export class LiveSession {
   if(!this.active(call)||!call.peer)return;
   const ready=call.peer.ready&&call.peer.connected&&!!call.lastContext;
   const micMuted=call.muted||call.standbyMuted;
-  call.peer.peer.track.enabled=ready&&!micMuted&&!call.mutePending;
+  call.peer.peer.track.enabled=ready&&!micMuted&&!call.mutePending&&!call.announcing;
   const voice=speakingHold(call.speakingUntil??0,call.peer.peer.getLevel()??0,Date.now());call.speakingUntil=voice.until;
   const state=!ready?'connecting':call.muted?'muted':this.paused&&!call.standbyWake?'standby':voice.speaking?'speaking':'listening';
   this.publish({state,ready,micMuted});

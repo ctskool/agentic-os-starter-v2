@@ -210,6 +210,23 @@ test('owned PTY cleanup waits for the conout worker before closing its pipe dest
  assert.equal(await releaseStoppedWindowsPty(proc),true);assert.equal(actions.length,4);
 });
 
+test('work asked for on a Live call opens its finished file without being asked to',t=>{
+ // Chase, 2026-11-26: the one-pager finished while the call was in standby and nothing came up on screen.
+ const {manager,directory}=fixture(t);
+ fs.writeFileSync(path.join(directory,'page.md'),'# One-pager\n');
+ const liveCallId=crypto.randomUUID(),task=manager.start({selection,prompt:'Make a one-pager on the rumor.',spoken:true,liveCallId});
+ assert.equal(task.openWhenDone,true);
+ manager.accept(task.id,{type:'complete',sessionId:crypto.randomUUID(),turnId:'done',text:'Made it: [One-pager](page.md)'});
+ assert.equal(task.turns[0].artifacts[0].open,true);
+ // A follow-up on a call opens its new version too; one typed outside a call does not.
+ manager.send(task.id,'Make it shorter',{spoken:true,liveCallId});assert.equal(task.openWhenDone,true);
+ manager.accept(task.id,{type:'complete',turnId:'shorter',text:'Shorter: [One-pager](page.md)'});assert.equal(task.turns[1].artifacts[0].open,true);
+ manager.send(task.id,'Save a copy',{spoken:true});
+ manager.accept(task.id,{type:'complete',turnId:'copy',text:'Copied: [One-pager](page.md)'});assert.equal(task.turns[2].artifacts[0].open,false);
+ // Off a call, nothing opens unless asked.
+ const typed=manager.start({selection,prompt:'Make a one-pager on the rumor.'});assert.equal(typed.openWhenDone,undefined);
+});
+
 test('a promised open survives an intervening turn and opens the first file the worker produces',t=>{
  const {manager,directory}=fixture(t);
  fs.writeFileSync(path.join(directory,'result.md'),'# Final document\n');

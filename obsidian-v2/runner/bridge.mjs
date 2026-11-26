@@ -68,6 +68,8 @@ const localPlaybacks=new Set();
 const hub=new VoiceHub({load:()=>readJson(root,`${ROOT}/voice-announcements.json`,[]),save:items=>writeJson(root,`${ROOT}/voice-announcements.json`,items),emit:e=>{for(const res of listeners.values())res.write(`data: ${JSON.stringify(e)}\n\n`);if(e.type==='owner')liveBridge.sweep()},
  canSpeak:()=>readVoicePrefs(root).voiceMode!=='live',onPublish:item=>liveBridge.calls.completion(item)});
 const liveBridge=createLiveBridge({root,runtimeDir:path.join(base,'.runtime'),hub,listeners,active,prefs:()=>readVoicePrefs(root),provider:()=>selection(root).provider,
+ // Standby announcements (live/task-updates.mjs): the same local voice and speed as spoken replies, one whole file.
+ speakAudio:(text,signal)=>fetch(`${speech}/speak?text=${encodeURIComponent(speechText(spokenFlow(selectSpokenAnswer(text,{mode:'reply'}))))}${speakPrefsQuery(readVoicePrefs(root))}`,{signal}),
  tasks:scope=>terminals.list().filter(task=>taskInScope(task,scope)&&!task.background),
  readEpoch:(provider,scope)=>readConversationEpoch(root,provider,scope),
  readContext:call=>{

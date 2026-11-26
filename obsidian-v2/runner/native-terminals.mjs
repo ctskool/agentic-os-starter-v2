@@ -100,7 +100,7 @@ export class NativeTerminalManager extends TerminalManager {
  send(id,text,{resumeStopped=false,spoken=false,openWhenDone=false,liveCallId}={}){
   const r=this.get(id);if(!native(r))return super.send(id,text,{resumeStopped,spoken,openWhenDone,liveCallId});
   text=cleanPrompt(text);this.collect(id);this.assertFollowup(id,{resumeStopped});
-  if(openWhenDone&&!r.openWhenDone){r.openWhenDone=true;this.save(r)}
+  if((openWhenDone||liveCallId)&&!r.openWhenDone){r.openWhenDone=true;this.save(r)}
   if(!this.live.has(id))return this.launch(r,{resumePrompt:text,spoken,liveCallId});
   const live=this.live.get(id);this.beginRequest(r,liveCallId);r.state='working';r.error=null;this.touch(r,{conversation:true});
   const handoff=artifactHandoffInstructions({node:process.execPath,helper:path.join(projectRoot,'runner','artifact-result.mjs'),events:this.artifactOutbox(id),taskId:id,requestKey:r.artifactRequestKey,provider:r.provider});
