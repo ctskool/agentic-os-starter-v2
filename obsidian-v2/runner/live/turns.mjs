@@ -1,4 +1,4 @@
-const WINDOW=90000;
+const WINDOW=90000,TALK_OVER=2500,TALK_OVER_WORDS=12;
 export const CORRECTION_RE=/(?:\b(?:actually|wait|hold on|never\s*mind|scratch that|no|instead)\b|\b(?:don['’]?t|do not|didn['’]?t mean)\b)/i;
 const UNDO_CANCEL_RE=/\b(?:stop|wait|cancel|hold on|hang on|no|don['’]?t|do not|never\s*mind|scratch that)\b/i;
 const offset=value=>Number.isFinite(value)&&value>=0?value:null;
@@ -31,13 +31,23 @@ export class LiveTurns {
   const rows=this.rows.filter(row=>row.offset<=anchor).sort((a,b)=>a.offset-b.offset||a.index-b.index);
   const last=rows.findLast(row=>row.user&&row.offset>this.used&&row.text.trim());
   if(!last)return null;
-  let first=rows.indexOf(last);
-  while(first>0){
-   const previous=rows[first-1];
-   if(!previous.user||previous.offset<=this.used||last.turnId!==null&&previous.turnId!==last.turnId)break;
-   first--;
+  // The caller's words, back to where their turn began. When Live talks over them (2026-11-26 test call: "On that
+  // outline, make sure it has a quick section on cost per hour" reached routing as its last half), Live's words in
+  // between are skipped as long as the caller kept going: their next words came within TALK_OVER of the last ones,
+  // and Live said only a few words meanwhile, none of them a question (a question hands the caller the floor).
+  let first=rows.indexOf(last),earliest=last,between='';
+  for(let i=first-1;i>=0;i--){
+   const previous=rows[i];
+   if(previous.offset<=this.used)break;
+   if(!previous.user){between=previous.text+between;continue}
+   if(between){
+    const said=between.trim();
+    if(earliest.at-previous.at>TALK_OVER||/\?/.test(said)||said.split(/\s+/).length>TALK_OVER_WORDS)break;
+   }else if(last.turnId!==null&&previous.turnId!==last.turnId)break;
+   if(previous.text.trim())earliest=previous;
+   first=i;between='';
   }
-  const utterance=rows.slice(first,rows.indexOf(last)+1);
+  const utterance=rows.slice(first,rows.indexOf(last)+1).filter(row=>row.user);
   this.used=Math.max(this.used,anchor);
   const exchanges=[];
   for(const row of rows.slice(0,first)){
@@ -45,7 +55,8 @@ export class LiveTurns {
    if(tail?.user===row.user&&tail.turnId===row.turnId)tail.rows.push(row);else exchanges.push({user:row.user,turnId:row.turnId,rows:[row]});
   }
   const lastAt=Math.max(...utterance.map(row=>row.at));
-  return {text:join(utterance).slice(0,4000),firstOffset:utterance[0].offset,lastAt,offer:recentOffer(exchanges,anchor,lastAt),
+  // A turn picked up after an earlier hand-off took its first half can start with that half's full stop (". Check the web…").
+  return {text:join(utterance).replace(/^[\s.,;:!?…-]+/,'').slice(0,4000),firstOffset:utterance[0].offset,lastAt,offer:recentOffer(exchanges,anchor,lastAt),
    preceding:exchanges.slice(-8).map(turn=>({role:turn.user?'user':'assistant',text:join(turn.rows).slice(-800)}))};
  }
  skip(anchor){this.used=Math.max(this.used,anchor)}

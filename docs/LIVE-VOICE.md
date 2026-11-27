@@ -35,7 +35,7 @@ If a call will not start, the message on screen says why and what to do: a key O
 
 ## How Live handles tasks
 
-Live acknowledges a task once, then you can keep talking while it runs. Ask “How’s that going?”, “Status of the research task”, or “What’s running?” for the current state. Say “slash today” or “run slash plan-tomorrow for next week” to start an installed skill in a fresh conversation with the selected provider.
+Live acknowledges a task once, then you can keep talking while it runs. If Live says it will do something but doesn’t hand it off, V2 notices a few seconds after Live stops talking and starts it from your words. If you talk over Live, both halves of your sentence count as one request. Ask “How’s that going?”, “Status of the research task”, or “What’s running?” for the current state. Say “slash today” or “run slash plan-tomorrow for next week” to start an installed skill in a fresh conversation with the selected provider.
 
 In Jarvis, each request Live hands off shows a card beside the core: **Handing off** while V2 works out the request, then the name of the task it started or the note it answered from. The card clears by itself after a few seconds.
 

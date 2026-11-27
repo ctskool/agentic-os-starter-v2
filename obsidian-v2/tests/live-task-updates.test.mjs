@@ -140,3 +140,25 @@ test('a call hears the worker’s own opening, and a file-link hiccup is not tol
  assert.deepEqual(done,{state:'done',text:'Hooks is done: I wrote three hooks and saved them.'});
  assert.equal(taskUpdate({label:'Hooks',kind:'completion-error',summary:'BLOCKED: no access'}).state,'failed');
 });
+
+// 2026-11-26 test call: a result sent a second before a "Starting…" line was never said.
+test('task news waits for a quiet moment: no hand-off being worked out, no line just sent, Live not mid-sentence', () => {
+ const f=fixture();let now=0;f.call.clock=()=>now;
+ f.receive('Saved the page.',100);
+ f.call.routing={};now=3200;f.flush(now);assert.equal(f.commentary().length,0,'a hand-off is being worked out');
+ f.call.routing=null;f.call.answers.speak(null,'Starting the hooks…');
+ now=4000;f.flush(now);assert.equal(f.commentary().length,1,'within 2.5 s of another line');
+ f.call.liveSaidAt=6000;now=6500;f.flush(now);assert.equal(f.commentary().length,1,'Live is still talking');
+ now=7300;f.flush(now);assert.equal(f.commentary().length,2);assert.match(f.commentary()[1].content,/Research is done: Saved the page/);
+});
+
+test('two hand-offs finishing together are said one at a time', () => {
+ const f=fixture();let now=0;f.call.clock=()=>now;
+ f.updates.hold(['research'],'del-1',0);f.updates.hold(['report'],'del-2',0);
+ f.receive('Found sources.',1000);f.receive('Saved the report.',1100,{taskId:'report',label:'Report'});
+ now=4200;f.flush(now);
+ assert.equal(f.commentary().length,1);assert.equal(f.commentary()[0].delegation_id,'del-1');
+ now=5000;f.flush(now);assert.equal(f.commentary().length,1);
+ now=6800;f.flush(now);
+ assert.equal(f.commentary().length,2);assert.equal(f.commentary()[1].delegation_id,'del-2');assert.match(f.commentary()[1].content,/^Report is done/);
+});

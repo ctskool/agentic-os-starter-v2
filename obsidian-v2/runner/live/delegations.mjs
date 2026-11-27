@@ -47,7 +47,14 @@ export class LiveDelegations {
  unchanged(call,captured){
   try{return !!captured&&isDeepStrictEqual(this.capture(call),captured)}catch{return false}
  }
- receive(call,event,id){
+ // Live promised work in its own words without handing it off (calls.mjs). The caller's words go through the same
+ // plan and commit as a hand-off, with no delegation: everything V2 says on it is a plain line.
+ rescue(call,anchor){
+  if(call.routing||call.staged||this.active.size||!this.isCurrent(call))return false;
+  this.receive(call,{delegation:{id:null,offset_ms:anchor}},randomUUID(),{key:'rescue-'+randomUUID().slice(0,8)});
+  return true;
+ }
+ receive(call,event,id,{key}={}){
   const delegation=event.delegation.id,anchor=call.turns.anchor(event,this.now());
   if(call.routing||this.active.size){
    if(call.routing&&!call.routing.assembled)call.routing.busyAnchor=Math.max(call.routing.busyAnchor??-1,anchor);
@@ -56,7 +63,7 @@ export class LiveDelegations {
   }
   let captured;try{captured=this.capture(call)}catch{}
   // Snapshot and reserve the delegation before yielding to the settle timer.
-  const pending={anchor,cancelled:false,abort:new AbortController(),prior:call.staged?.undo?call.staged:null,key:delegation};
+  const pending={anchor,cancelled:false,abort:new AbortController(),prior:call.staged?.undo?call.staged:null,key:delegation??key};
   call.routing=pending;
   this.activity(call,pending,'handoff');
   pending.plan=this.plan(call,pending,{id,delegation,captured});
@@ -196,7 +203,15 @@ export class LiveDelegations {
   // Work that starts a task keeps its hand-off open for that task's news, so this line goes as a plain one.
   const keepOpen=startsWork(stage.action)&&call.answers.isOpen(delegation);
   if(keepOpen)stage.heldOpen=delegation;
-  call.answers.speak(keepOpen?null:delegation,slash||explained?receipt.reply:`Starting ${stage.spokenDescription.replace(/^Start /i,'')}…`);
+  const line=slash||explained?receipt.reply:`Starting ${stage.spokenDescription.replace(/^Start /i,'')}…`;
+  // Live already acknowledged this in its own voice ("On it, spinning that up"), so "Starting…" would be a second
+  // acknowledgement (2026-11-26 test calls). Live gets it silently instead, to answer "what did you start?".
+  const acknowledged=call.liveAcked===true;
+  if(acknowledged&&!explained&&(keepOpen||!delegation)&&startsWork(stage.action)){
+   call.answers.append('thinking',null,`V2 is ${line.replace(/…$/,'').replace(/^Starting/,'starting')}. You already acknowledged it, so don't announce it again; mention it only if asked.`);
+   return;
+  }
+  call.answers.speak(keepOpen?null:delegation,line);
  }
  view(result,call){return this.requestContext().liveView?.(result,call.appScope)??result}
  async route(call,pending,request,delegation,phase,stage){

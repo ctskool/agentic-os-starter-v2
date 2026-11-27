@@ -8,6 +8,7 @@ import {EventEmitter} from 'node:events';
 import {setTimeout as wait} from 'node:timers/promises';
 import {createLiveBridge} from '../runner/live/routes.mjs';
 import {LiveTurns} from '../runner/live/turns.mjs';
+import {livePromised} from '../runner/live/calls.mjs';
 import {LiveAnswers} from '../runner/live/answers.mjs';
 import {liveHistory} from '../runner/live/snapshot.mjs';
 import {VoiceHub} from '../runner/voice-hub.mjs';
@@ -25,6 +26,7 @@ const chosen={provider:'claude',model:'sonnet'};
 const readReportPath='notes/live-only.md';
 const deferred=()=>{let resolve;const promise=new Promise(fn=>{resolve=fn});return {promise,resolve}};
 const flush=()=>new Promise(setImmediate);
+const plans=f=>f.requests.filter(item=>item.options?.phase==='plan').length;
 async function until(check){
  for(let attempt=0;attempt<250;attempt++){const value=check();if(value)return value;await wait(3)}
  assert.fail('Timed out in the Live bridge fixture');
@@ -105,7 +107,7 @@ function assertAppends(events){
 test('turn assembly uses offsets, includes delayed fragments before the anchor, and keeps 90 seconds',()=>{
  const turns=new LiveTurns(0);
  const add=(offset,text,at=offset,type='session.input_transcript.delta')=>turns.add({type,offset_ms:offset,delta:text},at);
- add(0,'Pruned');add(100000,'Earlier question');add(100010,'Earlier answer',100010,'session.output_transcript.delta');
+ add(0,'Pruned');add(96000,'Earlier question');add(97000,'Earlier answer',97000,'session.output_transcript.delta');
  add(100030,'Show my');add(100070,'A different request');add(100040,' schedule',100080);
  const first=turns.take(100045,100090);
  assert.equal(first.text,'Show my schedule');assert.equal(first.lastAt,100080);
@@ -444,7 +446,7 @@ test('snapshot refresh waits for a pending delegation and supplies only the chan
  await f.start();f.turn('Check that');await until(()=>f.active.size);
  f.setSnapshot('Today (fixture)\n- New agenda');await f.bridge.sweep();await flush();
  assert.equal(f.appends().some(e=>e.delegation_id===null),false);
- gate.resolve();await f.idle();await f.bridge.sweep();
+ gate.resolve();await f.idle();f.advance(4000);await f.bridge.sweep();
  const refresh=await f.say('New agenda');assert.equal(refresh.delegation_id,null);
  assert.equal(refresh.type,'session.thinking.append');assert.doesNotMatch(refresh.content,/First plan/);
  await f.bridge.sweep();await flush();assert.equal(f.appends().filter(e=>e.delegation_id===null).length,1);
@@ -646,4 +648,69 @@ test('on a call, a follow-up for a working task waits for it; if the task frees 
  assert.equal(f.work.length,3);assert.deepEqual(f.work[2].slice(0,2),['send',first]);
  assert.equal(f.appends().some(event=>/Say that again/.test(event.content)),false);
  assert.ok(stage.actionId);
+});
+
+// 2026-11-26 test calls: Live talked over the caller and only the tail of their request was routed.
+test('turn assembly joins the caller’s words across Live talking over them, but not across a question', () => {
+ const turns=new LiveTurns(0);
+ const say=(at,text,user=true)=>turns.add({type:user?'session.input_transcript.delta':'session.output_transcript.delta',delta:text},at);
+ say(30000,'Quick thing, your usage is at sixteen',false);
+ say(33000,'On that');say(33100,' percent',false);say(33300,' outline');say(34000,' used.',false);say(34200,' make sure it has a cost section');
+ assert.equal(turns.take(35000,35000).text,'On that outline make sure it has a cost section');
+ const offer=new LiveTurns(0);
+ offer.add({type:'session.input_transcript.delta',delta:'Any applications?'},10000);
+ offer.add({type:'session.output_transcript.delta',delta:'Want me to research that?'},10500);
+ offer.add({type:'session.input_transcript.delta',delta:'go ahead'},11000);
+ assert.equal(offer.take(12000,12000).text,'go ahead');
+ const late=new LiveTurns(0);
+ late.add({type:'session.input_transcript.delta',delta:'First request'},10000);
+ late.add({type:'session.output_transcript.delta',delta:'Okay.'},11000);
+ late.add({type:'session.input_transcript.delta',delta:'Second request'},14000);
+ assert.equal(late.take(15000,15000).text,'Second request','a pause longer than the talk-over gap starts a new turn');
+});
+
+test('Live promising work in its own words is recognised; offers, answers and report-backs are not', () => {
+ for(const said of ["Sure. I'll do a quick deep-dive and save a clean note. I'll get that moving.","Got it, I'll pull what's shipping now, compare tradeoffs, and save a one-page note.","On it.","Let me look that up.","Gotcha, I'll bake that in.","Sure, starting that now."])
+  assert.equal(livePromised(said),true,said);
+ for(const said of ['Want me to start a research task on that?',"Let me check. You've got three meetings today.","Research is still working. I'll tell you when it's done.","I'll let you know as soon as it's up.","Hi, Chase, ready when you are.","It's running now; I'll bring you the tradeoffs once it's ready.","It's still checking the file, so I'll share details once that's complete.","I'll keep that in mind."])
+  assert.equal(livePromised(said),false,said);
+});
+
+test('Live promises work and never hands it off: V2 takes the caller’s words itself, once, without a second acknowledgement', async t => {
+ const f=await fixture(t,{mode:'auto'});await f.start();
+ const at=f.input('Write three short YouTube hooks about AI coding agents and save a quick note',{turn_id:'u1'});
+ f.emit('session.output_transcript.delta',{offset_ms:at+10,delta:"Sure, I'll get that moving."});
+ f.advance(2999);await f.bridge.calls.sweep();await flush();assert.equal(f.requests.length,0,'Live may still hand it off');
+ f.advance(1);await f.bridge.calls.sweep();f.advance(200);
+ await until(()=>plans(f)===1);
+ assert.match(f.requests[0].request.transcript,/three short YouTube hooks/);
+ await until(()=>f.call.staged);
+ assert.equal(f.appends().some(event=>event.type==='session.commentary.append'&&/^Starting/.test(event.content)),false,'Live already said it');
+ assert.ok(f.appends().some(event=>event.type==='session.thinking.append'&&/^V2 is starting/.test(event.content)));
+ f.advance(2500);await f.idle();assert.equal(f.work.length,1);
+ f.advance(10000);await f.bridge.calls.sweep();f.advance(200);await flush();assert.equal(plans(f),1,'once per caller turn');
+});
+
+test('no rescue when Live answered, asked, or handed the work off itself', async t => {
+ const f=await fixture(t,{mode:'auto'});await f.start();
+ let at=f.input('How many meetings do I have today?',{turn_id:'u1'});
+ f.emit('session.output_transcript.delta',{offset_ms:at+10,delta:'You have three, starting at ten.'});
+ f.advance(5000);await f.bridge.calls.sweep();f.advance(200);await flush();
+ at=f.input('Research the new Codex release',{turn_id:'u2'});
+ f.emit('session.output_transcript.delta',{offset_ms:at+10,delta:'Want me to save it as a note too?'});
+ f.advance(5000);await f.bridge.calls.sweep();f.advance(200);await flush();
+ assert.equal(plans(f),0);
+ f.input('Draft a launch plan and save it',{turn_id:'u3'});const id=f.delegate();
+ f.emit('session.output_transcript.delta',{offset_ms:f.now(),delta:"On it, I'll get that moving."});
+ f.advance(200);await until(()=>plans(f)===1);
+ f.advance(5000);await f.bridge.calls.sweep();f.advance(200);await flush();
+ assert.equal(plans(f),1);assert.ok(id);
+});
+
+test('the rest of a turn an earlier hand-off cut short starts at its first word', () => {
+ const turns=new LiveTurns(0);
+ turns.add({type:'session.input_transcript.delta',delta:'Do a deeper research pass',offset_ms:100},100);
+ turns.skip(150);
+ turns.add({type:'session.input_transcript.delta',delta:'. Check the web for agent workflows',offset_ms:200},200);
+ assert.equal(turns.take(300,300).text,'Check the web for agent workflows');
 });

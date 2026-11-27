@@ -2,7 +2,14 @@ import {randomUUID} from 'node:crypto';
 import {localDate} from '../brief-voice.mjs';
 
 export function liveText(value,limit=500){
- return Buffer.from(String(value??'').trim()).subarray(0,limit).toString('utf8').replace(/\uFFFD$/,'').trimEnd();
+ const text=String(value??'').trim();
+ if(Buffer.byteLength(text)<=limit)return text;
+ // Too long: end on a whole sentence, or at least a whole word, so Live never says half a word.
+ const cut=Buffer.from(text).subarray(0,limit).toString('utf8').replace(/\uFFFD$/,'');
+ const sentence=cut.match(/^[\s\S]*[.!?](?=\s|$)/)?.[0];
+ if(sentence&&sentence.length>=cut.length/2)return sentence.trimEnd();
+ const word=cut.replace(/\s+\S*$/,'');
+ return (word&&word!==cut?word:cut).trimEnd();
 }
 export const revealedReports=reply=>new Set([reply.deliverable,reply.briefSource,reply.obsidian?.op==='open-note'&&reply.obsidian.query,
  reply.obsidian?.op==='daily-note'&&`daily-notes/${localDate()}.md`,
@@ -26,6 +33,8 @@ export class LiveAnswers {
   // frame may have gone out. A reconnect never replays an uncertain append.
   this.attempts.set(event.event_id,'unknown');
   this.call.debugLog?.({sent:event.type.replace(/^session\.|\.append$/g,''),delegation:event.delegation_id,text:event.content});
+  // Two lines for Live to say, sent within a second or so, and Live said only the second (2026-11-26): task news waits on this.
+  if(event.type==='session.commentary.append'&&this.call.clock)this.call.commentedAt=this.call.clock();
   if(this.attempts.size>2048)this.attempts.delete(this.attempts.keys().next().value);
   try{this.call.socket.send(event)}catch{}
  }

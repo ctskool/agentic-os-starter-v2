@@ -18,7 +18,10 @@ export function liveDebugLog(runtimeDir){
 const KEEP=new Set(['session.started','session.paused','session.resumed','session.delegation.created','session.commentary.appended','session.closed','error']);
 // The useful part of a sideband event: what was heard or said, and the moments that matter.
 export function debugRecord(event){
- if(event.type==='session.input_transcript.delta')return {heard:String(event.delta??'')};
+ if(event.type==='session.input_transcript.delta'){
+  const turn=event.turn_id??event.item_id,offset=event.offset_ms??event.end_offset_ms;
+  return {heard:String(event.delta??''),...(turn?{turn:String(turn).slice(-8)}:{}),...(Number.isFinite(offset)?{offset}:{})};
+ }
  if(event.type==='session.output_transcript.delta'||event.type==='session.assistant_transcript.delta')return {said:String(event.delta??'')};
  if(!KEEP.has(event.type))return null;
  return {event:event.type,...(event.delegation?.id?{delegation:event.delegation.id}:{}),...(event.error?{error:String(event.error.message||event.error.code||'').slice(0,300)}:{})};

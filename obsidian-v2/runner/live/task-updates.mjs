@@ -1,6 +1,6 @@
 import {taskLabel,taskUpdate,shortOutcome} from '../task-updates.mjs';
 
-const SILENCE=1200,BATCH=3000,RECENT=10000,CHECK_IN=180000;
+const SILENCE=1200,BATCH=3000,RECENT=10000,CHECK_IN=180000,LINE_GAP=2500;
 // How long a hand-off may stay open for its task (Chase, 2026-11-26: "five minute cap"). Open, the call stays awake
 // (no standby; about 3 cents a minute more) and Live says the result in its own voice when it lands.
 export const HANDOFF_CAP_MS=300000;
@@ -80,6 +80,11 @@ export class LiveTaskUpdates {
    }
   }else this.pending=this.pending.filter(entry=>entry.state!=='progress');
   if(this.inputOpen||now-this.lastInput<SILENCE)return;
+  // Not while a hand-off is being worked out or its "Starting…" window is open, within a moment of another line for
+  // Live to say, or while Live is mid-sentence: a result sent a second before a "Starting…" line was never said
+  // (2026-11-26 test call). One spoken line per pass; the next pass sends the next.
+  const call=this.call;
+  if(!call.paused&&(call.routing||call.staged?.undo||now-(call.commentedAt??-Infinity)<LINE_GAP||now-(call.liveSaidAt??-Infinity)<SILENCE))return;
   if(!this.call.paused)answers.resume({recentInput:now-this.lastInput<=RECENT});
   // An open hand-off past the cap, or whose task was stopped, is closed by Live in its own voice. The call can then
   // go to standby; that task's news comes later through a fresh session (see below).
@@ -94,6 +99,7 @@ export class LiveTaskUpdates {
     this.open.delete(id);
     const label=task?taskLabel(task):'That task';
     answers.speak(entry.delegation,stopped?`${label} was stopped.`:`${label} is still working. I'll tell you when it's done.`);
+    return;
    }
   }
   while(this.pending.length&&now-this.pending[0].at>=BATCH){
@@ -101,13 +107,16 @@ export class LiveTaskUpdates {
    const all=this.pending.filter(item=>item.at<=boundary);
    this.pending=this.pending.slice(all.length);
    // A task whose hand-off is still open: its news goes on that hand-off, one each, so Live says it in its own voice.
-   const batch=[];
+   const batch=[],later=[];let spoke=false;
    for(const item of all){
     const entry=!this.call.paused&&!['needs input','progress'].includes(item.state)?this.open.get(item.taskId):null;
     if(!entry){batch.push(item);continue}
+    if(spoke){later.push(item);continue}
     this.open.delete(item.taskId);
-    answers.speak(entry.delegation,item.text);
+    answers.speak(entry.delegation,item.text);spoke=true;
    }
+   // The rest wait for the next pass, in their order.
+   if(spoke){this.pending.unshift(...later,...batch);return}
    if(!batch.length)continue;
    const prefix=now-this.lastInput<=RECENT?'By the way, ':'';
    const parts=batch.map(item=>{
@@ -129,6 +138,7 @@ export class LiveTaskUpdates {
    }
    answers.append('thinking',null,text);
    answers.speak(null,text);
+   return;
   }
  }
 }

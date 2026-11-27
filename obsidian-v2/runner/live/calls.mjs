@@ -21,6 +21,18 @@ const expiry=value=>{
  if(typeof value==='number'&&Number.isFinite(value)&&value>0)return value<1e12?value*1000:value;
  const parsed=typeof value==='string'?Date.parse(value):NaN;return Number.isFinite(parsed)?parsed:null;
 };
+// The last sentence of Live's reply commits to work ("I'll get that moving", "Gotcha, I'll bake that in"), not an
+// offer ("Want me to…?") or a promise to report back ("I'll tell you when it's done", "I'll share details once…").
+const RESCUE_QUIET=3000,RESCUE_WINDOW=45000,REFRESH_AFTER_TALK=4000;
+const PROMISE=/\b(?:I['’]ll|I will|I['’]m going to|I['’]m gonna|let me)\s+(?:just |go |quickly |also |now |then |get to work and )?(?!(?:be|keep|let|tell|wait|stay|hold|hang|leave|ping|update|stop|need|have|talk|get back|circle back|report|follow up|bring|share|read|walk|give you|say|mention|know|remember|see)\b)[a-z]{2,}|\b(?:getting|starting|kicking|spinning|rolling)\s+(?:that|it|this|on|off|up)\b/i;
+const REPORT_BACK=/\b(?:let you know|tell you|update you|ping you|hand (?:you|it|them) (?:over|back)|(?:when|once|as soon as) (?:it|that)(?:['’]s| is) (?:done|ready|up|back|finished|complete))\b/i;
+export function livePromised(reply){
+ const text=String(reply??'').replace(/\s+/g,' ').trim();
+ if(!text||/\?["”’']?$/.test(text))return false;
+ const last=text.split(/(?<=[.!])\s+/).filter(Boolean).at(-1)||'';
+ if(REPORT_BACK.test(last))return false;
+ return PROMISE.test(last)||/^(?:(?:sure|okay|ok|got it|yep|yes)[,.!\s]+)*on it[.!]*$/i.test(last);
+}
 const deferred=()=>{let resolve;const promise=new Promise(done=>{resolve=done});return {promise,resolve}};
 const sectionName=/^(About the user|Today|Work in progress|New vault notes|Numbers|News|Morning brief|Radar) \(/;
 function sections(text){
@@ -88,7 +100,7 @@ export class LiveCalls {
    const now=new Date(this.now()),snapshot=await this.readSnapshot(call,now,prefs);
    call.snapshotSections=sections(snapshot);call.refreshAt=this.now()+this.limits.snapshotRefresh;
    call.turns=new LiveTurns(call.startedAt);call.answers=new LiveAnswers(call);call.taskUpdates=new LiveTaskUpdates(call);
-   call.requestWake=()=>this.wake(call);call.debugLog=record=>this.debugLog(call,record);
+   call.requestWake=()=>this.wake(call);call.debugLog=record=>this.debugLog(call,record);call.clock=this.now;
    const history=call.from?call.from.transcriptTail||'':prefs.liveCarryToday?this.history(this.root,call.appScope,now):'';
    if(!this.current(call))throw new Error('Live call ended before connecting.');
    // Persist the cooldown marker before sending. A bridge crash in this
@@ -264,8 +276,9 @@ export class LiveCalls {
   if(transcript.has(event.type)){
    call.lastTranscriptAt=this.now();
    const row=call.turns?.add(event,this.now());
-   if(row){call.taskUpdates?.transcript(row);call.transcriptTail=((call.transcriptTail||'')+row.text).slice(-2200);this.delegations?.fragment(call,row)}
+   if(row){call.taskUpdates?.transcript(row);call.transcriptTail=((call.transcriptTail||'')+row.text).slice(-2200);this.heard(call,row);this.delegations?.fragment(call,row)}
   }
+  if(event.type==='session.delegation.created'){call.delegatedAt=this.now();call.liveAcked=false}
   if(['session.input_transcript.done','session.input_transcript.completed','session.input_audio_buffer.speech_stopped','input_audio_buffer.speech_stopped','session.delegation.created','session.paused'].includes(event.type))call.taskUpdates?.endTurn(event);
   if(event.type==='session.paused'||event.type==='session.resumed'){
    call.paused=event.type==='session.paused';if(!call.from)call.updates.push({type:call.paused?'paused':'resumed'});
@@ -279,6 +292,23 @@ export class LiveCalls {
    this.delegations?.receive(call,event,id);
   }
  }
+ // Who spoke last, and what Live said back to the caller's latest words: for the promise check below, for holding
+ // task news while Live is mid-sentence (task-updates.mjs), and for not doubling Live's own acknowledgement.
+ heard(call,row){
+  const now=this.now();
+  if(row.user){if(row.text.trim()){call.heardAt=now;call.heardOffset=row.offset;call.liveReply='';call.liveAcked=false}return}
+  call.liveSaidAt=now;call.liveAcked=true;
+  if(call.heardAt!==undefined)call.liveReply=((call.liveReply||'')+row.text).slice(-1200);
+ }
+ // Live said it would do something and never handed it off (2026-11-26 test calls: "Sure, I'll get that moving", then
+ // nothing ran, twice). Once Live has finished that reply and no hand-off came, V2 takes the caller's words itself.
+ rescue(call,now){
+  if(!this.delegations||call.from||call.heardAt===undefined||call.rescuedFor===call.heardAt||!call.liveReply)return;
+  if(call.delegatedAt>=call.heardAt||call.commentedAt>=call.heardAt||call.routing||call.staged||call.taskUpdates?.inputOpen)return;
+  if(now-call.liveSaidAt<RESCUE_QUIET||now-call.heardAt>RESCUE_WINDOW||!livePromised(call.liveReply))return;
+  call.rescuedFor=call.heardAt;
+  this.delegations.rescue(call,call.heardOffset);
+ }
  hotkey(){const call=this.call;if(call?.localHeld&&call.ready&&this.current(call))call.updates.push({type:'hotkey'})}
  speechBoot(bootId){
   const call=this.call;
@@ -291,9 +321,12 @@ export class LiveCalls {
  }
  refreshSnapshot(call){
   if(!call.ready||!call.answers||call.routing||call.staged||call.refreshing||this.localBusy()||this.now()<call.refreshAt)return;
+  // Not in standby (an update sent then is held, and was refused when the call ended: 2026-11-26), and not while
+  // the caller is talking or Live is answering, where it got in the way of a hand-off. The next quiet moment sends it.
+  if(call.paused||call.taskUpdates?.inputOpen||this.now()-(call.heardAt??-Infinity)<REFRESH_AFTER_TALK||this.now()-(call.liveSaidAt??-Infinity)<REFRESH_AFTER_TALK)return;
   call.refreshAt=this.now()+this.limits.snapshotRefresh;call.refreshing=true;
   void Promise.resolve().then(()=>this.readSnapshot(call,new Date(this.now()),this.prefs())).then(snapshot=>{
-   if(!this.current(call)||call.routing||call.staged||this.localBusy())return;
+   if(!this.current(call)||call.routing||call.staged||call.paused||this.localBusy())return;
    // The whole brief is too long for one update, so a change to it is reported, not resent.
    // A section counts as changed only for what it says, not for the minutes ticking on a task's age (2026-11-26 test
    // calls: the work list was resent every minute, each update kept the call out of standby, and Live read them out).
@@ -440,6 +473,7 @@ export class LiveCalls {
     // A renewal asked for to say task news must be under way within 15 seconds, or the screen says it.
     if(call.wakeRollover&&!this.replacement&&now-call.wakeRollover>=15000)this.wakeFailed(call);
     if(call.ready)call.taskUpdates?.flush(prefs,now,()=>this.tasks(call.appScope));
+    if(call.ready&&!call.paused)this.rescue(call,now);
     this.renewSpeech(call);this.refreshSnapshot(call);
    }
   }
