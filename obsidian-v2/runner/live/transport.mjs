@@ -34,8 +34,9 @@ export function createLiveTransport({httpOrigin=origin,wsOrigin=httpOrigin.repla
     reason=reason.split(key).join('').replace(/sk-[A-Za-z0-9_-]{8,}/g,'').replace(/\s+/g,' ').slice(0,180);
     // A known cause is said in plain words with what to do; anything else keeps OpenAI's own reason.
     const known=liveRejection(response.status,code);
-    if(known)throw new LiveCreateRejected('OpenAI rejected the Live session request: '+known.text+'. (HTTP '+response.status+(/^[a-z_]{1,40}$/.test(code)?' '+code:'')+')');
-    throw new LiveCreateRejected('OpenAI rejected the Live session request (HTTP '+response.status+(reason?' '+reason:'')+').');
+    // The status and kind ride along so the caller can tell a request OpenAI will never accept from a bad moment.
+    const rejected=new LiveCreateRejected(known?'OpenAI rejected the Live session request: '+known.text+'. (HTTP '+response.status+(/^[a-z_]{1,40}$/.test(code)?' '+code:'')+')':'OpenAI rejected the Live session request (HTTP '+response.status+(reason?' '+reason:'')+').');
+    rejected.status=response.status;rejected.kind=known?.kind??null;throw rejected;
    }
    const data=await response.json(),id=data?.session?.id;
    if(!sessionId(id))throw new Error('Live session response did not include a session ID.');

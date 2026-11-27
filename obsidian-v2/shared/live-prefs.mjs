@@ -7,6 +7,6 @@ export const LIVE_PREF_CHOICES=Object.freeze({
  liveHandoff:Object.freeze(['client','tools'])
 });
 export const LIVE_PREF_DEFAULTS=Object.freeze({
- voiceMode:'local',liveTaskUpdates:'done',liveVoice:'marin',liveConfirm:'auto',liveIdleMic:'open',liveIdleHangupMin:30,liveStandbySec:60,liveCarryToday:false,liveShareWork:true,liveShareBrief:false,liveGreeting:true,liveHandoff:'client'
+ voiceMode:'local',liveTaskUpdates:'done',liveVoice:'marin',liveConfirm:'auto',liveIdleMic:'open',liveIdleHangupMin:30,liveStandbySec:60,liveCarryToday:false,liveShareWork:true,liveShareBrief:false,liveGreeting:true,liveHandoff:'tools'
 });
 export const livePrefsFrom=value=>Object.fromEntries(Object.entries(LIVE_PREF_CHOICES).map(([key,choices])=>[key,choices.includes(value?.[key])?value[key]:LIVE_PREF_DEFAULTS[key]]));

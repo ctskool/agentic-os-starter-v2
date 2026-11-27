@@ -815,7 +815,7 @@ async function toolFixture(t){
 test('tool hand-off: start_task is answered with what started and a task id, then the work starts', async t => {
  const f=await toolFixture(t);
  assert.equal(f.creates[0].session.delegation.type,'responses');
- assert.deepEqual(f.creates[0].session.delegation.responses.tools.map(tool=>tool.name),['start_task','follow_up_task','cancel_task','get_task_status','ask_vault']);
+ assert.deepEqual(f.creates[0].session.delegation.responses.tools.map(tool=>tool.name),['start_task','follow_up_task','cancel_task','get_task_status','confirm_action','ask_vault']);
  f.input('Write three hooks and, uh, save a note',{turn_id:'u1'});
  f.emit('session.delegation.created',{delegation:{id:'d1',type:'delegation',target:'responses',response_id:'r1'}});
  toolCall(f,'call_1','start_task',{request:'Write three hooks about coding agents and save a note'});
@@ -853,8 +853,38 @@ test('tool hand-off: cancel_task drops work that has not started, and stops work
  f.advance(2500);await until(()=>f.work.length===1);await f.idle();await f.post('/voice/live/context',f.saved());
  const id=f.work[0][1].id;
  toolCall(f,'call_4','cancel_task',{task_ref:'t2'});
- await until(()=>toolOutputs(f).length===4);assert.match(toolOutputs(f)[3].say,/^Stopping it/);
- f.advance(2500);await f.idle();assert.deepEqual(f.work.at(-1),['stop',id]);
+ // Stopping is what they asked for: it happens at once, with one line and no window to take it back.
+ await until(()=>toolOutputs(f).length===4);await f.idle();
+ assert.match(toolOutputs(f)[3].say,/^Stopped /);assert.deepEqual(f.work.at(-1),['stop',id]);
+ assert.equal(f.appends().some(e=>e.type==='session.commentary.append'&&/Stop/.test(e.content)),false,'said once');
+ // The cancelled first task left no id behind, and a cancel that names nothing running stops nothing.
+ assert.deepEqual([...f.call.toolRefs.keys()],['t2']);
+ f.tasks.get(id).state='stopped';await f.post('/voice/live/context',f.saved());
+ toolCall(f,'call_5','cancel_task',{task_ref:'latest'});await until(()=>toolOutputs(f).length===5);await f.idle();
+ assert.equal(toolOutputs(f)[4].say,'That one has already finished.');assert.equal(f.work.filter(item=>item[0]==='stop').length,1);
+ toolCall(f,'call_6','cancel_task',{task_ref:'the mic note'});await until(()=>toolOutputs(f).length===6);
+ assert.equal(toolOutputs(f)[5].say,'Nothing from this call is running.');
+});
+
+test('tool hand-off: a follow-up that names no known task asks which, when the call has several', async t => {
+ const f=await toolFixture(t);
+ for(const [call,request] of [['call_1','Write a note on desk mics'],['call_2','Write a note on boom arms']]){
+  toolCall(f,call,'start_task',{request});await until(()=>f.call?.staged);f.advance(2500);await f.idle();await f.post('/voice/live/context',f.saved());
+ }
+ assert.equal(f.work.length,2);
+ toolCall(f,'call_3','follow_up_task',{task_ref:'the mic one',change:'Add a budget pick'});await until(()=>toolOutputs(f).length===3);
+ assert.equal(toolOutputs(f)[2].say,'Which task is that for?');await f.idle();assert.equal(f.work.length,2,'no stray new task');
+});
+
+test('tool hand-off: when Live already acknowledged the work, the tool result gives it nothing more to say', async t => {
+ const f=await toolFixture(t);
+ f.input('Write three hooks and save a note',{turn_id:'u1'});
+ f.emit('session.delegation.created',{delegation:{id:'d1',type:'delegation',target:'responses',response_id:'r1'}});
+ f.emit('session.output_transcript.delta',{delta:"Sure, I'll get that started."});
+ toolCall(f,'call_1','start_task',{request:'Write three hooks and save a note'});await until(()=>f.call?.staged);
+ const [out]=toolOutputs(f);
+ assert.equal(out.say,'');assert.match(out.started,/^Starting /);assert.match(out.note,/NOTHING/);assert.equal(out.task_id,'t1');
+ f.advance(2500);await f.idle();assert.equal(f.work.length,1);
 });
 
 test('tool hand-off: follow_up_task goes to the named task, whatever its wording', async t => {
@@ -875,4 +905,39 @@ test('tool hand-off: a tool call V2 cannot read is still answered', async t => {
  f.emit('response.event',{delegation_id:'d9',event:{type:'response.output_item.done',item:{type:'function_call',call_id:'call_9',name:'start_task',arguments:'{not json'}}});
  await until(()=>toolOutputs(f).length===1);
  assert.match(toolOutputs(f)[0].say,/Say it again/);assert.equal(f.work.length,0);
+});
+
+test('tool hand-off: with Ask first, confirm_action carries the yes or the no', async t => {
+ const f=await fixture(t,{mode:'voice',modelReply:{tier:3,reply:'Working on that.'}});f.prefs.liveHandoff='tools';await f.start();
+ toolCall(f,'call_1','start_task',{request:'Write a note on desk mics'});await until(()=>toolOutputs(f).length===1);
+ assert.match(toolOutputs(f)[0].say,/^Just to check: .* Say yes to go ahead\.$/);assert.equal(f.work.length,0);
+ toolCall(f,'call_2','confirm_action',{confirm:true});await until(()=>toolOutputs(f).length===2);
+ assert.match(toolOutputs(f)[1].say,/^Starting /);
+ await f.idle();f.advance(1500);await until(()=>f.work.length===1);await f.idle();await f.post('/voice/live/context',f.saved());
+ toolCall(f,'call_3','start_task',{request:'Write a note on boom arms'});await until(()=>toolOutputs(f).length===3);
+ toolCall(f,'call_4','confirm_action',{confirm:false});await until(()=>toolOutputs(f).length===4);
+ assert.equal(toolOutputs(f)[3].say,'Cancelled.');f.advance(5000);await f.idle();assert.equal(f.work.length,1);
+ toolCall(f,'call_5','confirm_action',{confirm:true});await until(()=>toolOutputs(f).length===5);
+ assert.equal(toolOutputs(f)[4].say,'Nothing is waiting for a yes.');
+});
+
+test('tool hand-off: a promise Live made without handing off asks the model to look again, and V2 guesses nothing', async t => {
+ const f=await toolFixture(t);
+ const at=f.input('On that outline, add a section on cost per hour',{turn_id:'u1'});
+ f.emit('session.output_transcript.delta',{offset_ms:at+10,delta:"Gotcha, I'll bake that in."});
+ f.advance(3000);await f.bridge.calls.sweep();f.advance(200);await flush();
+ const sent=f.frames.map(frame=>frame.type);
+ assert.equal(sent.filter(type=>type==='response.create').length,1);assert.equal(sent.includes('response.item.create'),false);
+ assert.equal(plans(f),0,'nothing is taken from the transcript');
+ f.advance(5000);await f.bridge.calls.sweep();await flush();assert.equal(f.frames.filter(frame=>frame.type==='response.create').length,1,'once per turn');
+});
+
+test('tool hand-off: when the backend model’s run fails, that request is taken from the transcript and not lost', async t => {
+ const f=await toolFixture(t);
+ f.input('Write three hooks about coding agents and save a note',{turn_id:'u1'});
+ f.emit('session.delegation.created',{delegation:{id:'d1',type:'delegation',target:'responses',response_id:'r1'}});
+ f.emit('response.event',{delegation_id:'d1',event:{type:'response.failed',response:{status:'failed'}}});
+ f.advance(200);await until(()=>plans(f)===1);
+ assert.match(f.requests[0].request.transcript,/three hooks about coding agents/);
+ assert.equal(f.requests[0].request.liveIntent,undefined,'routed the original way');
 });

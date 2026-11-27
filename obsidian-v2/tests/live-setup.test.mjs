@@ -79,10 +79,10 @@ test('a check that throws or answers nonsense still saves the key, marked unconf
 
 test('Live voice preferences validate independently from key authorization and preserve Local fields',t=>{
  const root=temp(t);
- const defaults={voiceMode:'local',liveVoice:'marin',liveConfirm:'auto',liveIdleMic:'open',liveIdleHangupMin:30,liveStandbySec:60,liveCarryToday:false,liveShareWork:true,liveShareBrief:false,liveGreeting:true,liveHandoff:'client',liveTaskUpdates:'done'};
+ const defaults={voiceMode:'local',liveVoice:'marin',liveConfirm:'auto',liveIdleMic:'open',liveIdleHangupMin:30,liveStandbySec:60,liveCarryToday:false,liveShareWork:true,liveShareBrief:false,liveGreeting:true,liveHandoff:'tools',liveTaskUpdates:'done'};
  assert.deepEqual(readVoicePrefs(root),{spokenReplies:true,voice:null,rate:1,...defaults});
  saveVoicePrefs(root,{liveConfirm:'voice'});assert.equal(readVoicePrefs(root).liveConfirm,'voice');
- const values={voiceMode:'live',liveVoice:'cedar',liveConfirm:'destructive',liveIdleMic:'muted',liveIdleHangupMin:15,liveStandbySec:20,liveCarryToday:true,liveShareWork:false,liveShareBrief:true,liveGreeting:false,liveHandoff:'tools',liveTaskUpdates:'chatty'};
+ const values={voiceMode:'live',liveVoice:'cedar',liveConfirm:'destructive',liveIdleMic:'muted',liveIdleHangupMin:15,liveStandbySec:20,liveCarryToday:true,liveShareWork:false,liveShareBrief:true,liveGreeting:false,liveHandoff:'client',liveTaskUpdates:'chatty'};
  assert.deepEqual(saveVoicePrefs(root,values),{spokenReplies:true,voice:null,rate:1,...values});
  for(const [name,value]of Object.entries({voiceMode:'off',liveVoice:'unknown',liveConfirm:'always',liveIdleMic:true,liveIdleHangupMin:0,liveStandbySec:180,liveCarryToday:1,liveShareWork:'false',liveShareBrief:'yes',liveGreeting:'yes',liveHandoff:'auto',liveTaskUpdates:'loud'}))assert.throws(()=>saveVoicePrefs(root,{[name]:value}),/Invalid/);
  assert.deepEqual(readVoicePrefs(root),{spokenReplies:true,voice:null,rate:1,...values});

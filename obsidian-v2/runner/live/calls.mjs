@@ -107,7 +107,9 @@ export class LiveCalls {
    call.turns=new LiveTurns(call.startedAt);call.answers=new LiveAnswers(call);call.taskUpdates=new LiveTaskUpdates(call);
    call.requestWake=()=>this.wake(call);call.debugLog=record=>this.debugLog(call,record);call.clock=this.now;
    // Tool hand-offs (tools.mjs). The ids the model knows tasks by carry over a renewed connection.
-   call.toolMode=prefs.liveHandoff==='tools';call.toolRefs=call.from?.toolRefs??new Map();
+   // If OpenAI refused the tool set-up on this computer (for example the key cannot use the small model), this
+   // call and later ones use the original hand-off: Live keeps working either way.
+   call.toolMode=prefs.liveHandoff==='tools'&&!this.toolsRefused;call.toolRefs=call.from?.toolRefs??new Map();call.toolSeq=call.from?.toolSeq??{n:0};
    const history=call.from?call.from.transcriptTail||'':prefs.liveCarryToday?this.history(this.root,call.appScope,now):'';
    if(!this.current(call))throw new Error('Live call ended before connecting.');
    // Persist the cooldown marker before sending. A bridge crash in this
@@ -116,12 +118,21 @@ export class LiveCalls {
    this.markUnconfirmedCreate(call,this.limits.create);
    let timedOut=false;
    let created;
+   const create=()=>bounded(this.schedule,this.limits.create,'Live session creation timed out.',signal=>{
+    const result=this.transport.create(key,liveSessionBody({sdp,prefs:{...prefs,liveHandoff:call.toolMode?'tools':'client'},snapshot,history,continued:!!call.from}),signal);
+    void Promise.resolve(result).then(late=>{if(timedOut&&validLiveSessionId(late?.id))void this.lateCreate(call,late.id,key)},()=>{});
+    return result;
+   });
    try{
-    created=await bounded(this.schedule,this.limits.create,'Live session creation timed out.',signal=>{
-     const result=this.transport.create(key,liveSessionBody({sdp,prefs,snapshot,history,continued:!!call.from}),signal);
-     void Promise.resolve(result).then(late=>{if(timedOut&&validLiveSessionId(late?.id))void this.lateCreate(call,late.id,key)},()=>{});
-     return result;
-    });
+    try{created=await create()}
+    catch(error){
+     // Only a refusal of the request itself (its shape, or a model this key cannot use) says the tool set-up will never
+     // work here. A bad key, no credit, a rate limit or an OpenAI outage would refuse the original hand-off too.
+     const permanent=error instanceof LiveCreateRejected&&(error.kind==='no-model'||error.kind===null&&[400,404,422].includes(error.status));
+     if(!permanent||!call.toolMode||!this.current(call))throw error;
+     this.toolsRefused=true;call.toolMode=false;this.log({event:'tools-refused',call:call.callId?.slice(0,8)??null,reason:String(error.message).slice(0,200)});
+     created=await create();
+    }
    }catch(error){
     timedOut=true;
     if(error instanceof LiveCreateRejected)this.clearCreateMarker(call);
@@ -205,6 +216,8 @@ export class LiveCalls {
   next.localHeld=true;old.localHeld=false;
   next.speechLease=old.speechLease;old.speechLease=null;
   for(const path of old.answers.reports)next.answers.reports.add(path);
+  // The fresh session's model has never seen the ids V2 gave the old one.
+  if(next.toolMode&&next.toolRefs?.size)next.answers.append('instructions',null,'Tasks started earlier in this call, by the id V2 gave each, newest first: '+[...next.toolRefs].slice(-8).reverse().map(([ref,task])=>`${ref} = "${task.words.slice(0,50)}"`).join('; ')+'.',APPEND_MAX_BYTES);
   next.taskUpdates=old.taskUpdates;next.taskUpdates.call=next;next.taskUpdates.endTurn({});next.taskUpdates.release();
   next.taskUpdates.inputOffset=-Infinity;
   next.answers.held.push(...old.answers.held.filter(event=>event.delegation_id===null));
@@ -292,7 +305,19 @@ export class LiveCalls {
    if(!call.paused)call.answers?.resume({tasks:false});
   }
   if(positive.has(event.type)){call.positive=true;this.ready(call)}
-  if(call.toolMode){this.toolEvent(call,event);return}
+  if(call.toolMode){
+   // The tool set-up was accepted but its model cannot run on this key: the caller's words are taken the original
+   // way this once, and later calls use the original hand-off.
+   if(event.type==='error'&&/responses_validation_failed|model_not_found/.test(String(event.error?.code??'')+' '+String(event.error?.message??''))){
+    this.toolsRefused=true;call.toolsBroken=true;this.log({event:'tools-refused',call:call.callId?.slice(0,8)??null,reason:String(event.error?.message??event.error?.code??'').slice(0,200)});
+    if(call.heardAt!==undefined&&call.rescuedFor!==call.heardAt&&!call.routing&&!call.staged){call.rescuedFor=call.heardAt;this.delegations?.rescue(call,call.heardOffset)}
+   }
+   // For the rest of a call whose tool model cannot run, each hand-off is taken from the transcript.
+   if(call.toolsBroken&&event.type==='session.delegation.created'&&!call.from&&call.heardAt!==undefined&&call.rescuedFor!==call.heardAt&&!call.routing&&!call.staged){
+    call.rescuedFor=call.heardAt;this.delegations?.rescue(call,call.heardOffset);return;
+   }
+   this.toolEvent(call,event);return;
+  }
   if(!call.from&&event.type==='session.delegation.created'&&typeof event.delegation?.id==='string'&&event.delegation.id.length>0&&event.delegation.id.length<=256){
    const mapKey=JSON.stringify([call.sessionId,event.delegation.id]);
    if(this.recovery.delegations.has(mapKey))return;
@@ -303,6 +328,11 @@ export class LiveCalls {
  // A tool hand-off (tools.mjs): an OpenAI model that has the conversation calls one of V2's tools, with the request
  // written out. It goes through the same plan and commit as any hand-off; what V2 says first is the tool's result.
  toolEvent(call,event){
+  // The backend model's run failed: this one request is taken from the transcript, the original way, not lost.
+  const failed=event.type==='response.event'&&['response.failed','response.incomplete'].includes(event.event?.type);
+  if(failed&&!call.from&&this.delegations&&call.heardAt!==undefined&&call.rescuedFor!==call.heardAt&&!call.routing&&!call.staged){
+   call.rescuedFor=call.heardAt;this.log({event:'tool-run-failed',call:call.callId?.slice(0,8)??null});this.delegations.rescue(call,call.heardOffset);return;
+  }
   const found=toolCall(event);
   if(!found||call.from||!this.delegations)return;
   const key='tool:'+found.callId;
@@ -338,6 +368,9 @@ export class LiveCalls {
   if(call.delegatedAt>=(call.turnStartAt??call.heardAt)||call.commentedAt>=call.heardAt||call.routing||call.staged||call.supersededHandoff||call.taskUpdates?.inputOpen)return;
   if(now-call.liveSaidAt<RESCUE_QUIET||now-call.heardAt>RESCUE_WINDOW||!livePromised(call.liveReply))return;
   call.rescuedFor=call.heardAt;
+  // With tool hand-offs the model that has the conversation is asked to look again: it calls a tool with the request
+  // written out, or answers NOTHING (checked on a real call, 2026-11-27: Live says nothing of that).
+  if(call.toolMode&&!call.toolsBroken){call.answers.kick();return}
   this.delegations.rescue(call,call.heardOffset);
  }
  hotkey(){const call=this.call;if(call?.localHeld&&call.ready&&this.current(call))call.updates.push({type:'hotkey'})}
@@ -362,7 +395,9 @@ export class LiveCalls {
    // A section counts as changed only for what it says, not for the minutes ticking on a task's age (2026-11-26 test
    // calls: the work list was resent every minute, each update kept the call out of standby, and Live read them out).
    const stable=section=>section.replace(/, \d+ (?:min|h)\)/g,')'),before=new Set(call.snapshotSections.map(stable));
-   const next=sections(snapshot),changed=next.filter(section=>!before.has(stable(section)))
+   // The work list is not refreshed mid-call: it showed a task as finished some seconds before V2 said so, and Live
+   // announced it early, then corrected itself (2026-11-27 test calls). Task news and status questions cover it.
+   const next=sections(snapshot),changed=next.filter(section=>!before.has(stable(section))&&!section.startsWith('Work in progress ('))
     .map(section=>section.startsWith('Morning brief (')?section.split('\n')[0]+'\nThis note changed during the call, so the copy from the start of the call may be out of date.':section);
    for(const name of ['About the user','Work in progress','Morning brief']){
     if(call.snapshotSections.some(section=>section.startsWith(name+' ('))&&!next.some(section=>section.startsWith(name+' (')))

@@ -16,8 +16,8 @@ export const VOICE_HELP = `Voice settings
   voice speed <0.8-1.4>       how fast it speaks (1 = normal)
   voice live-idle open|muted  whether the Live mic stays open in standby
   voice live-standby 20s|30s|1m  how long a quiet Live call waits before standby (1m by default, OpenAI's longest)
-  voice live-handoff client|tools  how Live passes work to V2 (tools is the new way, being tried: an OpenAI model
-                              writes out each request for V2 where V2 otherwise rebuilds it from the transcript)
+  voice live-handoff tools|client  how Live passes work to V2 (tools, the default: an OpenAI model writes out each
+                              request; client: V2 rebuilds it from the transcript, the original way)
   voice teach "<word>" ...    a name voice should listen for, in your spelling
   voice forget "<word>" ...   stop listening for a word (yours or a learned one)
   voice learn on | off        learn names from your notes' titles (on by default)

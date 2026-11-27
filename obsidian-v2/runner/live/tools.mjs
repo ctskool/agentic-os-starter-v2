@@ -11,9 +11,9 @@
 // at once and says results later as plain lines (task-updates.mjs), through a fresh session after standby.
 export const TOOL_BACKEND_MODEL='gpt-6-luna';
 export const TOOL_INSTRUCTIONS=`You route voice requests from the user to V2, the assistant software on their computer. You are given the conversation.
-Call at most one tool per turn. Preserve every concrete detail the user said (numbers, names, where to save it) in the tool arguments, including anything they added after a pause or while the voice assistant was talking; never invent details.
+Call at most one tool per turn. Write each argument in the user's own words, as close to word for word as you can, with every concrete detail they gave (numbers, names, where to save it), including anything they added after a pause or while the voice assistant was talking. Add nothing of your own: no extra steps, caveats, quality bars or research instructions, and nothing the voice assistant said.
 Use follow_up_task only when they refer back to a task from this call; otherwise start_task. Use cancel_task for "never mind" or "stop that".
-After the tool returns, reply with one short spoken sentence saying what its "say" field reports. A result with status "started" means the work has only begun: say it has started, never that it is done, saved or ready. No markdown, no file paths. If nothing needs a tool, reply with a short sentence only.`;
+After the tool returns, reply with one short spoken sentence saying what its "say" field reports. A result with status "started" means the work has only begun: say it has started, never that it is done, saved or ready. No markdown, no file paths. If nothing needs a tool, or the latest request was already handled, reply with exactly: NOTHING`;
 const fn=(name,description,required,properties)=>({type:'function',name,strict:true,description,parameters:{type:'object',additionalProperties:false,required,properties}});
 export const LIVE_TOOLS=Object.freeze([
  fn('start_task',"Start a NEW background task on the user's computer (research, drafting, writing a note, running a workflow or a slash skill).",['request'],
@@ -24,6 +24,8 @@ export const LIVE_TOOLS=Object.freeze([
   {task_ref:{type:'string',description:'Task id from an earlier tool result, or "latest".'}}),
  fn('get_task_status','How a task started in this call is going.',['task_ref'],
   {task_ref:{type:'string',description:'Task id from an earlier tool result, or "all".'}}),
+ fn('confirm_action','The user answered yes or no to V2\'s question "say yes to go ahead".',['confirm'],
+  {confirm:{type:'boolean',description:'true for yes / go ahead, false for no / cancel.'}}),
  fn('ask_vault',"A read-only lookup on the user's computer: a fresh calendar or inbox reading, or a note that is not in the snapshot.",['question'],
   {question:{type:'string',description:'The lookup question, in full.'}})
 ]);
@@ -39,9 +41,17 @@ export function toolRequest(name,rawArguments,refs){
  const ref=text(args.task_ref).toLowerCase(),ids=[...refs.values()];
  const taskId=ref==='latest'?ids.at(-1)??null:refs.get(ref)??null;
  if(name==='start_task')return text(args.request)?{kind:'new_work',request:text(args.request),taskId:null}:null;
- if(name==='follow_up_task')return text(args.change)?{kind:taskId?'follow_up':'new_work',request:text(args.change),taskId}:null;
+ // A follow-up that names no task V2 knows: with one task on the call it is that one; with none it is new work
+ // ("make that note shorter" about something from before the call); with several, V2 asks which.
+ if(name==='follow_up_task'){
+  if(!text(args.change))return null;
+  const only=ids.length===1?ids[0]:null,target=taskId??only;
+  if(!target&&ids.length>1)return {kind:'unclear',request:text(args.change),taskId:null,say:'Which task is that for?'};
+  return {kind:target?'follow_up':'new_work',request:text(args.change),taskId:target};
+ }
  if(name==='cancel_task')return {kind:'cancel',request:'Stop that task.',taskId};
  if(name==='get_task_status')return {kind:'status',request:"How's that going?",taskId};
+ if(name==='confirm_action')return typeof args.confirm==='boolean'?{kind:'confirm',request:args.confirm?'Yes.':'No.',confirm:args.confirm,taskId:null}:null;
  if(name==='ask_vault')return text(args.question)?{kind:'question',request:text(args.question),taskId:null}:null;
  return null;
 }

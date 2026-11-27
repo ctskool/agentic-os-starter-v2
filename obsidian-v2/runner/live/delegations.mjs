@@ -164,9 +164,26 @@ export class LiveDelegations {
   call.rescuedFor=call.heardAt;
   if(!this.unchanged(call,captured)){answers.speak(delegation,retry);return}
   let {kind,request:transcript,taskId}=pending.tool;
+  if(kind==='unclear'){answers.speak(delegation,pending.tool.say);return}
+  // The answer to "say yes to go ahead" (the Ask first settings).
+  if(kind==='confirm'){
+   const waiting=call.staged&&!call.staged.undo&&!call.staged.consumed?call.staged:null;
+   if(!waiting){answers.speak(delegation,'Nothing is waiting for a yes.');return}
+   if(!pending.tool.confirm){this.clear(call,'staged-cancelled');answers.speak(delegation,'Cancelled.');return}
+   if(!this.unchanged(call,waiting.captured)||waiting.expiresAt<=this.now()){this.clear(call);answers.speak(delegation,retry);return}
+   if(waiting.mode==='click'){answers.speak(delegation,'Tap Confirm on screen.');return}
+   this.startUndo(call,waiting,delegation,pending.anchor,this.now()+this.limits.undo);return;
+  }
   const refOf=id=>[...call.toolRefs].find(([,task])=>task.id===id)?.[0]??null;
   const staged=call.staged&&!call.staged.consumed?call.staged:null,stagedIds=staged?jobsOf(staged.action):[];
   if(kind==='cancel'&&staged&&(!taskId||stagedIds.includes(taskId))){this.clear(call,'staged-cancelled');answers.speak(delegation,'Cancelled.');return}
+  // A cancel that names no task stops only work this call started, and only when there is no doubt which.
+  if(kind==='cancel'&&!taskId){
+   const terminals=this.requestContext().terminals;
+   const running=[...call.toolRefs.values()].map(task=>task.id).filter(id=>{try{return ['starting','working','needs input'].includes(terminals?.get(id)?.state)}catch{return false}});
+   if(running.length!==1){answers.speak(delegation,running.length?'More than one task is running. Which one should I stop?':'Nothing from this call is running.');return}
+   taskId=running[0];
+  }
   // Live handed off before the caller finished ("Start a timer test task." … "Wait six full minutes…"): the rest
   // arrives as a follow-up to work that has not started yet, so the two halves become the one request.
   if(kind==='follow_up'&&staged&&stagedIds.includes(taskId)){
@@ -177,10 +194,12 @@ export class LiveDelegations {
    surface:call.ownerSurface,liveCallId:call.callId,liveTurns:call.turns.context(this.now()),liveTaskIds:call.taskUpdates?.taskIds(),liveIntent:{kind}};
   const stage=await this.planned(call,pending,request,delegation,captured,await this.route(call,pending,request,delegation,'plan'));
   if(!stage)return;
+  // Stopping is what the caller just asked for: no "Stopping…" and a window to take it back, just the one line.
+  if(kind==='cancel')stage.immediate=true;
   // The model names tasks by short ids V2 gives it (t1, t2…), described by the caller's own words: nothing from
   // outside this call is named to it.
   for(const job of jobsOf(stage.action)){
-   const ref=pending.reuseRef??'t'+(call.toolRefs.size+1);pending.reuseRef=null;
+   const ref=pending.reuseRef??'t'+(++call.toolSeq.n);pending.reuseRef=null;
    call.toolRefs.set(ref,{id:job,words:transcript.slice(0,80)});
    answers.toolExtra(delegation,{task_id:ref,status:'started'});
   }
@@ -301,6 +320,8 @@ export class LiveDelegations {
   // Never for a rescue (no delegation): V2 started that on its own reading of Live's words, so the caller hears what
   // started and can still say "wait" (Neon review, 2026-11-26).
   const acknowledged=call.liveAcked===true;
+  // On a tool hand-off the same: the tool's result says it started without giving Live a second line to say.
+  if(acknowledged&&!explained&&startsWork(stage.action)&&call.answers.tools.has(delegation)){call.answers.toolQuiet(delegation,line);return}
   if(acknowledged&&!explained&&keepOpen&&startsWork(stage.action)){
    call.answers.append('thinking',null,`V2 is ${line.replace(/…$/,'').replace(/^(Starting|Updating)/,word=>word.toLowerCase())}. You already acknowledged it, so don't announce it again; mention it only if asked.`);
    return;
@@ -311,7 +332,8 @@ export class LiveDelegations {
  holdsNews(){try{return this.prefs().liveTaskUpdates!=='silent'}catch{return false}}
  view(result,call){return this.requestContext().liveView?.(result,call.appScope)??result}
  async route(call,pending,request,delegation,phase,stage){
-  const cancelProgress=phase==='plan'&&pendingRead.test(request.transcript)&&!compoundReadAction.test(request.transcript)?this.schedule(()=>{
+  // Not on a tool hand-off: its first line is the tool's result, so a progress line would end it before the answer.
+  const cancelProgress=phase==='plan'&&!pending.tool&&pendingRead.test(request.transcript)&&!compoundReadAction.test(request.transcript)?this.schedule(()=>{
    if(this.isCurrent(call)&&!pending.cancelled)call.answers.speak(delegation,'Still looking…');
   },this.limits.progress):null;
   const watchDisconnect=abort=>{
@@ -365,6 +387,8 @@ export class LiveDelegations {
  clear(call,type='staged-cleared'){
   const stage=call.staged;if(!stage)return;
   call.staged=null;stage.undo?.();stage.expiry?.();
+  // Work that never started keeps no id for the model to name later.
+  if(!stage.consumed&&call.toolRefs){const ids=jobsOf(stage.action);for(const [ref,task] of call.toolRefs)if(ids.includes(task.id))call.toolRefs.delete(ref)}
   if(!stage.consumed){
    stage.finish?.();this.activity(call,stage.activity,'dropped');
    // Cancelled in the undo window: the hand-off left open for the task's news is answered now.

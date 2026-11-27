@@ -102,7 +102,7 @@ export async function routeVoice(root,{id,transcript,selection:chosen,terminalMo
  // A tool hand-off says what the request is (runner/live/tools.mjs): new work, a follow-up to a task, a cancel, a
  // status question. Then nothing is guessed from its phrasing.
  const intent=transport==='live'&&['new_work','follow_up','cancel','status','question'].includes(liveIntent?.kind)?liveIntent.kind:null;
- const newTask=intent?(intent==='new_work'?{payload:transcript,multiple:false}:null):newTaskIntent(transcript);
+ const newTask=intent?null:newTaskIntent(transcript);
  let ask=newTask?newTask.payload:transcript;
  const slashAsk=stripPleasantry(ask);
  const slash=stopIntent(slashAsk)?null:spokenSlashSkill(slashAsk,{hasSkill:name=>hasSkill(chosen.provider,root,name)});
@@ -160,6 +160,8 @@ export async function routeVoice(root,{id,transcript,selection:chosen,terminalMo
   // A named provider ("stop Claude") overrides the selection and the current provider.
   const provider=named||chosen.provider;
   let task=named?null:selectedStopTarget();
+  // A cancel from a tool hand-off names its task: when that one is not running, nothing else is stopped in its place.
+  if(intent==='cancel'&&(!task||!running(task)))return {action:'reply',reply:task?'That one has already finished.':'Nothing from this call is running.'};
   if(!task||!running(task)){
    const candidates=(terminals.list?.()||[]).filter(t=>taskInScope(t,appScope)&&t.provider===provider&&running(t));
    if(candidates.length>1)return {action:'reply',reply:transport==='live'&&liveCallId?`${candidates.length} tasks are running. Select one and say stop again.`:`${candidates.length} tasks are running: ${candidates.map(t=>shortTitle(t.title)).join(', ')}. Select the one to stop and say stop again.`};

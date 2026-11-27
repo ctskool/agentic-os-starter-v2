@@ -228,7 +228,21 @@ test('an explicit create rejection releases the slot without starting a cooldown
  const f=await fixture(t,{onCreate:async({res})=>{res.writeHead(403).end();return false}});
  await assert.rejects(f.start(),/OpenAI rejected/);
  await assert.rejects(f.start(),/OpenAI rejected/);
- assert.equal(f.api.requests.length,2);assert.equal(f.calls.recovery.call,null);assert.equal(f.calls.usage.rows.size,0);
+ // The first call tries the tool hand-off, then the original one; once refused, later calls go straight to the original.
+ assert.deepEqual(f.api.requests.map(body=>body.session.delegation.type),['responses','client','client']);
+ assert.equal(f.calls.recovery.call,null);assert.equal(f.calls.usage.rows.size,0);
+});
+
+test('a refused tool set-up falls back to the original hand-off, for this call and later ones',async t=>{
+ let api;
+ const f=await fixture(t,{onCreate:async({res})=>{
+  if(api.requests.at(-1).session.delegation.type!=='responses')return true;
+  res.writeHead(400,{'Content-Type':'application/json'}).end(JSON.stringify({error:{message:'This key cannot use that model.'}}));return false;
+ }});
+ api=f.api;
+ await f.start();
+ assert.deepEqual(f.api.requests.map(body=>body.session.delegation.type),['responses','client']);
+ assert.equal(f.calls.call.toolMode,false);assert.equal(f.calls.toolsRefused,true);
 });
 
 test('a late create success after owner invalidation persists and closes without returning SDP',async t=>{
@@ -561,4 +575,11 @@ test('task news in standby renews the call, the fresh session says it, and a ren
  assert.ok(events.some(event=>event.type==='announce'));assert.equal(call.answers.held.length,0);
  assert.equal(call.rolloverSent,false,'the 2-hour renewal can still run later');
  await g.calls.invalidate('Finished test.');
+});
+
+test('a rate limit or an OpenAI outage does not switch Live to the original hand-off', async t => {
+ const f=await fixture(t,{onCreate:async({res})=>{res.writeHead(429,{'Content-Type':'application/json'}).end(JSON.stringify({error:{code:'rate_limit_exceeded',message:'Slow down.'}}));return false}});
+ await assert.rejects(f.start(),/OpenAI rejected/);
+ assert.deepEqual(f.api.requests.map(body=>body.session.delegation.type),['responses']);
+ assert.notEqual(f.calls.toolsRefused,true);
 });

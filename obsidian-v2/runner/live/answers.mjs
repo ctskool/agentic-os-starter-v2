@@ -24,6 +24,14 @@ export class LiveAnswers {
  tool(key,callId){this.tools.set(key,{callId,done:false,extra:{}});if(this.tools.size>256)this.tools.delete(this.tools.keys().next().value)}
  toolExtra(key,extra){const tool=this.tools.get(key);if(tool)Object.assign(tool.extra,extra)}
  // Every tool call is answered, even one V2 has nothing to say on: an unanswered one blocks every later hand-off.
+ // Asks the backend model to look at the conversation now (a promise Live made without handing it off).
+ kick(){
+  if(this.call.state==='closing'||!this.call.socket)return;
+  this.call.debugLog?.({sent:'kick',delegation:null,text:'response.create'});
+  try{this.call.socket.send({type:'response.create',event_id:'evt_'+randomUUID().replace(/-/g,'')})}catch{}
+ }
+ // The result of a tool call Live has already acknowledged aloud: what started, and nothing more to say.
+ toolQuiet(key,started){const tool=this.tools.get(key);if(tool&&!tool.done)this.toolOutput(tool,'',{started,note:'The voice assistant already told the user this is starting. Reply with exactly: NOTHING'})}
  closeTool(key){const tool=this.tools.get(key);if(tool&&!tool.done)this.toolOutput(tool,'',{note:'Nothing to report on this one; say nothing.'})}
  toolOutput(tool,say,more={}){
   tool.done=true;
