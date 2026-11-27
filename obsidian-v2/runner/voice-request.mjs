@@ -93,7 +93,7 @@ export async function handleVoiceRequest(ctx,request,{source='text',guard,phase,
   const client=supplied||hub?.live().find(item=>item.id===hub.owner&&item.kind===appScope)?.id;
   const target=artifactTarget?.(client,chosen.provider,conversationEpoch,appScope)??null;
   stage='routing';recordDiagnostic({});
-  const result=await route(root,{id,transcript,selection:chosen,terminalMode,workTarget,conversationEpoch,appScope,origin,...(transport==='live'?{liveCallId:request.liveCallId,liveTurns:request.liveTurns,liveTaskIds:request.liveTaskIds}:{})},controller.signal,prepared?(vault,job,prompt,options)=>executeFastVoice(vault,job,prompt,options,{prepared}):undefined,terminals,{
+  const result=await route(root,{id,transcript,selection:chosen,terminalMode,workTarget,conversationEpoch,appScope,origin,...(transport==='live'?{liveCallId:request.liveCallId,liveTurns:request.liveTurns,liveIntent:request.liveIntent,liveTaskIds:request.liveTaskIds}:{})},controller.signal,prepared?(vault,job,prompt,options)=>executeFastVoice(vault,job,prompt,options,{prepared}):undefined,terminals,{
    updateCurrent:change=>setCurrent(root,terminals,{...change,scope:appScope}),
    ...(artifacts?{
     onDispatch:(taskId,epoch)=>artifacts.bind(taskId,target?{...target,epoch}:null),

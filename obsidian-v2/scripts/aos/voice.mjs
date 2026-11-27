@@ -16,6 +16,8 @@ export const VOICE_HELP = `Voice settings
   voice speed <0.8-1.4>       how fast it speaks (1 = normal)
   voice live-idle open|muted  whether the Live mic stays open in standby
   voice live-standby 20s|30s|1m  how long a quiet Live call waits before standby (1m by default, OpenAI's longest)
+  voice live-handoff client|tools  how Live passes work to V2 (tools is the new way, being tried: an OpenAI model
+                              writes out each request for V2 where V2 otherwise rebuilds it from the transcript)
   voice teach "<word>" ...    a name voice should listen for, in your spelling
   voice forget "<word>" ...   stop listening for a word (yours or a learned one)
   voice learn on | off        learn names from your notes' titles (on by default)
@@ -54,6 +56,12 @@ export async function voiceCommand({words = [], flags = {}, log = console.log, r
       if(rest.length!==1||!seconds)throw new Error('Use: voice live-standby 20s|30s|1m (OpenAI allows at most 1 minute)');
       saveVoicePrefs(vault,{liveStandbySec:seconds});
       log(`A quiet Live call now waits ${seconds<60?seconds+' seconds':seconds/60+(seconds===60?' minute':' minutes')} before standby. It applies from the next call.`);return 0;
+    }
+    case 'live-handoff':{
+      const mode={client:'client',tools:'tools'}[String(rest[0]||'').toLowerCase()];
+      if(rest.length!==1||!mode)throw new Error('Use: voice live-handoff client|tools');
+      saveVoicePrefs(vault,{liveHandoff:mode});
+      log(mode==='tools'?'Live now passes work to V2 through tool calls: an OpenAI model writes out each request (a fraction of a cent each). It applies from the next call.':'Live passes work to V2 the original way: V2 rebuilds each request from the transcript. It applies from the next call.');return 0;
     }
     case 'live-idle':
       if(rest.length!==1||!['open','muted'].includes(rest[0]))throw new Error('Use: voice live-idle open|muted');

@@ -802,3 +802,77 @@ test('the two halves of a talked-over turn meet with a space, so “start a new 
  turns.add({type:'session.input_transcript.delta',delta:'Write a three-line note and save it'},20000);
  assert.equal(turns.take(21000,21000).text,'Also start a new task Write a three-line note and save it');
 });
+
+// Tool hand-offs (runner/live/tools.mjs): an OpenAI model that has the conversation calls V2's tools with the request
+// written out, so nothing is rebuilt from the transcript.
+const toolCall=(f,callId,name,args)=>f.emit('response.event',{delegation_id:'d-'+callId,event:{type:'response.output_item.done',item:{type:'function_call',call_id:callId,name,arguments:JSON.stringify(args)}}});
+const toolOutputs=f=>f.frames.filter(frame=>frame.type==='response.item.create').map(frame=>({callId:frame.item.call_id,...JSON.parse(frame.item.output)}));
+async function toolFixture(t){
+ const f=await fixture(t,{mode:'auto',modelReply:{tier:3,reply:'Working on that.'}});f.prefs.liveHandoff='tools';await f.start();
+ return f;
+}
+
+test('tool hand-off: start_task is answered with what started and a task id, then the work starts', async t => {
+ const f=await toolFixture(t);
+ assert.equal(f.creates[0].session.delegation.type,'responses');
+ assert.deepEqual(f.creates[0].session.delegation.responses.tools.map(tool=>tool.name),['start_task','follow_up_task','cancel_task','get_task_status','ask_vault']);
+ f.input('Write three hooks and, uh, save a note',{turn_id:'u1'});
+ f.emit('session.delegation.created',{delegation:{id:'d1',type:'delegation',target:'responses',response_id:'r1'}});
+ toolCall(f,'call_1','start_task',{request:'Write three hooks about coding agents and save a note'});
+ await until(()=>f.call?.staged);
+ const [out]=toolOutputs(f);
+ assert.equal(out.callId,'call_1');assert.equal(out.ok,true);assert.match(out.say,/^Starting /);assert.equal(out.task_id,'t1');assert.equal(out.status,'started');
+ assert.deepEqual(out.tasks_in_this_call,[{task_id:'t1',request:'Write three hooks about coding agents and save a note'}]);
+ const sent=f.frames.map(frame=>frame.type);assert.equal(sent[sent.indexOf('response.item.create')+1],'response.create');
+ assert.equal(f.appends().some(e=>e.delegation_id!==null),false,'a tool hand-off takes no appends of its own');
+ assert.equal(f.requests[0].request.transcript,'Write three hooks about coding agents and save a note');
+ assert.deepEqual(f.requests[0].request.liveIntent,{kind:'new_work'});
+ f.advance(2500);await f.idle();assert.equal(f.work.length,1);assert.equal(f.work[0][0],'start');
+});
+
+test('tool hand-off: the two halves of a request Live handed off too early become one task', async t => {
+ const f=await toolFixture(t);
+ toolCall(f,'call_1','start_task',{request:'Start a timer test task.'});await until(()=>f.call?.staged);
+ // Not a cancel: the caller's words are not searched for "wait" in this mode.
+ f.input(' Wait six full minutes, then save a short note.');assert.ok(f.call.staged);
+ toolCall(f,'call_2','follow_up_task',{task_ref:'t1',change:'Wait six full minutes with a sleep command, then save a short note.'});
+ await until(()=>toolOutputs(f).length===2);await until(()=>f.call?.staged);
+ assert.equal(f.call.staged.request.transcript,'Start a timer test task. Wait six full minutes with a sleep command, then save a short note.');
+ assert.equal(toolOutputs(f)[1].task_id,'t1','the model keeps the id it was given');
+ f.advance(2500);await f.idle();assert.equal(f.work.length,1);
+});
+
+test('tool hand-off: cancel_task drops work that has not started, and stops work that has', async t => {
+ const f=await toolFixture(t);
+ toolCall(f,'call_1','start_task',{request:'Draft a quick one-pager on local voice models'});await until(()=>f.call?.staged);
+ toolCall(f,'call_2','cancel_task',{task_ref:'latest'});
+ await until(()=>toolOutputs(f).length===2);
+ assert.equal(toolOutputs(f)[1].say,'Cancelled.');assert.equal(f.call.staged,null);
+ f.advance(2500);await f.idle();assert.equal(f.work.length,0);
+ toolCall(f,'call_3','start_task',{request:'Write a note on desk mics'});await until(()=>f.call?.staged);
+ f.advance(2500);await until(()=>f.work.length===1);await f.idle();await f.post('/voice/live/context',f.saved());
+ const id=f.work[0][1].id;
+ toolCall(f,'call_4','cancel_task',{task_ref:'t2'});
+ await until(()=>toolOutputs(f).length===4);assert.match(toolOutputs(f)[3].say,/^Stopping it/);
+ f.advance(2500);await f.idle();assert.deepEqual(f.work.at(-1),['stop',id]);
+});
+
+test('tool hand-off: follow_up_task goes to the named task, whatever its wording', async t => {
+ const f=await toolFixture(t);
+ toolCall(f,'call_1','start_task',{request:'Draft a note comparing two desk mic setups'});await until(()=>f.call?.staged);
+ f.advance(2500);await until(()=>f.work.length===1);await f.idle();await f.post('/voice/live/context',f.saved());
+ const id=f.work[0][1].id;
+ // "Write a budget pick…" reads as new work by its words; the tool call says which task it is for.
+ toolCall(f,'call_2','follow_up_task',{task_ref:'t1',change:'Write a budget pick under a hundred bucks into it'});
+ await until(()=>toolOutputs(f).length===2);
+ assert.equal(toolOutputs(f)[1].task_id,'t1');
+ f.advance(2500);await f.idle();
+ assert.equal(f.work.length,2);assert.deepEqual(f.work[1].slice(0,2),['queue',id]);
+});
+
+test('tool hand-off: a tool call V2 cannot read is still answered', async t => {
+ const f=await toolFixture(t);
+ f.emit('response.event',{delegation_id:'d9',event:{type:'response.output_item.done',item:{type:'function_call',call_id:'call_9',name:'start_task',arguments:'{not json'}}});
+ await until(()=>toolOutputs(f).length===1);
+ assert.match(toolOutputs(f)[0].say,/Say it again/);assert.equal(f.work.length,0);
+});

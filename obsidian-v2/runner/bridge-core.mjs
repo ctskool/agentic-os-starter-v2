@@ -46,7 +46,7 @@ export function directVoiceRoute(transcript){
  if(/^(?:is (?:the )?(?:v2 )?worker online|worker status|check (?:the )?worker status)$/.test(text))return {action:'status',reply:''};
  return null;
 }
-export async function routeVoice(root,{id,transcript,selection:chosen,terminalMode=false,workTarget=null,conversationEpoch:requestEpoch,appScope='web',origin='live',transport:requestTransport='local',liveCallId,liveTurns,liveTaskIds},signal,execute=executeFastVoice,terminals=null,{jev,strict,resolveCli=findCli,updateCurrent=()=>{},onDispatch=()=>{},reopenArtifact=()=>{throw new Error('No connected dashboard can display that file right now.')},guard,phase,plannedAction,beforeCommit,transport=requestTransport,handoffTarget=null,hasSkill=skillExists}={}){
+export async function routeVoice(root,{id,transcript,selection:chosen,terminalMode=false,workTarget=null,conversationEpoch:requestEpoch,appScope='web',origin='live',transport:requestTransport='local',liveCallId,liveTurns,liveTaskIds,liveIntent},signal,execute=executeFastVoice,terminals=null,{jev,strict,resolveCli=findCli,updateCurrent=()=>{},onDispatch=()=>{},reopenArtifact=()=>{throw new Error('No connected dashboard can display that file right now.')},guard,phase,plannedAction,beforeCommit,transport=requestTransport,handoffTarget=null,hasSkill=skillExists}={}){
  if(!['web','native'].includes(appScope))throw new Error('Invalid application scope');
  validateSelection(chosen);
  if(typeof transcript!=='string'||!transcript.trim()||transcript.length>4000)throw new Error('No speech detected, or the request was too long.');
@@ -99,7 +99,10 @@ export async function routeVoice(root,{id,transcript,selection:chosen,terminalMo
  const expiredDuringRequest=reset?.reason==='expired'&&workTarget&&reset.previousId===workTarget&&readCurrentState(root,appScope)[chosen.provider]===null;
  const initialEpoch=requestEpoch===undefined||requestEpoch===beforeExpiry||expiredDuringRequest?currentEpoch:requestEpoch;
  if(workTarget)workTarget=resolveVoiceTarget(root,terminals,{scope:appScope,provider:chosen.provider,id:workTarget});
- const newTask=newTaskIntent(transcript);
+ // A tool hand-off says what the request is (runner/live/tools.mjs): new work, a follow-up to a task, a cancel, a
+ // status question. Then nothing is guessed from its phrasing.
+ const intent=transport==='live'&&['new_work','follow_up','cancel','status','question'].includes(liveIntent?.kind)?liveIntent.kind:null;
+ const newTask=intent?(intent==='new_work'?{payload:transcript,multiple:false}:null):newTaskIntent(transcript);
  let ask=newTask?newTask.payload:transcript;
  const slashAsk=stripPleasantry(ask);
  const slash=stopIntent(slashAsk)?null:spokenSlashSkill(slashAsk,{hasSkill:name=>hasSkill(chosen.provider,root,name)});
@@ -166,10 +169,10 @@ export async function routeVoice(root,{id,transcript,selection:chosen,terminalMo
   effect('stop',{taskId:task.id},`Stop “${existingTitle(task)}”`);stopped={taskId:task.id,title:transport==='live'&&liveCallId?existingTitle(task):task.title};
   return {action:'reply',reply:`Stopped ${existingTitle(task)}.`};
  };
- const stopping=/[\p{L}\p{N}]/u.test(ask)?stopIntent(ask)||(transport==='live'&&/^never\s*mind the report[.!?\s]*$/i.test(ask)?{provider:null}:null):null;
+ const stopping=intent?(intent==='cancel'?{provider:null}:null):/[\p{L}\p{N}]/u.test(ask)?stopIntent(ask)||(transport==='live'&&/^never\s*mind the report[.!?\s]*$/i.test(ask)?{provider:null}:null):null;
  // On a call, "never mind" within half a minute of this call starting a task takes that task back (2026-11-26 test
  // call: said three seconds after "Starting…", it was answered "I'll leave it alone. It's still running").
- const regretted=!stopping&&transport==='live'&&terminals&&neverMindIntent(ask)?(liveTaskIds||[]).map(id=>{try{return terminals.get(id)}catch{return null}})
+ const regretted=!intent&&!stopping&&transport==='live'&&terminals&&neverMindIntent(ask)?(liveTaskIds||[]).map(id=>{try{return terminals.get(id)}catch{return null}})
   .filter(task=>task&&running(task)&&taskInScope(task,appScope)&&Date.now()-(task.created??0)<=30000).at(-1)||null:null;
  const takeBack=task=>{effect('stop',{taskId:task.id},`Stop “${existingTitle(task)}”`);stopped={taskId:task.id,title:existingTitle(task)};return {action:'reply',reply:'Okay, cancelled it.'}};
  const direct=/[\p{L}\p{N}]/u.test(ask)?(stopping?stopRoute(stopping.provider):regretted?takeBack(regretted):slash&&!slash.found?{action:'reply',reply:`I don't see a /${slash.name} skill in ${chosen.provider==='claude'?'Claude Code':'Codex'}.`}:directVoiceRoute(ask)):{action:'reply',reply:newTask?'Ready for a new conversation. What would you like me to work on?':"I didn't catch a request. What would you like me to do?"};
@@ -220,7 +223,7 @@ export async function routeVoice(root,{id,transcript,selection:chosen,terminalMo
  // Off a call nothing changes: a busy conversation still refuses rather than getting a replacement.
  // Idle too (2026-11-26 test calls): "write a short one-pager comparing X" and "put together an outline for Y" were
  // sent into the last call's finished task as a continuation, and announced under that task's name.
- if(transport==='live'&&skill==='voice-ask'&&terminalMode&&terminals&&workTarget&&!stopped&&!refersBack(executionAsk)){
+ if(transport==='live'&&skill==='voice-ask'&&terminalMode&&terminals&&workTarget&&!stopped&&!(intent?intent==='follow_up':refersBack(executionAsk))){
   let occupied;try{occupied=terminals.get(workTarget)}catch{}
   if(occupied&&running(occupied)){startedBeside=existingTitle(occupied);workTarget=null;effects.push('busy-target-new')}
   else if(occupied){workTarget=null;effects.push('new-work-new-task')}

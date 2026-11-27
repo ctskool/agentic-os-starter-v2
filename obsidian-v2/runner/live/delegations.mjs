@@ -28,6 +28,8 @@ const immediate=action=>{
   !action.effects.some(effect=>effect.site==='updateCurrent'&&!newWork.has(effect.details.id));
 };
 // Work whose news comes later: a new task, a workflow, or a request sent to (or queued for) an existing one.
+// The tasks an action starts.
+const jobsOf=action=>(action?.effects||[]).filter(effect=>['start','startWorkflow','enqueue'].includes(effect.site)).map(effect=>effect.details.job.id);
 const startsWork=action=>Array.isArray(action?.effects)&&action.effects.some(effect=>['start','startWorkflow','enqueue','send','queueFollowup','continueWorkflow'].includes(effect.site));
 const scheduleTimer=(fn,ms)=>{const handle=setTimeout(fn,ms);handle.unref?.();return ()=>clearTimeout(handle)};
 
@@ -79,7 +81,7 @@ export class LiveDelegations {
   delete call.cancelledBy;call.rescuedFor=call.heardAt;
   this.receive(call,{delegation:{id:held.delegation,offset_ms:call.heardOffset}},randomUUID());
  }
- receive(call,event,id,{key}={}){
+ receive(call,event,id,{key,tool}={}){
   const delegation=event.delegation.id,anchor=call.turns.anchor(event,this.now());
   this.closeSuperseded(call,delegation);
   if(call.routing||this.active.size){
@@ -89,7 +91,7 @@ export class LiveDelegations {
   }
   let captured;try{captured=this.capture(call)}catch{}
   // Snapshot and reserve the delegation before yielding to the settle timer.
-  const pending={anchor,cancelled:false,abort:new AbortController(),prior:call.staged?.undo?call.staged:null,key:delegation??key};
+  const pending={anchor,cancelled:false,abort:new AbortController(),prior:call.staged?.undo?call.staged:null,key:delegation??key,tool};
   call.routing=pending;
   this.activity(call,pending,'handoff');
   pending.plan=this.plan(call,pending,{id,delegation,captured});
@@ -110,6 +112,7 @@ export class LiveDelegations {
    // minutes…"), Live never handed off the rest. See closeSuperseded and retakeSuperseded.
    if(pending.cancelled&&delegation&&this.isCurrent(call)&&call.answers.isOpen(delegation)&&call.staged?.heldOpen!==delegation)
     call.supersededHandoff={delegation,at:this.now(),cancelledBy:call.cancelledBy??pending.anchor};
+   if(pending.tool)call.answers.closeTool(delegation);
    if(pending.busyAnchor!==undefined)call.turns.skip(pending.busyAnchor);
    if(call.routing===pending)call.routing=null;
    // A hand-off that ended without an answer or an action leaves nothing on screen.
@@ -127,6 +130,9 @@ export class LiveDelegations {
   call.updates.push({type:'activity',key:pending.key,phase,label:String(label??'').slice(0,120),...(ids.length?{taskIds:ids}:{})});
  }
  fragment(call,row){
+  // With tool hand-offs a cancel or a correction arrives as its own tool call, read in context ("Wait six full
+  // minutes…" is not a cancel), so the caller's words are not searched for cancel words here.
+  if(call.toolMode)return;
   if(!row.user||!row.text.trim())return;
   const stage=call.staged;
   if(stage?.undo){
@@ -148,7 +154,42 @@ export class LiveDelegations {
   if(interruption.cancel)call.undoCancelledBy=interruption.offset;else call.cancelledBy=interruption.offset;
   this.clear(call,'staged-cancelled');return true;
  }
+ // A tool hand-off: the request arrives written out, with its kind and the task it concerns (tools.mjs). Nothing is
+ // taken from the transcript, and nothing is waited for.
+ async planTool(call,pending,{id,delegation,captured}){
+  const answers=call.answers;
+  pending.assembled=true;
+  // These words are spoken for: nothing else takes them from the transcript (no rescue for this turn).
+  if(call.heardOffset!==undefined)call.turns.skip(call.heardOffset);
+  call.rescuedFor=call.heardAt;
+  if(!this.unchanged(call,captured)){answers.speak(delegation,retry);return}
+  let {kind,request:transcript,taskId}=pending.tool;
+  const refOf=id=>[...call.toolRefs].find(([,task])=>task.id===id)?.[0]??null;
+  const staged=call.staged&&!call.staged.consumed?call.staged:null,stagedIds=staged?jobsOf(staged.action):[];
+  if(kind==='cancel'&&staged&&(!taskId||stagedIds.includes(taskId))){this.clear(call,'staged-cancelled');answers.speak(delegation,'Cancelled.');return}
+  // Live handed off before the caller finished ("Start a timer test task." … "Wait six full minutes…"): the rest
+  // arrives as a follow-up to work that has not started yet, so the two halves become the one request.
+  if(kind==='follow_up'&&staged&&stagedIds.includes(taskId)){
+   pending.reuseRef=refOf(taskId);transcript=(staged.request.transcript+' '+transcript).slice(0,4000);kind='new_work';taskId=null;this.clear(call);
+  }else if(staged&&!staged.undo)this.clear(call,'staged-cancelled');
+  if(this.active.size){answers.speak(delegation,busy);return}
+  const request={id,transcript,selection:captured.selection,workTarget:taskId??null,appScope:captured.appScope,conversationEpoch:captured.conversationEpoch,
+   surface:call.ownerSurface,liveCallId:call.callId,liveTurns:call.turns.context(this.now()),liveTaskIds:call.taskUpdates?.taskIds(),liveIntent:{kind}};
+  const stage=await this.planned(call,pending,request,delegation,captured,await this.route(call,pending,request,delegation,'plan'));
+  if(!stage)return;
+  // The model names tasks by short ids V2 gives it (t1, t2…), described by the caller's own words: nothing from
+  // outside this call is named to it.
+  for(const job of jobsOf(stage.action)){
+   const ref=pending.reuseRef??'t'+(call.toolRefs.size+1);pending.reuseRef=null;
+   call.toolRefs.set(ref,{id:job,words:transcript.slice(0,80)});
+   answers.toolExtra(delegation,{task_id:ref,status:'started'});
+  }
+  if(taskId)answers.toolExtra(delegation,{task_id:refOf(taskId)});
+  answers.toolExtra(delegation,{tasks_in_this_call:[...call.toolRefs].slice(-8).map(([task_id,task])=>({task_id,request:task.words}))});
+  return stage;
+ }
  async plan(call,pending,{id,delegation,captured}){
+  if(pending.tool)return this.planTool(call,pending,{id,delegation,captured});
   await this.sleep(this.limits.settle,pending.abort.signal);
   if(pending.cancelled||!this.isCurrent(call))return;
   // Live can hand off at a pause while the caller is still talking (2026-11-26: "…save to my inbox. Take your time
@@ -200,7 +241,10 @@ export class LiveDelegations {
   if(call.turns.correctionAfter(pending.anchor)){pending.cancelled=true;return}
   const request={id,transcript,selection:captured.selection,workTarget:affirm?null:captured.workTarget,appScope:captured.appScope,
    conversationEpoch:captured.conversationEpoch,surface:call.ownerSurface,liveCallId:call.callId,liveTurns:turn.preceding,liveTaskIds:call.taskUpdates?.taskIds()};
-  const result=await this.route(call,pending,request,delegation,'plan');
+  return this.planned(call,pending,request,delegation,captured,await this.route(call,pending,request,delegation,'plan'));
+ }
+ // A routed plan becomes an answer (a read) or an action to stage.
+ planned(call,pending,request,delegation,captured,result){
   if(pending.cancelled||!this.isCurrent(call))return;
   if(!this.unchanged(call,captured)){call.answers.speak(delegation,retry);return}
   if(result.kind==='read'){
@@ -230,7 +274,7 @@ export class LiveDelegations {
   call.answers.speak(delegation,stage.mode==='click'?"Here's what I'd do. Tap Confirm on screen.":`Just to check: ${stage.spokenDescription}. Say yes to go ahead.`);
  }
  startUndo(call,stage,delegation,anchor,until){
-  if(this.interruptUndo(call,anchor,until))return;
+  if(!call.toolMode&&this.interruptUndo(call,anchor,until))return;
   stage.finished=new Promise(resolve=>{stage.finish=resolve});
   stage.undoAnchor=anchor;stage.undoUntil=until;stage.undoDelegation=delegation;
   const finishUndo=()=>{
@@ -250,7 +294,8 @@ export class LiveDelegations {
   if(keepOpen)stage.heldOpen=delegation;
   // A follow-up sent to a task reads "Continue “that task”" (titles stay off the call), so it is said as "Updating it now…".
   const followUp=/^Continue “(.*)”$/.exec(stage.spokenDescription);
-  const line=slash||explained?receipt.reply:followUp?`Updating ${followUp[1]==='that task'?'it':`“${followUp[1]}”`} now…`:`Starting ${stage.spokenDescription.replace(/^Start /i,'')}…`;
+  const stop=/^Stop “(.*)”$/.exec(stage.spokenDescription);
+  const line=slash||explained?receipt.reply:stop?`Stopping ${stop[1]==='that task'?'it':`“${stop[1]}”`}…`:followUp?`Updating ${followUp[1]==='that task'?'it':`“${followUp[1]}”`} now…`:`Starting ${stage.spokenDescription.replace(/^Start /i,'')}…`;
   // Live already acknowledged this in its own voice ("On it, spinning that up"), so "Starting…" would be a second
   // acknowledgement (2026-11-26 test calls). Live gets it silently instead, to answer "what did you start?".
   // Never for a rescue (no delegation): V2 started that on its own reading of Live's words, so the caller hears what

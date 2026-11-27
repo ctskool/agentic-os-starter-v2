@@ -67,6 +67,16 @@ export class LiveTurns {
    preceding:exchanges.slice(-8).map(turn=>({role:turn.user?'user':'assistant',text:join(turn.rows).slice(-800)}))};
  }
  skip(anchor){this.used=Math.max(this.used,anchor)}
+ // The last few exchanges, for the router's context when the request itself arrives written out (tool hand-offs).
+ context(now){
+  this.prune(now);
+  const exchanges=[];
+  for(const row of [...this.rows].sort((a,b)=>a.offset-b.offset||a.index-b.index)){
+   const tail=exchanges.at(-1);
+   if(tail?.user===row.user&&tail.turnId===row.turnId)tail.rows.push(row);else exchanges.push({user:row.user,turnId:row.turnId,rows:[row]});
+  }
+  return exchanges.slice(-8).map(turn=>({role:turn.user?'user':'assistant',text:join(turn.rows).slice(-800)}));
+ }
  // What the caller said from this point on, for telling a real cancel from a "wait" inside a request.
  textFrom(offset){return join(this.rows.filter(row=>row.user&&row.offset>=offset).sort((a,b)=>a.offset-b.offset||a.index-b.index)).replace(/^[\s.,;:!?…-]+/,'').trim()}
  // The caller was still mid-sentence at a hand-off and kept going: the words before it end without a full stop, the

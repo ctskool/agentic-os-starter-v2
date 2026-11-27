@@ -18,8 +18,30 @@ export const revealedReports=reply=>new Set([reply.deliverable,reply.briefSource
 // Closes a hand-off nothing more will be said on. On the real API Live stays quiet and standby follows (probe, 2026-11-26).
 export const LIVE_SUPERSEDED='Superseded: what the user said next replaces this request and is handled on its own. There is nothing to say about this one; say nothing.';
 export class LiveAnswers {
- constructor(call){this.call=call;this.held=[];this.attempts=new Map();this.reports=new Set();this.answered=new Set();this.spoken=new Map()}
+ constructor(call){this.call=call;this.held=[];this.attempts=new Map();this.reports=new Set();this.answered=new Set();this.spoken=new Map();this.tools=new Map()}
+ // Tool hand-offs (tools.mjs): the first line said on a tool call is its result, which the backend model words and
+ // Live says. A tool call takes no appends of its own, so anything after that, and anything silent, is a plain line.
+ tool(key,callId){this.tools.set(key,{callId,done:false,extra:{}});if(this.tools.size>256)this.tools.delete(this.tools.keys().next().value)}
+ toolExtra(key,extra){const tool=this.tools.get(key);if(tool)Object.assign(tool.extra,extra)}
+ // Every tool call is answered, even one V2 has nothing to say on: an unanswered one blocks every later hand-off.
+ closeTool(key){const tool=this.tools.get(key);if(tool&&!tool.done)this.toolOutput(tool,'',{note:'Nothing to report on this one; say nothing.'})}
+ toolOutput(tool,say,more={}){
+  tool.done=true;
+  if(this.call.state==='closing'||!this.call.socket)return;
+  const id=()=>'evt_'+randomUUID().replace(/-/g,'');
+  this.call.debugLog?.({sent:'tool-output',delegation:null,text:say});
+  if(say&&this.call.clock)this.call.commentedAt=this.call.clock();
+  try{
+   this.call.socket.send({type:'response.item.create',event_id:id(),item:{type:'function_call_output',call_id:tool.callId,output:JSON.stringify({ok:true,say,...tool.extra,...more})}});
+   this.call.socket.send({type:'response.create',event_id:id()});
+  }catch{}
+ }
  append(kind,id,value,limit){
+  const tool=this.tools.get(id);
+  if(tool){
+   if(kind==='commentary'&&!tool.done){const say=liveText(value,limit);if(say&&this.call.state!=='closing')this.toolOutput(tool,say);return}
+   id=null;
+  }
   const text=liveText(value,limit);if(!text||this.call.state==='closing')return;
   // GPT-Live wire shape (checked against the API 2026-11-22): event_id, and content as a plain string.
   const event={type:'session.'+kind+'.append',delegation_id:id,event_id:'evt_'+randomUUID().replace(/-/g,''),content:text};
@@ -28,7 +50,7 @@ export class LiveAnswers {
   if(kind==='commentary'&&(this.call.paused||!this.call.socket)){this.held.push(event);return}
   this.send(event);
  }
- isOpen(id){return typeof id==='string'&&!!id&&!this.answered.has(id)}
+ isOpen(id){return typeof id==='string'&&!!id&&!this.answered.has(id)&&!this.tools.has(id)}
  send(event){
   if(this.call.state==='closing'||!this.call.socket)return;
   // Record the attempt before send, including a send which throws after the

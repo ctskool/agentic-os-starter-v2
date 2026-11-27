@@ -18,6 +18,7 @@ interface LivePrefs {
  liveShareWork: boolean;
  liveShareBrief: boolean;
  liveGreeting: boolean;
+ liveHandoff: 'client'|'tools';
 }
 export interface VoicePrefs extends Partial<LivePrefs> {spokenReplies: boolean; voice: string | null; rate: number}
 export interface VoiceChoice {id: string; label: string; group: string; name: string}

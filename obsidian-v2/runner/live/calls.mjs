@@ -13,6 +13,7 @@ import {LiveAnswers} from './answers.mjs';
 import {speechBusy,speechRestarted,speechUpdate} from './speech-mode.mjs';
 import {liveCallLog} from './call-log.mjs';
 import {liveDebugLog,debugRecord} from './debug-log.mjs';
+import {toolCall,toolRequest} from './tools.mjs';
 
 const defaults={create:10000,attach:5000,ready:10000,close:5000,poll:20000,peer:15000,cooldown:120000,cleanup:7200000,backoff:2000,rollover:60000,idleForRollover:20000,forceRollover:20000,snapshotRefresh:10000};
 const positive=new Set(['session.started','session.resumed','session.paused','session.usage.updated','session.input_transcript.delta','session.output_transcript.delta','session.assistant_transcript.delta']);
@@ -105,6 +106,8 @@ export class LiveCalls {
    call.snapshotSections=sections(snapshot);call.refreshAt=this.now()+this.limits.snapshotRefresh;
    call.turns=new LiveTurns(call.startedAt);call.answers=new LiveAnswers(call);call.taskUpdates=new LiveTaskUpdates(call);
    call.requestWake=()=>this.wake(call);call.debugLog=record=>this.debugLog(call,record);call.clock=this.now;
+   // Tool hand-offs (tools.mjs). The ids the model knows tasks by carry over a renewed connection.
+   call.toolMode=prefs.liveHandoff==='tools';call.toolRefs=call.from?.toolRefs??new Map();
    const history=call.from?call.from.transcriptTail||'':prefs.liveCarryToday?this.history(this.root,call.appScope,now):'';
    if(!this.current(call))throw new Error('Live call ended before connecting.');
    // Persist the cooldown marker before sending. A bridge crash in this
@@ -289,12 +292,26 @@ export class LiveCalls {
    if(!call.paused)call.answers?.resume({tasks:false});
   }
   if(positive.has(event.type)){call.positive=true;this.ready(call)}
+  if(call.toolMode){this.toolEvent(call,event);return}
   if(!call.from&&event.type==='session.delegation.created'&&typeof event.delegation?.id==='string'&&event.delegation.id.length>0&&event.delegation.id.length<=256){
    const mapKey=JSON.stringify([call.sessionId,event.delegation.id]);
    if(this.recovery.delegations.has(mapKey))return;
    const id=this.recovery.register(call.sessionId,event.delegation.id);
    this.delegations?.receive(call,event,id);
   }
+ }
+ // A tool hand-off (tools.mjs): an OpenAI model that has the conversation calls one of V2's tools, with the request
+ // written out. It goes through the same plan and commit as any hand-off; what V2 says first is the tool's result.
+ toolEvent(call,event){
+  const found=toolCall(event);
+  if(!found||call.from||!this.delegations)return;
+  const key='tool:'+found.callId;
+  if(call.answers.tools.has(key))return;
+  call.answers.tool(key,found.callId);
+  call.debugLog?.({tool:found.name,args:String(found.arguments??'').slice(0,600)});
+  const request=toolRequest(found.name,found.arguments,new Map([...call.toolRefs].map(([ref,task])=>[ref,task.id])));
+  if(!request){call.answers.speak(key,"I didn't catch that. Say it again?");return}
+  this.delegations.receive(call,{delegation:{id:key,offset_ms:call.heardOffset??0}},randomUUID(),{tool:request});
  }
  // Who spoke last, and what Live said back to the caller's latest words: for the promise check below, for holding
  // task news while Live is mid-sentence (task-updates.mjs), and for not doubling Live's own acknowledgement.
