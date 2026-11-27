@@ -45,18 +45,17 @@ Your agent does the rest, and asks before each step that needs you:
 > [!NOTE]
 > Allow installation and network access when your agent asks.
 
-<details>
-<summary><b>Already use Agentic OS? Upgrade instead</b></summary>
+### Already use Agentic OS? Upgrade instead
 
-<br>
+Open **Claude Code** or **Codex** and paste this:
 
 ```text
 Use https://github.com/ctskool/agentic-os-starter-v2 to help upgrade the Agentic OS I already use. Find my installation and vault, explain what I can add, and preserve my customizations. Show me the plan before changing my setup.
 ```
 
-You do not need to know your installation's path. The agent finds it, recommends compatible improvements, and asks before interrupting your running system. Customized setups get an integration plan. After the update it offers what is new, such as Live voice, once. [How upgrades work](docs/UPGRADING.md)
+You do not need to know your installation's path. The agent finds it, recommends compatible improvements, and asks before interrupting your running system. Customized setups get an integration plan. After the update it offers what is new, such as Live voice, once.
 
-</details>
+On a starter you have not modified, `node aos.mjs update` from the starter folder does the same in one command. Coming from the September 2026 release, it needs one extra step afterwards: see [How upgrades work](docs/UPGRADING.md).
 
 <details>
 <summary><b>What you need</b></summary>
