@@ -101,7 +101,7 @@ export async function routeVoice(root,{id,transcript,selection:chosen,terminalMo
  if(workTarget)workTarget=resolveVoiceTarget(root,terminals,{scope:appScope,provider:chosen.provider,id:workTarget});
  // A tool hand-off says what the request is (runner/live/tools.mjs): new work, a follow-up to a task, a cancel, a
  // status question. Then nothing is guessed from its phrasing.
- const intent=transport==='live'&&['new_work','follow_up','cancel','status','question'].includes(liveIntent?.kind)?liveIntent.kind:null;
+ const intent=transport==='live'&&['new_work','follow_up','replace','cancel','status','question'].includes(liveIntent?.kind)?liveIntent.kind:null;
  const newTask=intent?null:newTaskIntent(transcript);
  let ask=newTask?newTask.payload:transcript;
  const slashAsk=stripPleasantry(ask);
@@ -206,7 +206,7 @@ export async function routeVoice(root,{id,transcript,selection:chosen,terminalMo
  const openNote=openWhenDone?'\n\nThe user asked to see the result when it is finished: register the final file with the dashboard helper using --open.':'';
  // "Actually, instead of that, make X": work in progress is stopped and the new
  // request starts as its own conversation. A tweak to idle work stays a follow-up.
- if(skill==='voice-ask'&&terminalMode&&terminals&&workTarget&&supersedeIntent(executionAsk)){
+ if(skill==='voice-ask'&&terminalMode&&terminals&&workTarget&&(intent?intent==='replace':supersedeIntent(executionAsk))){
   const task=selectedStopTarget();
   if(task&&running(task)){effect('stop',{taskId:task.id},`Stop “${existingTitle(task)}”`);stopped={taskId:task.id,title:transport==='live'&&liveCallId?existingTitle(task):task.title};workTarget=null;effects.push('supersede-stop')}
  }

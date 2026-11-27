@@ -67,6 +67,8 @@ export class LiveTurns {
    preceding:exchanges.slice(-8).map(turn=>({role:turn.user?'user':'assistant',text:join(turn.rows).slice(-800)}))};
  }
  skip(anchor){this.used=Math.max(this.used,anchor)}
+ // What the caller has said since a moment in time (words that kept coming after a hand-off).
+ saidSince(at){return join(this.rows.filter(row=>row.user&&row.at>at).sort((a,b)=>a.offset-b.offset||a.index-b.index)).trim()}
  // The last few exchanges, for the router's context when the request itself arrives written out (tool hand-offs).
  context(now){
   this.prune(now);

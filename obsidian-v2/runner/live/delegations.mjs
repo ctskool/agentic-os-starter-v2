@@ -37,7 +37,7 @@ export class LiveDelegations {
  constructor({active,context,requestContext,valid,prefs,now=Date.now,handle=handleVoiceRequest,limits={},
   timing:{schedule=scheduleTimer,sleep=(ms,signal)=>wait(ms,undefined,{signal})}={}}){
   Object.assign(this,{active,context,requestContext,valid,prefs,now,handle,schedule,sleep});
-  this.limits={settle:200,progress:8000,undo:1500,autoUndo:2500,stage:45000,finish:3000,finishQuiet:1200,...limits};
+  this.limits={settle:200,progress:8000,undo:1500,autoUndo:2500,stage:45000,finish:3000,finishQuiet:1200,retry:1500,...limits};
  }
  isCurrent(call){
   try{return call.localHeld&&call.ready&&call.state==='active'&&this.prefs().voiceMode==='live'&&this.valid(call)}
@@ -104,6 +104,7 @@ export class LiveDelegations {
    call.routing=pending;
    return this.stage(call,pending,stage);
   }).catch(error=>{
+   call.debugLog?.({event:'v2-error',error:String(error?.message??error).slice(0,300)});
    if(this.isCurrent(call)&&!pending.cancelled)call.answers.speak(delegation,spokenFailure(error));
   }).finally(()=>{
    // A hand-off dropped because the caller corrected themselves or kept going is held, never left open: one left open
@@ -132,7 +133,7 @@ export class LiveDelegations {
  fragment(call,row){
   // With tool hand-offs a cancel or a correction arrives as its own tool call, read in context ("Wait six full
   // minutes…" is not a cancel), so the caller's words are not searched for cancel words here.
-  if(call.toolMode)return;
+  if(call.toolMode&&!call.toolsBroken)return;
   if(!row.user||!row.text.trim())return;
   const stage=call.staged;
   if(stage?.undo){
@@ -153,6 +154,14 @@ export class LiveDelegations {
   if(!interruption)return false;
   if(interruption.cancel)call.undoCancelledBy=interruption.offset;else call.cancelledBy=interruption.offset;
   this.clear(call,'staged-cancelled');return true;
+ }
+ // Work that never started keeps no id for the model to name later.
+ dropRefs(call,stage){const ids=jobsOf(stage.action);for(const [ref,task] of call.toolRefs??[])if(ids.includes(task.id))call.toolRefs.delete(ref)}
+ retryTool(call,stage){
+  if(!this.isCurrent(call))return;
+  if(call.routing||call.staged||this.active.size){this.dropRefs(call,stage);call.answers.speak(null,retry);return}
+  const ref=[...call.toolRefs].find(([,task])=>jobsOf(stage.action).includes(task.id))?.[0]??null;
+  this.receive(call,{delegation:{id:null,offset_ms:call.heardOffset??0}},randomUUID(),{tool:{...stage.tool,retry:true,retryRef:ref},key:'retry-'+randomUUID().slice(0,8)});
  }
  // A tool hand-off: the request arrives written out, with its kind and the task it concerns (tools.mjs). Nothing is
  // taken from the transcript, and nothing is waited for.
@@ -186,6 +195,8 @@ export class LiveDelegations {
   }
   // Live handed off before the caller finished ("Start a timer test task." … "Wait six full minutes…"): the rest
   // arrives as a follow-up to work that has not started yet, so the two halves become the one request.
+  if(kind==='replace'&&staged&&stagedIds.includes(taskId)){pending.reuseRef=refOf(taskId);kind='new_work';taskId=null;this.clear(call)}
+  if(pending.tool.retryRef)pending.reuseRef=pending.tool.retryRef;
   if(kind==='follow_up'&&staged&&stagedIds.includes(taskId)){
    pending.reuseRef=refOf(taskId);transcript=(staged.request.transcript+' '+transcript).slice(0,4000);kind='new_work';taskId=null;this.clear(call);
   }else if(staged&&!staged.undo)this.clear(call,'staged-cancelled');
@@ -196,6 +207,7 @@ export class LiveDelegations {
   if(!stage)return;
   // Stopping is what the caller just asked for: no "Stopping…" and a window to take it back, just the one line.
   if(kind==='cancel')stage.immediate=true;
+  stage.tool={...pending.tool,kind,request:transcript,taskId};stage.retried=!!pending.tool.retry;
   // The model names tasks by short ids V2 gives it (t1, t2…), described by the caller's own words: nothing from
   // outside this call is named to it.
   for(const job of jobsOf(stage.action)){
@@ -293,14 +305,24 @@ export class LiveDelegations {
   call.answers.speak(delegation,stage.mode==='click'?"Here's what I'd do. Tap Confirm on screen.":`Just to check: ${stage.spokenDescription}. Say yes to go ahead.`);
  }
  startUndo(call,stage,delegation,anchor,until){
-  if(!call.toolMode&&this.interruptUndo(call,anchor,until))return;
+  if(!(call.toolMode&&!call.toolsBroken)&&this.interruptUndo(call,anchor,until))return;
   stage.finished=new Promise(resolve=>{stage.finish=resolve});
   stage.undoAnchor=anchor;stage.undoUntil=until;stage.undoDelegation=delegation;
   const finishUndo=()=>{
    if(call.staged!==stage)return;
    const remaining=until-this.now();
    if(remaining>0){stage.undo=this.schedule(finishUndo,remaining);return}
-   void this.confirm(call,stage.actionId,stage.mode,delegation).catch(error=>{if(this.isCurrent(call))call.answers.speak(delegation,spokenFailure(error))});
+   void this.confirm(call,stage.actionId,stage.mode,delegation).catch(error=>{
+    // Which part of the context moved, for the call log: seen when a request lands seconds after a task starts.
+    let moved='';try{const now=this.capture(call);moved=now?['selection','workTarget','appScope','conversationEpoch','gen','sessionId'].filter(key=>!isDeepStrictEqual(now[key],stage.captured?.[key])).join(','):'context not posted'}catch{}
+    call.debugLog?.({event:'v2-error',error:String(error?.message??error).slice(0,300)+(moved?' ['+moved+']':'')});
+    if(!this.isCurrent(call))return;
+    // A request that came written out is tried once more, quietly, before the caller is asked to repeat it (seen
+    // twice on a 2026-11-27 test call: an accepted follow-up answered "Say that again in a moment" two seconds on).
+    if(stage.tool&&!stage.retried){this.schedule(()=>this.retryTool(call,stage),this.limits.retry);return}
+    this.dropRefs(call,stage);
+    call.answers.speak(delegation,spokenFailure(error));
+   });
   };
   stage.undo=this.schedule(finishUndo,Math.max(0,until-this.now()));
   const receipt=stage.action.receipt;
@@ -313,15 +335,18 @@ export class LiveDelegations {
   if(keepOpen)stage.heldOpen=delegation;
   // A follow-up sent to a task reads "Continue “that task”" (titles stay off the call), so it is said as "Updating it now…".
   const followUp=/^Continue “(.*)”$/.exec(stage.spokenDescription);
+  if(stage.retried)return;
   const stop=/^Stop “(.*)”$/.exec(stage.spokenDescription);
-  const line=slash||explained?receipt.reply:stop?`Stopping ${stop[1]==='that task'?'it':`“${stop[1]}”`}…`:followUp?`Updating ${followUp[1]==='that task'?'it':`“${followUp[1]}”`} now…`:`Starting ${stage.spokenDescription.replace(/^Start /i,'')}…`;
+  // "Stop “that task” and then Start “…” in your Claude terminal" (a replace) is said as one plain sentence.
+  const swap=/^Stop “[^”]*” and then Start (“.*)$/.exec(stage.spokenDescription);
+  const line=slash||explained?receipt.reply:swap?`Stopping that and starting ${swap[1]} instead…`:stop?`Stopping ${stop[1]==='that task'?'it':`“${stop[1]}”`}…`:followUp?`Updating ${followUp[1]==='that task'?'it':`“${followUp[1]}”`} now…`:`Starting ${stage.spokenDescription.replace(/^Start /i,'')}…`;
   // Live already acknowledged this in its own voice ("On it, spinning that up"), so "Starting…" would be a second
   // acknowledgement (2026-11-26 test calls). Live gets it silently instead, to answer "what did you start?".
   // Never for a rescue (no delegation): V2 started that on its own reading of Live's words, so the caller hears what
   // started and can still say "wait" (Neon review, 2026-11-26).
   const acknowledged=call.liveAcked===true;
-  // On a tool hand-off the same: the tool's result says it started without giving Live a second line to say.
-  if(acknowledged&&!explained&&startsWork(stage.action)&&call.answers.tools.has(delegation)){call.answers.toolQuiet(delegation,line);return}
+  // Not on a tool hand-off: given a result with nothing to say, Live made up "Done. It's saved" for work that had only
+  // started (2026-11-27 test call). A second "starting" is the lesser fault, so the tool's result always says it.
   if(acknowledged&&!explained&&keepOpen&&startsWork(stage.action)){
    call.answers.append('thinking',null,`V2 is ${line.replace(/…$/,'').replace(/^(Starting|Updating)/,word=>word.toLowerCase())}. You already acknowledged it, so don't announce it again; mention it only if asked.`);
    return;

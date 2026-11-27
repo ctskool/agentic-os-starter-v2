@@ -30,8 +30,6 @@ export class LiveAnswers {
   this.call.debugLog?.({sent:'kick',delegation:null,text:'response.create'});
   try{this.call.socket.send({type:'response.create',event_id:'evt_'+randomUUID().replace(/-/g,'')})}catch{}
  }
- // The result of a tool call Live has already acknowledged aloud: what started, and nothing more to say.
- toolQuiet(key,started){const tool=this.tools.get(key);if(tool&&!tool.done)this.toolOutput(tool,'',{started,note:'The voice assistant already told the user this is starting. Reply with exactly: NOTHING'})}
  closeTool(key){const tool=this.tools.get(key);if(tool&&!tool.done)this.toolOutput(tool,'',{note:'Nothing to report on this one; say nothing.'})}
  toolOutput(tool,say,more={}){
   tool.done=true;

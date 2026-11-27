@@ -25,6 +25,7 @@ const expiry=value=>{
 // The last sentence of Live's reply commits to work ("I'll get that moving", "Gotcha, I'll bake that in"), not an
 // offer ("Want me to…?") or a promise to report back ("I'll tell you when it's done", "I'll share details once…").
 const TURN_GAP=2500,BACKCHANNEL=/^(?:(?:mm+-?hmm+|mhm|uh-?huh|hmm+|mm+|okay|ok|yeah|yep|yes|right|sure|got it|gotcha)[,.!\s]*)+$/i;
+const TRAILING_MS=400;
 const RESCUE_QUIET=3000,RESCUE_WINDOW=45000,REFRESH_AFTER_TALK=4000;
 // Work verbs only (Neon review, 2026-11-26): "Let me explain", "I'll break it down" or "I'll note that" is talk, not work,
 // and a rescue that starts a task nobody asked for is the worst way this can fail.
@@ -298,7 +299,7 @@ export class LiveCalls {
    const row=call.turns?.add(event,this.now());
    if(row){call.taskUpdates?.transcript(row);call.transcriptTail=((call.transcriptTail||'')+row.text).slice(-2200);this.heard(call,row);this.delegations?.fragment(call,row)}
   }
-  if(event.type==='session.delegation.created'){call.delegatedAt=this.now();call.liveAcked=false;call.ackText=''}
+  if(event.type==='session.delegation.created'){call.delegatedAt=this.now();call.liveAcked=false;call.ackText='';call.toolText='';call.toolName=null}
   if(['session.input_transcript.done','session.input_transcript.completed','session.input_audio_buffer.speech_stopped','input_audio_buffer.speech_stopped','session.delegation.created','session.paused'].includes(event.type))call.taskUpdates?.endTurn(event);
   if(event.type==='session.paused'||event.type==='session.resumed'){
    call.paused=event.type==='session.paused';if(!call.from)call.updates.push({type:call.paused?'paused':'resumed'});
@@ -306,9 +307,11 @@ export class LiveCalls {
   }
   if(positive.has(event.type)){call.positive=true;this.ready(call)}
   if(call.toolMode){
-   // The tool set-up was accepted but its model cannot run on this key: the caller's words are taken the original
-   // way this once, and later calls use the original hand-off.
-   if(event.type==='error'&&/responses_validation_failed|model_not_found/.test(String(event.error?.code??'')+' '+String(event.error?.message??''))){
+   // The tool set-up was accepted but its model cannot run on this key. Checked on the real API (2026-11-27): the
+   // call connects, an error arrives at once (responses_validation_failed), and then every hand-off fails with a
+   // second error, no delegation event and nothing said. So the call renews itself onto the original hand-off (see
+   // sweep), later calls start there, and a request made before the renewal lands is taken from the transcript.
+   if(event.type==='error'&&/responses_validation_failed|model_not_found|does not exist or you do not have access/.test(String(event.error?.code??'')+' '+String(event.error?.message??''))){
     this.toolsRefused=true;call.toolsBroken=true;this.log({event:'tools-refused',call:call.callId?.slice(0,8)??null,reason:String(event.error?.message??event.error?.code??'').slice(0,200)});
     if(call.heardAt!==undefined&&call.rescuedFor!==call.heardAt&&!call.routing&&!call.staged){call.rescuedFor=call.heardAt;this.delegations?.rescue(call,call.heardOffset)}
    }
@@ -337,7 +340,7 @@ export class LiveCalls {
   if(!found||call.from||!this.delegations)return;
   const key='tool:'+found.callId;
   if(call.answers.tools.has(key))return;
-  call.answers.tool(key,found.callId);
+  call.answers.tool(key,found.callId);call.toolAt=this.now();call.toolText=String(found.arguments??'');call.toolName=found.name;
   call.debugLog?.({tool:found.name,args:String(found.arguments??'').slice(0,600)});
   const request=toolRequest(found.name,found.arguments,new Map([...call.toolRefs].map(([ref,task])=>[ref,task.id])));
   if(!request){call.answers.speak(key,"I didn't catch that. Say it again?");return}
@@ -364,6 +367,22 @@ export class LiveCalls {
  // Live said it would do something and never handed it off (2026-11-26 test calls: "Sure, I'll get that moving", then
  // nothing ran, twice). Once Live has finished that reply and no hand-off came, V2 takes the caller's words itself.
  rescue(call,now){
+  // Tool hand-offs: Live handed off at a pause and the caller kept talking (2026-11-27 probe: "Write a super short
+  // checklist for recording a voice demo" arrived, "with no fluff, five bullets, and save it to my inbox" never did).
+  // If no tool call has picked up those later words once everyone is quiet, the model is asked to look again.
+  if(call.toolMode&&!call.toolsBroken&&this.delegations&&!call.from&&call.heardAt!==undefined&&call.rescuedFor!==call.heardAt
+    &&call.delegatedAt>=(call.turnStartAt??Infinity)&&call.heardAt>call.delegatedAt+TRAILING_MS&&call.toolAt>=call.delegatedAt&&!(call.toolAt>=call.heardAt)&&!call.routing
+    &&now-call.heardAt>=RESCUE_QUIET&&now-(call.liveSaidAt??-Infinity)>=RESCUE_QUIET&&now-call.heardAt<=RESCUE_WINDOW){
+   call.rescuedFor=call.heardAt;
+   // Only after a tool call that carries the request's words: a cancel, a status question or a yes names a task, not words.
+   if(!['start_task','follow_up_task','replace_task','ask_vault'].includes(call.toolName))return;
+   // Not when the tool call already carries them (the transcript can simply arrive after the hand-off event).
+   // A trailing "please" or "thanks" is not worth it either: only three or more words the tool call does not have.
+   const plain=value=>String(value??'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().split(' ').filter(Boolean);
+   const carried=new Set(plain(call.toolText)),missing=plain(call.turns?.saidSince(call.delegatedAt)).filter(word=>!carried.has(word));
+   if(missing.length>=3)call.answers.kick();
+   return;
+  }
   if(!this.delegations||call.from||call.heardAt===undefined||call.rescuedFor===call.heardAt||!call.liveReply)return;
   if(call.delegatedAt>=(call.turnStartAt??call.heardAt)||call.commentedAt>=call.heardAt||call.routing||call.staged||call.supersededHandoff||call.taskUpdates?.inputOpen)return;
   if(now-call.liveSaidAt<RESCUE_QUIET||now-call.heardAt>RESCUE_WINDOW||!livePromised(call.liveReply))return;
@@ -538,6 +557,8 @@ export class LiveCalls {
    if(this.current(call)){
     // A renewal asked for to say task news must be under way within 15 seconds, or the screen says it.
     if(call.wakeRollover&&!this.replacement&&now-call.wakeRollover>=15000)this.wakeFailed(call);
+    // A call whose tool model cannot run moves to the original hand-off as soon as it can renew.
+    if(call.toolsBroken&&call.toolMode&&!call.movedOffTools&&this.wake(call)){call.movedOffTools=true;this.log({event:'tools-renew',call:call.callId?.slice(0,8)??null})}
     if(call.ready)call.taskUpdates?.flush(prefs,now,()=>this.tasks(call.appScope));
     if(call.ready&&!call.paused){this.delegations?.retakeSuperseded(call,now);this.rescue(call,now)}
     this.renewSpeech(call);this.refreshSnapshot(call);

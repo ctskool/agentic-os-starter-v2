@@ -12,7 +12,7 @@
 export const TOOL_BACKEND_MODEL='gpt-6-luna';
 export const TOOL_INSTRUCTIONS=`You route voice requests from the user to V2, the assistant software on their computer. You are given the conversation.
 Call at most one tool per turn. Write each argument in the user's own words, as close to word for word as you can, with every concrete detail they gave (numbers, names, where to save it), including anything they added after a pause or while the voice assistant was talking. Add nothing of your own: no extra steps, caveats, quality bars or research instructions, and nothing the voice assistant said.
-Use follow_up_task only when they refer back to a task from this call; otherwise start_task. Use cancel_task for "never mind" or "stop that".
+Use follow_up_task only when they refer back to a task that an earlier tool result in this call started, and name that task; if what they mean was never started as a task, use start_task with the whole request. Use replace_task when they change their mind about a task ("wait, no, make it X instead"). Use cancel_task for "never mind" or "stop that".
 After the tool returns, reply with one short spoken sentence saying what its "say" field reports. A result with status "started" means the work has only begun: say it has started, never that it is done, saved or ready. No markdown, no file paths. If nothing needs a tool, or the latest request was already handled, reply with exactly: NOTHING`;
 const fn=(name,description,required,properties)=>({type:'function',name,strict:true,description,parameters:{type:'object',additionalProperties:false,required,properties}});
 export const LIVE_TOOLS=Object.freeze([
@@ -20,6 +20,8 @@ export const LIVE_TOOLS=Object.freeze([
   {request:{type:'string',description:"The complete request in the user's words, with every constraint they gave."}}),
  fn('follow_up_task','Add an instruction, edit or follow-up to a task already started in this call.',['task_ref','change'],
   {task_ref:{type:'string',description:'Task id from an earlier tool result, for example t1.'},change:{type:'string',description:'The change or addition the user asked for.'}}),
+ fn('replace_task','The user changed their mind about a task from this call: stop it and do this other thing in its place ("wait, no, make it X instead").',['task_ref','request'],
+  {task_ref:{type:'string',description:'Task id from an earlier tool result, or "latest".'},request:{type:'string',description:"The new request, complete, in the user's words."}}),
  fn('cancel_task','Cancel or stop a task started in this call ("never mind", "stop that").',['task_ref'],
   {task_ref:{type:'string',description:'Task id from an earlier tool result, or "latest".'}}),
  fn('get_task_status','How a task started in this call is going.',['task_ref'],
@@ -30,7 +32,9 @@ export const LIVE_TOOLS=Object.freeze([
   {question:{type:'string',description:'The lookup question, in full.'}})
 ]);
 export const toolDelegation=()=>({type:'responses',acknowledgement_delay_ms:700,
- responses:{model:TOOL_BACKEND_MODEL,instructions:TOOL_INSTRUCTIONS,tools:LIVE_TOOLS,tool_choice:'auto',parallel_tool_calls:false}});
+ // No extra reasoning: the tool call then arrives about 0.4 s after the hand-off, where the default took about 1 s and
+ // sometimes 2.4 s, with the same choices on the same requests (real-API probe, 2026-11-27).
+ responses:{model:TOOL_BACKEND_MODEL,instructions:TOOL_INSTRUCTIONS,tools:LIVE_TOOLS,tool_choice:'auto',parallel_tool_calls:false,reasoning:{effort:'none'}}});
 
 const text=value=>typeof value==='string'?value.replace(/\s+/g,' ').trim().slice(0,4000):'';
 // A tool call as V2's router wants it: what kind of request, its words, and which of this call's tasks it concerns.
@@ -49,6 +53,7 @@ export function toolRequest(name,rawArguments,refs){
   if(!target&&ids.length>1)return {kind:'unclear',request:text(args.change),taskId:null,say:'Which task is that for?'};
   return {kind:target?'follow_up':'new_work',request:text(args.change),taskId:target};
  }
+ if(name==='replace_task')return text(args.request)?{kind:taskId?'replace':'new_work',request:text(args.request),taskId}:null;
  if(name==='cancel_task')return {kind:'cancel',request:'Stop that task.',taskId};
  if(name==='get_task_status')return {kind:'status',request:"How's that going?",taskId};
  if(name==='confirm_action')return typeof args.confirm==='boolean'?{kind:'confirm',request:args.confirm?'Yes.':'No.',confirm:args.confirm,taskId:null}:null;

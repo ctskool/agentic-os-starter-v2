@@ -815,7 +815,7 @@ async function toolFixture(t){
 test('tool hand-off: start_task is answered with what started and a task id, then the work starts', async t => {
  const f=await toolFixture(t);
  assert.equal(f.creates[0].session.delegation.type,'responses');
- assert.deepEqual(f.creates[0].session.delegation.responses.tools.map(tool=>tool.name),['start_task','follow_up_task','cancel_task','get_task_status','confirm_action','ask_vault']);
+ assert.deepEqual(f.creates[0].session.delegation.responses.tools.map(tool=>tool.name),['start_task','follow_up_task','replace_task','cancel_task','get_task_status','confirm_action','ask_vault']);
  f.input('Write three hooks and, uh, save a note',{turn_id:'u1'});
  f.emit('session.delegation.created',{delegation:{id:'d1',type:'delegation',target:'responses',response_id:'r1'}});
  toolCall(f,'call_1','start_task',{request:'Write three hooks about coding agents and save a note'});
@@ -876,14 +876,15 @@ test('tool hand-off: a follow-up that names no known task asks which, when the c
  assert.equal(toolOutputs(f)[2].say,'Which task is that for?');await f.idle();assert.equal(f.work.length,2,'no stray new task');
 });
 
-test('tool hand-off: when Live already acknowledged the work, the tool result gives it nothing more to say', async t => {
+test('tool hand-off: the tool result always says what started, even when Live already acknowledged it', async t => {
  const f=await toolFixture(t);
  f.input('Write three hooks and save a note',{turn_id:'u1'});
  f.emit('session.delegation.created',{delegation:{id:'d1',type:'delegation',target:'responses',response_id:'r1'}});
  f.emit('session.output_transcript.delta',{delta:"Sure, I'll get that started."});
  toolCall(f,'call_1','start_task',{request:'Write three hooks and save a note'});await until(()=>f.call?.staged);
  const [out]=toolOutputs(f);
- assert.equal(out.say,'');assert.match(out.started,/^Starting /);assert.match(out.note,/NOTHING/);assert.equal(out.task_id,'t1');
+ // Given a result with nothing to say, Live made up "Done. It's saved" for work that had only started.
+ assert.match(out.say,/^Starting /);assert.equal(out.status,'started');assert.equal(out.task_id,'t1');
  f.advance(2500);await f.idle();assert.equal(f.work.length,1);
 });
 
@@ -940,4 +941,89 @@ test('tool hand-off: when the backend model’s run fails, that request is taken
  f.advance(200);await until(()=>plans(f)===1);
  assert.match(f.requests[0].request.transcript,/three hooks about coding agents/);
  assert.equal(f.requests[0].request.liveIntent,undefined,'routed the original way');
+});
+
+test('tool hand-off: words the caller kept saying through a hand-off are picked up when no tool call carries them', async t => {
+ const f=await toolFixture(t);
+ f.input('Write a super short checklist for recording a voice demo',{turn_id:'u1'});
+ f.emit('session.delegation.created',{delegation:{id:'d1',type:'delegation',target:'responses',response_id:'r1'}});
+ toolCall(f,'call_1','start_task',{request:'Write a super short checklist for recording a voice demo'});await until(()=>f.call?.staged);
+ f.advance(600);f.input(' with no fluff, five bullets, and save it to my inbox',{turn_id:'u1'});
+ f.advance(2900);await f.bridge.calls.sweep();await flush();
+ assert.equal(f.frames.filter(frame=>frame.type==='response.create').length,1,'only the tool result so far');
+ f.advance(200);await f.bridge.calls.sweep();await flush();
+ assert.equal(f.frames.filter(frame=>frame.type==='response.create').length,2,'the model is asked to look again');
+ f.advance(5000);await f.bridge.calls.sweep();await flush();
+ assert.equal(f.frames.filter(frame=>frame.type==='response.create').length,2,'once');
+});
+
+test('tool hand-off: no second look when the tool call already carries the caller’s last words', async t => {
+ const f=await toolFixture(t);
+ f.input('Write three hooks about coding agents',{turn_id:'u1'});
+ f.emit('session.delegation.created',{delegation:{id:'d1',type:'delegation',target:'responses',response_id:'r1'}});
+ f.advance(600);f.input(' and save a quick note',{turn_id:'u1'});
+ toolCall(f,'call_1','start_task',{request:'Write three hooks about coding agents and save a quick note'});await until(()=>f.call?.staged);
+ f.advance(600);f.input(' please, thanks',{turn_id:'u1'});
+ f.advance(2500);await f.idle();f.advance(4000);await f.bridge.calls.sweep();await flush();
+ assert.equal(f.work.length,1);assert.equal(f.frames.filter(frame=>frame.type==='response.create').length,1);
+});
+
+// Real API, 2026-11-27: a backend model the key cannot use is not refused at the start. The call connects, an error
+// arrives at once, and every hand-off then fails silently.
+test('tool hand-off: when the tool model cannot run, the call renews onto the original hand-off and loses no request', async t => {
+ const f=await toolFixture(t);
+ f.emit('error',{error:{type:'invalid_request_error',code:'responses_validation_failed',message:'Responses configuration validation failed: The model `x` does not exist or you do not have access to it.'}});
+ assert.equal(f.bridge.calls.toolsRefused,true);
+ await f.bridge.calls.sweep();
+ assert.equal(f.call.rolloverSent,true,'a renewal is asked for');
+ // A request made before the renewal lands: the hand-off fails with a second error, and V2 takes it from the transcript.
+ f.input('Write three hooks about coding agents and save a note',{turn_id:'u1'});
+ f.emit('error',{error:{type:'invalid_request_error',code:'invalid_request_error',message:'The model `x` does not exist or you do not have access to it.'}});
+ f.advance(200);await until(()=>plans(f)===1);
+ assert.match(f.requests[0].request.transcript,/three hooks about coding agents/);
+});
+
+// 2026-11-27 test call: "Draft a note on thumbnail styles" … "Wait, no, make it title formulas instead" arrived as a
+// follow-up, and both notes were written.
+test('tool hand-off: replace_task swaps work that has not started, and stops and replaces work that has', async t => {
+ const f=await toolFixture(t);
+ toolCall(f,'call_1','start_task',{request:'Draft a short note on three thumbnail styles'});await until(()=>f.call?.staged);
+ toolCall(f,'call_2','replace_task',{task_ref:'t1',request:'Draft a short note on three YouTube title formulas and save it'});
+ await until(()=>toolOutputs(f).length===2);await until(()=>f.call?.staged);
+ assert.equal(f.call.staged.request.transcript,'Draft a short note on three YouTube title formulas and save it');
+ assert.equal(toolOutputs(f)[1].task_id,'t1');
+ f.advance(2500);await until(()=>f.work.length===1);await f.idle();await f.post('/voice/live/context',f.saved());
+ assert.match(f.work[0][1].prompt,/title formulas/);assert.doesNotMatch(f.work[0][1].prompt,/thumbnail/);
+ const first=f.work[0][1].id;
+ toolCall(f,'call_3','replace_task',{task_ref:'t1',request:'Write a note on boom arms instead'});
+ await until(()=>toolOutputs(f).length===3);
+ assert.match(toolOutputs(f)[2].say,/^Stopping that and starting “Write a note on boom arms instead” .* instead…$/);
+ f.advance(2500);await until(()=>f.work.length===3);await f.idle();
+ assert.deepEqual(f.work[1],['stop',first]);assert.equal(f.work[2][0],'start');assert.match(f.work[2][1].prompt,/boom arms/);
+});
+
+test('tool hand-off: an accepted request whose start fails is tried once more before the caller is asked to repeat it', async t => {
+ const f=await toolFixture(t);
+ toolCall(f,'call_1','start_task',{request:'Write a note on desk mics'});await until(()=>f.call?.staged);await f.idle();
+ f.active.set('other-request',{});
+ f.advance(2500);await flush();await flush();
+ assert.equal(f.work.length,0);assert.equal(f.appends().some(e=>/Say that again|still on the last/.test(e.content)),false,'not said yet');
+ f.active.delete('other-request');
+ f.advance(1500);await until(()=>f.call?.staged);
+ assert.equal(toolOutputs(f).length,1,'announced once');assert.equal(f.appends().filter(e=>e.type==='session.commentary.append').length,0);
+ f.advance(2500);await until(()=>f.work.length===1);await f.idle();
+ assert.deepEqual([...f.call.toolRefs.keys()],['t1'],'it keeps the id the model was given');
+});
+
+test('tool hand-off: no second look after a cancel, whose tool call names a task and carries none of the caller’s words', async t => {
+ const f=await toolFixture(t);
+ toolCall(f,'call_1','start_task',{request:'Write a note on desk mics'});await until(()=>f.call?.staged);
+ f.advance(2500);await until(()=>f.work.length===1);await f.idle();await f.post('/voice/live/context',f.saved());
+ f.advance(5000);f.input('Wait, actually never mind',{turn_id:'u2'});
+ f.emit('session.delegation.created',{delegation:{id:'d2',type:'delegation',target:'responses',response_id:'r2'}});
+ toolCall(f,'call_2','cancel_task',{task_ref:'t1'});await until(()=>toolOutputs(f).length===2);await f.idle();
+ f.advance(600);f.input(' that mic note, please stop it',{turn_id:'u2'});
+ const before=f.frames.filter(frame=>frame.type==='response.create').length;
+ f.advance(4000);await f.bridge.calls.sweep();await flush();
+ assert.equal(f.frames.filter(frame=>frame.type==='response.create').length,before);
 });
