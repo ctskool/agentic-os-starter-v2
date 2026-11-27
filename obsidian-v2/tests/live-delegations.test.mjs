@@ -121,12 +121,12 @@ test('delegations register before settling, route anchored text once, and refuse
  await f.post('/voice/live/context',{...f.saved(),conversationEpoch:4});
  id=f.turn('Open the dashboard');await f.say('Say that again',id);await f.idle();assert.equal(f.requests.length,0);
  await f.post('/voice/live/context',f.saved());
- const anchor=f.input('Open the', {offset_ms:100});
+ const anchor=f.input('Open the', {offset_ms:100,turn_id:'first'});
  f.delegate('anchored',140);
  const requestId=f.bridge.calls.recovery.delegations.get(JSON.stringify([f.call.sessionId,'anchored']));
  assert.ok(uuid(requestId));assert.equal(f.requests.length,0);
- f.emit('session.input_transcript.delta',{offset_ms:130,delta:' dashboard'});
- f.emit('session.input_transcript.delta',{offset_ms:160,delta:'future words'});
+ f.emit('session.input_transcript.delta',{offset_ms:130,delta:' dashboard',turn_id:'first'});
+ f.emit('session.input_transcript.delta',{offset_ms:160,delta:'future words',turn_id:'next'});
  f.delegate('anchored',anchor);
  f.advance(199);assert.equal(f.requests.length,0);f.advance(1);
  await until(()=>f.requests.length);await f.idle();
@@ -371,7 +371,11 @@ test('a correction during classification aborts the shared request before it can
  await f.start();const id=f.turn('Run morning intel');await until(()=>f.active.size);
  f.input('Actually, hold on');
  await f.idle();assert.equal(aborted,true);assert.equal(f.work.length,0);assert.equal(f.call.staged,undefined);
- assert.equal(f.appends().some(e=>e.delegation_id===id),false);
+ assert.equal(f.appends().some(e=>e.delegation_id===id),false,'held until the caller is done');
+ // Once they are quiet, a turn that ended in a cancel answers the held hand-off, so it cannot keep the call awake.
+ f.advance(2500);await f.bridge.calls.sweep();await f.idle();
+ const own=f.appends().filter(e=>e.delegation_id===id);
+ assert.equal(own.length,1);assert.equal(own[0].content,'Cancelled.');assert.equal(f.work.length,0);
 });
 
 test('click alone confirms, once; cancel, expiry, changed target, and a different generation refuse',async t=>{
@@ -713,4 +717,59 @@ test('the rest of a turn an earlier hand-off cut short starts at its first word'
  turns.skip(150);
  turns.add({type:'session.input_transcript.delta',delta:'. Check the web for agent workflows',offset_ms:200},200);
  assert.equal(turns.take(300,300).text,'Check the web for agent workflows');
+});
+
+test('a follow-up sent to the finished task in front is said as “Updating it now…”, not “Starting Continue that task”', async t => {
+ const f=await fixture(t,{mode:'auto',modelReply:{tier:3,reply:'Working on that.'}});await f.start();
+ f.turn('Draft a launch plan');await until(()=>f.call?.staged);await f.idle();f.advance(2500);await until(()=>f.work.length===1);await f.idle();
+ await f.post('/voice/live/context',f.saved());
+ const first=f.saved().workTarget;f.tasks.get(first).state='ready';
+ f.turn('Make it shorter, five tight bullets');await until(()=>f.call?.staged);await f.idle();
+ assert.ok(await f.say('Updating it now…'));
+ assert.equal(f.appends().some(event=>/Starting Continue/.test(event.content)),false);
+ f.advance(2500);await f.idle();assert.deepEqual(f.work[1].slice(0,2),['send',first]);
+});
+
+test('a hand-off made at a pause waits for the caller to finish and takes the rest of what they said', async t => {
+ const f=await fixture(t,{mode:'auto'});await f.start();
+ f.input('Research AI video editors and save it to my',{turn_id:'u1'});f.delegate();
+ f.advance(100);f.input(' inbox. Take your time and be thorough.',{turn_id:'u1'});
+ for(let i=0;i<5;i++){f.advance(200);await flush()}
+ assert.equal(plans(f),0,'the caller only just stopped');
+ for(let i=0;i<8;i++){f.advance(200);await flush()}
+ await until(()=>plans(f)===1);
+ assert.match(f.requests[0].request.transcript,/save it to my inbox\. Take your time and be thorough\./);
+});
+
+// 2026-11-26 test calls: "Start a timer test task. Wait six full minutes…" — Live handed off at the full stop, and the
+// "Wait" cancelled that hand-off. Closed at once, Live never handed off the rest and the request was lost.
+test('a hand-off cancelled by a “wait” inside the request is retaken with the whole turn when Live makes no new one', async t => {
+ const f=await fixture(t,{mode:'auto'});await f.start();
+ const id=f.turn('Start a timer test task.');
+ f.input('Wait six full minutes, then save a short note.');
+ await f.idle();assert.equal(f.appends().some(e=>e.delegation_id===id&&e.type==='session.commentary.append'),false);
+ f.advance(2500);await f.bridge.calls.sweep();f.advance(200);
+ await until(()=>plans(f)===1);
+ assert.match(f.requests[0].request.transcript,/Start a timer test task\. ?Wait six full minutes, then save a short note\./);
+ assert.equal(f.appends().some(e=>/^Superseded/.test(e.content)),false);
+});
+
+test('a held hand-off is closed quietly when Live hands off the rest itself', async t => {
+ const f=await fixture(t,{mode:'auto'});await f.start();
+ const id=f.turn('Start a timer test task.');
+ f.input('Wait six full minutes, then save a short note.');await f.idle();
+ const next=f.delegate();f.advance(200);
+ const closed=await f.say('Superseded',id);assert.equal(closed.type,'session.commentary.append');
+ await until(()=>plans(f)===1);assert.ok(next);
+});
+
+test('after a retake, Live’s own “starting that up” does not set off a second, empty rescue', async t => {
+ const f=await fixture(t,{mode:'auto'});await f.start();
+ f.turn('Start a timer test task.');
+ f.input('Wait six full minutes, then save a short note.');await f.idle();
+ f.emit('session.output_transcript.delta',{delta:'Sure thing, starting that up.'});
+ f.advance(2500);await f.bridge.calls.sweep();f.advance(200);await until(()=>plans(f)===1);await f.idle();
+ f.advance(2500);await f.idle();
+ f.advance(4000);await f.bridge.calls.sweep();f.advance(200);await flush();await f.idle();
+ assert.equal(plans(f),1);assert.equal(f.appends().some(e=>/Say that again/.test(e.content)),false);
 });

@@ -304,7 +304,7 @@ export class LiveCalls {
  // nothing ran, twice). Once Live has finished that reply and no hand-off came, V2 takes the caller's words itself.
  rescue(call,now){
   if(!this.delegations||call.from||call.heardAt===undefined||call.rescuedFor===call.heardAt||!call.liveReply)return;
-  if(call.delegatedAt>=call.heardAt||call.commentedAt>=call.heardAt||call.routing||call.staged||call.taskUpdates?.inputOpen)return;
+  if(call.delegatedAt>=call.heardAt||call.commentedAt>=call.heardAt||call.routing||call.staged||call.supersededHandoff||call.taskUpdates?.inputOpen)return;
   if(now-call.liveSaidAt<RESCUE_QUIET||now-call.heardAt>RESCUE_WINDOW||!livePromised(call.liveReply))return;
   call.rescuedFor=call.heardAt;
   this.delegations.rescue(call,call.heardOffset);
@@ -473,7 +473,7 @@ export class LiveCalls {
     // A renewal asked for to say task news must be under way within 15 seconds, or the screen says it.
     if(call.wakeRollover&&!this.replacement&&now-call.wakeRollover>=15000)this.wakeFailed(call);
     if(call.ready)call.taskUpdates?.flush(prefs,now,()=>this.tasks(call.appScope));
-    if(call.ready&&!call.paused)this.rescue(call,now);
+    if(call.ready&&!call.paused){this.delegations?.retakeSuperseded(call,now);this.rescue(call,now)}
     this.renewSpeech(call);this.refreshSnapshot(call);
    }
   }

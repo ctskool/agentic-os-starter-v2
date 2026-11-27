@@ -137,7 +137,7 @@ test('Share morning brief sends the whole note as one block, email section inclu
  const file=write(name,'---\ntags: [brief]\n---\n# Morning Intel\n\n## TL;DR\n- **Private lead** ([source](https://example.com/a)).\n\n---\n\n## Top Story\nPublic headline\n\n'+
   '## Inbox (last 24h)\n- **Sponsor pitch** from Acme, [thread](https://mail.example.com/t/1). <!-- hidden -->\n\n## So What - Content Plan\n1. Film the demo https://example.com/b',saved);
  const off=await snapshot();
- assert.match(off,/\nNews \(inbox\/research\/morning-intel, 2026-11-22\)\n- Public headline/);assert.doesNotMatch(off,/Sponsor pitch|Private lead|Morning brief \(/);
+ assert.match(off,/\nNews \(headlines from the morning brief, inbox\/research\/morning-intel, 2026-11-22\)\n- Public headline/);assert.doesNotMatch(off,/Sponsor pitch|Private lead|Morning brief \(/);
  const block=text=>text.split('\n\n').find(part=>part.startsWith('Morning brief ('));
  const text=await snapshot({liveShareBrief:true});
  assert.equal(block(text),`Morning brief (${name}, ${date}, saved 9:13 AM; the whole note, and its Inbox section is email as of then)`+

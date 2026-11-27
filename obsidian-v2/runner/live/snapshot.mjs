@@ -126,7 +126,9 @@ export async function liveSnapshot(root,{now=new Date(),usage={claude:getClaudeU
    ...cards.map(m=>`${m.source} ${m.metric}: ${m.value} as of ${sourceDate(m.timestamp)||'unknown date'}${m.deltaWeek===null?'':', week change '+m.deltaWeek}`)],900);
  // The router's public catalog excludes inbox and private TL;DR material. These lines go when the whole brief is not shared.
  const whole=liveShareBrief?wholeBrief(root,brief,today):null;
- const news=whole||on.news&&section('News',[`${sourceFolder(brief.briefSource,'morning-intel')}, ${brief.date}${brief.status==='stale'?', stale':''}`],
+ // Named for what the user calls it: "any big AI headlines from the morning brief" was handed off while these
+ // headlines were right here under "News" (2026-11-26 test call).
+ const news=whole||on.news&&section('News',[`headlines from the morning brief, ${sourceFolder(brief.briefSource,'morning-intel')}, ${brief.date}${brief.status==='stale'?', stale':''}`],
   [...brief.headlines.slice(0,4).map(item=>clip(item,220)),...brief.hackerNews.slice(0,2).map(item=>'Hacker News: '+clip(item.title,95)),
    ...[...(brief.xHighlights||[]),...Object.values(brief.sections||{}).flatMap(entry=>(entry?.items||[]).filter(item=>/\b(?:x\.com|twitter|on X|X highlight)\b/i.test(item.text)).map(item=>item.text))].slice(0,2).map(item=>'X: '+clip(item,105))],1400);
  const radar=on.radar&&section('Radar',[`${sourceFolder(outliers?.rel,'outlier-radar')}, ${outliers?.date||'unavailable'}`,`${sourceFolder(trending?.rel,'github-trending')}, ${savedDate(root,trending?.rel)}`],

@@ -60,6 +60,18 @@ export class LiveTurns {
    preceding:exchanges.slice(-8).map(turn=>({role:turn.user?'user':'assistant',text:join(turn.rows).slice(-800)}))};
  }
  skip(anchor){this.used=Math.max(this.used,anchor)}
+ // What the caller said from this point on, for telling a real cancel from a "wait" inside a request.
+ textFrom(offset){return join(this.rows.filter(row=>row.user&&row.offset>=offset).sort((a,b)=>a.offset-b.offset||a.index-b.index)).replace(/^[\s.,;:!?…-]+/,'').trim()}
+ // The caller was still mid-sentence at a hand-off and kept going: the words before it end without a full stop, the
+ // words after it are the same turn (no other turn id) and are not a correction or a cancel.
+ continuesAfter(anchor){
+  const user=this.rows.filter(row=>row.user&&row.text.trim()&&row.offset>this.used).sort((a,b)=>a.offset-b.offset||a.index-b.index);
+  const before=user.filter(row=>row.offset<=anchor),after=user.filter(row=>row.offset>anchor),last=before.at(-1);
+  if(!last||!after.length||/[.!?]["”’']?\s*$/.test(last.text))return false;
+  if(after.some(row=>row.turnId!==null&&last.turnId!==null&&row.turnId!==last.turnId))return false;
+  const more=join(after);
+  return !UNDO_CANCEL_RE.test(more)&&!CORRECTION_RE.test(more);
+ }
  undoInterruptionAfter(anchor,until){
   const rows=this.rows.filter(row=>row.offset>anchor&&row.at<=until).sort((a,b)=>a.offset-b.offset||a.index-b.index);
   const utterances=new Map();

@@ -7,6 +7,8 @@ import {CORRECTION_RE} from './turns.mjs';
 
 const retry='Say that again in a moment.';
 const busy='One second, still on the last one.';
+const RETAKE_QUIET=2500,RETAKE_WINDOW=30000;
+const SUPERSEDED='Superseded: what the user said next replaces this request and is handled on its own. There is nothing to say about this one; say nothing.';
 const expired='That action is no longer available. Say the request again.';
 // A request that cannot be delivered says why when the reason is one the caller can act on. "Say that again in a
 // moment" told a caller nothing when the real answer was "the task you started is still working" (2026-11-23).
@@ -32,7 +34,7 @@ export class LiveDelegations {
  constructor({active,context,requestContext,valid,prefs,now=Date.now,handle=handleVoiceRequest,limits={},
   timing:{schedule=scheduleTimer,sleep=(ms,signal)=>wait(ms,undefined,{signal})}={}}){
   Object.assign(this,{active,context,requestContext,valid,prefs,now,handle,schedule,sleep});
-  this.limits={settle:200,progress:8000,undo:1500,autoUndo:2500,stage:45000,...limits};
+  this.limits={settle:200,progress:8000,undo:1500,autoUndo:2500,stage:45000,finish:3000,finishQuiet:1200,...limits};
  }
  isCurrent(call){
   try{return call.localHeld&&call.ready&&call.state==='active'&&this.prefs().voiceMode==='live'&&this.valid(call)}
@@ -54,8 +56,31 @@ export class LiveDelegations {
   this.receive(call,{delegation:{id:null,offset_ms:anchor}},randomUUID(),{key:'rescue-'+randomUUID().slice(0,8)});
   return true;
  }
+ // Live handed off what the caller said next itself: the held hand-off is closed with a say-nothing line (on the
+ // real API Live then stays quiet and the call can go to standby: probe, 2026-11-26).
+ closeSuperseded(call,except){
+  const held=call.supersededHandoff;
+  if(!held||held.delegation===except)return;
+  call.supersededHandoff=null;
+  if(call.answers?.isOpen(held.delegation))call.answers.speak(held.delegation,SUPERSEDED);
+ }
+ // Live made no new hand-off once the caller stopped: V2 takes their whole turn on the held one. A turn that ended in
+ // a cancel ("…wait, actually never mind") is answered "Cancelled."; a held one no longer needed is closed.
+ retakeSuperseded(call,now){
+  const held=call.supersededHandoff;
+  if(!held||call.routing||call.staged||this.active.size)return;
+  if(now-(call.heardAt??-Infinity)<RETAKE_QUIET||now-held.at<RETAKE_QUIET)return;
+  call.supersededHandoff=null;
+  if(!this.isCurrent(call)||!call.answers.isOpen(held.delegation))return;
+  if(now-held.at>RETAKE_WINDOW||!(call.heardOffset>call.turns.used)){call.answers.speak(held.delegation,SUPERSEDED);return}
+  const tail=call.turns.textFrom(held.cancelledBy);
+  if(!tail||cancelWords.test(tail)){call.turns.skip(call.heardOffset);call.answers.speak(held.delegation,'Cancelled.');return}
+  delete call.cancelledBy;call.rescuedFor=call.heardAt;
+  this.receive(call,{delegation:{id:held.delegation,offset_ms:call.heardOffset}},randomUUID());
+ }
  receive(call,event,id,{key}={}){
   const delegation=event.delegation.id,anchor=call.turns.anchor(event,this.now());
+  this.closeSuperseded(call,delegation);
   if(call.routing||this.active.size){
    if(call.routing&&!call.routing.assembled)call.routing.busyAnchor=Math.max(call.routing.busyAnchor??-1,anchor);
    else call.turns.skip(anchor);
@@ -78,6 +103,12 @@ export class LiveDelegations {
   }).catch(error=>{
    if(this.isCurrent(call)&&!pending.cancelled)call.answers.speak(delegation,spokenFailure(error));
   }).finally(()=>{
+   // A hand-off dropped because the caller corrected themselves or kept going is held, never left open: one left open
+   // kept a test call awake for eleven minutes, Live filling the silence ("Mm-hmm", "Still here"). And it was not
+   // closed at once either: closed while the caller was still talking ("Start a timer test task. Wait six full
+   // minutes…"), Live never handed off the rest. See closeSuperseded and retakeSuperseded.
+   if(pending.cancelled&&delegation&&this.isCurrent(call)&&call.answers.isOpen(delegation)&&call.staged?.heldOpen!==delegation)
+    call.supersededHandoff={delegation,at:this.now(),cancelledBy:call.cancelledBy??pending.anchor};
    if(pending.busyAnchor!==undefined)call.turns.skip(pending.busyAnchor);
    if(call.routing===pending)call.routing=null;
    // A hand-off that ended without an answer or an action leaves nothing on screen.
@@ -119,9 +150,22 @@ export class LiveDelegations {
  async plan(call,pending,{id,delegation,captured}){
   await this.sleep(this.limits.settle,pending.abort.signal);
   if(pending.cancelled||!this.isCurrent(call))return;
+  // Live can hand off at a pause while the caller is still talking (2026-11-26: "…save to my inbox. Take your time
+  // and be thorough" reached V2 as "…Save to my"). Words that keep coming after the hand-off point are waited for,
+  // up to `finish`, and taken with the rest.
+  if(call.heardOffset>pending.anchor&&call.turns.continuesAfter(pending.anchor)){
+   const deadline=this.now()+this.limits.finish;
+   while(this.now()-call.heardAt<this.limits.finishQuiet&&this.now()<deadline){
+    await this.sleep(this.limits.settle,pending.abort.signal);
+    if(pending.cancelled||!this.isCurrent(call))return;
+   }
+   pending.anchor=Math.max(pending.anchor,call.heardOffset);
+  }
   const turn=call.turns.take(pending.anchor,this.now());
   pending.assembled=true;
   if(pending.busyAnchor!==undefined)call.turns.skip(pending.busyAnchor);
+  // A rescue (no delegation) with nothing new to take was already handled: nothing to say (2026-11-26 test call).
+  if(!turn?.text&&delegation===null)return;
   if(!turn?.text||!this.unchanged(call,captured)){call.answers.speak(delegation,retry);return}
   if(this.active.size){call.answers.speak(delegation,busy);return}
   // The input delta already cleared the timer. Its delegation must not stop another task.
@@ -203,7 +247,9 @@ export class LiveDelegations {
   // Work that starts a task keeps its hand-off open for that task's news, so this line goes as a plain one.
   const keepOpen=startsWork(stage.action)&&call.answers.isOpen(delegation);
   if(keepOpen)stage.heldOpen=delegation;
-  const line=slash||explained?receipt.reply:`Starting ${stage.spokenDescription.replace(/^Start /i,'')}…`;
+  // A follow-up sent to a task reads "Continue “that task”" (titles stay off the call), so it is said as "Updating it now…".
+  const followUp=/^Continue “(.*)”$/.exec(stage.spokenDescription);
+  const line=slash||explained?receipt.reply:followUp?`Updating ${followUp[1]==='that task'?'it':`“${followUp[1]}”`} now…`:`Starting ${stage.spokenDescription.replace(/^Start /i,'')}…`;
   // Live already acknowledged this in its own voice ("On it, spinning that up"), so "Starting…" would be a second
   // acknowledgement (2026-11-26 test calls). Live gets it silently instead, to answer "what did you start?".
   const acknowledged=call.liveAcked===true;
