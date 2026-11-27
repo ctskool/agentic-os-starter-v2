@@ -162,3 +162,14 @@ test('two hand-offs finishing together are said one at a time', () => {
  now=6800;f.flush(now);
  assert.equal(f.commentary().length,2);assert.equal(f.commentary()[1].delegation_id,'del-2');assert.match(f.commentary()[1].content,/^Report is done/);
 });
+
+// Neon review, 2026-11-26: two ways a hand-off could be left open, keeping the call awake.
+test('a second hand-off for the same task closes the first; Screen only closes any held hand-off', () => {
+ const f=fixture();
+ f.updates.hold(['research'],'del-1',0);f.updates.hold(['research'],'del-2',1000);
+ const closed=f.commentary().find(e=>e.delegation_id==='del-1');
+ assert.ok(closed);assert.match(closed.content,/^Superseded: .*say nothing\.$/);
+ assert.equal(f.updates.open.get('research').delegation,'del-2');
+ const g=fixture('silent');g.updates.hold(['report'],'del-3',0);g.flush(5000);
+ assert.equal(g.commentary().filter(e=>e.delegation_id==='del-3').length,1);assert.equal(g.updates.open.size,0);
+});

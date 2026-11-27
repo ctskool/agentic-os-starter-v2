@@ -4,11 +4,12 @@ import {randomUUID} from 'node:crypto';
 import {liveAffirmation,LIVE_NO_OFFER} from '../voice-router.mjs';
 import {handleVoiceRequest} from '../voice-request.mjs';
 import {CORRECTION_RE} from './turns.mjs';
+import {LIVE_SUPERSEDED as SUPERSEDED} from './answers.mjs';
 
 const retry='Say that again in a moment.';
 const busy='One second, still on the last one.';
 const RETAKE_QUIET=2500,RETAKE_WINDOW=30000;
-const SUPERSEDED='Superseded: what the user said next replaces this request and is handled on its own. There is nothing to say about this one; say nothing.';
+
 const expired='That action is no longer available. Say the request again.';
 // A request that cannot be delivered says why when the reason is one the caller can act on. "Say that again in a
 // moment" told a caller nothing when the real answer was "the task you started is still working" (2026-11-23).
@@ -245,20 +246,24 @@ export class LiveDelegations {
   // own while the selected task works, and a follow-up that waits for that task.
   const explained=receipt?.reply&&receipt.decision?.effects?.some(effect=>effect==='busy-target-separate'||effect==='queueFollowup');
   // Work that starts a task keeps its hand-off open for that task's news, so this line goes as a plain one.
-  const keepOpen=startsWork(stage.action)&&call.answers.isOpen(delegation);
+  const keepOpen=startsWork(stage.action)&&call.answers.isOpen(delegation)&&this.holdsNews();
   if(keepOpen)stage.heldOpen=delegation;
   // A follow-up sent to a task reads "Continue “that task”" (titles stay off the call), so it is said as "Updating it now…".
   const followUp=/^Continue “(.*)”$/.exec(stage.spokenDescription);
   const line=slash||explained?receipt.reply:followUp?`Updating ${followUp[1]==='that task'?'it':`“${followUp[1]}”`} now…`:`Starting ${stage.spokenDescription.replace(/^Start /i,'')}…`;
   // Live already acknowledged this in its own voice ("On it, spinning that up"), so "Starting…" would be a second
   // acknowledgement (2026-11-26 test calls). Live gets it silently instead, to answer "what did you start?".
+  // Never for a rescue (no delegation): V2 started that on its own reading of Live's words, so the caller hears what
+  // started and can still say "wait" (Neon review, 2026-11-26).
   const acknowledged=call.liveAcked===true;
-  if(acknowledged&&!explained&&(keepOpen||!delegation)&&startsWork(stage.action)){
-   call.answers.append('thinking',null,`V2 is ${line.replace(/…$/,'').replace(/^Starting/,'starting')}. You already acknowledged it, so don't announce it again; mention it only if asked.`);
+  if(acknowledged&&!explained&&keepOpen&&startsWork(stage.action)){
+   call.answers.append('thinking',null,`V2 is ${line.replace(/…$/,'').replace(/^(Starting|Updating)/,word=>word.toLowerCase())}. You already acknowledged it, so don't announce it again; mention it only if asked.`);
    return;
   }
   call.answers.speak(keepOpen?null:delegation,line);
  }
+ // A hand-off is held open only for news that will be said: with task updates on Screen only, nothing would close it.
+ holdsNews(){try{return this.prefs().liveTaskUpdates!=='silent'}catch{return false}}
  view(result,call){return this.requestContext().liveView?.(result,call.appScope)??result}
  async route(call,pending,request,delegation,phase,stage){
   const cancelProgress=phase==='plan'&&pendingRead.test(request.transcript)&&!compoundReadAction.test(request.transcript)?this.schedule(()=>{
@@ -287,7 +292,7 @@ export class LiveDelegations {
   this.activity(call,stage.activity,'started',stage.description,started);
   if(this.isCurrent(call)){
    call.taskUpdates?.started(started,this.now());
-   const keepOpen=started.length>0&&call.answers.isOpen(delegation);
+   const keepOpen=started.length>0&&call.answers.isOpen(delegation)&&this.holdsNews();
    call.answers.result(delegation,result,this.view(result,call),{speak:!(stage.undo&&result.action==='task'),keepOpen});
    if(keepOpen)call.taskUpdates?.hold(started,delegation,this.now());
   }

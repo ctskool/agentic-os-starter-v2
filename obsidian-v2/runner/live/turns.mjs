@@ -47,7 +47,14 @@ export class LiveTurns {
    if(previous.text.trim())earliest=previous;
    first=i;between='';
   }
-  const utterance=rows.slice(first,rows.indexOf(last)+1).filter(row=>row.user);
+  const span=rows.slice(first,rows.indexOf(last)+1),utterance=span.filter(row=>row.user);
+  // Where Live's words were skipped the caller's two halves meet with no space between them ("…a new taskWrite a
+  // note…", 2026-11-26 test call, which hid "start a new task"), so a space goes at that seam.
+  let said='',seam=false;
+  for(const row of span){
+   if(!row.user){seam=true;continue}
+   said+=seam&&said&&!/\s$/.test(said)&&!/^\s/.test(row.text)?' '+row.text:row.text;seam=false;
+  }
   this.used=Math.max(this.used,anchor);
   const exchanges=[];
   for(const row of rows.slice(0,first)){
@@ -56,7 +63,7 @@ export class LiveTurns {
   }
   const lastAt=Math.max(...utterance.map(row=>row.at));
   // A turn picked up after an earlier hand-off took its first half can start with that half's full stop (". Check the web…").
-  return {text:join(utterance).replace(/^[\s.,;:!?…-]+/,'').slice(0,4000),firstOffset:utterance[0].offset,lastAt,offer:recentOffer(exchanges,anchor,lastAt),
+  return {text:said.trim().replace(/^[\s.,;:!?…-]+/,'').slice(0,4000),firstOffset:utterance[0].offset,lastAt,offer:recentOffer(exchanges,anchor,lastAt),
    preceding:exchanges.slice(-8).map(turn=>({role:turn.user?'user':'assistant',text:join(turn.rows).slice(-800)}))};
  }
  skip(anchor){this.used=Math.max(this.used,anchor)}

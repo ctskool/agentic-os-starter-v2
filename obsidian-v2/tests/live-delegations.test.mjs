@@ -674,13 +674,15 @@ test('turn assembly joins the caller’s words across Live talking over them, bu
 });
 
 test('Live promising work in its own words is recognised; offers, answers and report-backs are not', () => {
- for(const said of ["Sure. I'll do a quick deep-dive and save a clean note. I'll get that moving.","Got it, I'll pull what's shipping now, compare tradeoffs, and save a one-page note.","On it.","Let me look that up.","Gotcha, I'll bake that in.","Sure, starting that now."])
+ for(const said of ["Sure. I'll do a quick deep-dive and save a clean note. I'll get that moving.","Got it, I'll pull what's shipping now, compare tradeoffs, and save a one-page note.","On it.","Let me look that up.","Gotcha, I'll bake that in.","Sure, starting that now.","I'll fold that in with the outline that's running now."])
   assert.equal(livePromised(said),true,said);
- for(const said of ['Want me to start a research task on that?',"Let me check. You've got three meetings today.","Research is still working. I'll tell you when it's done.","I'll let you know as soon as it's up.","Hi, Chase, ready when you are.","It's running now; I'll bring you the tradeoffs once it's ready.","It's still checking the file, so I'll share details once that's complete.","I'll keep that in mind."])
+ for(const said of ['Want me to start a research task on that?',"Let me check. You've got three meetings today.","Research is still working. I'll tell you when it's done.","I'll let you know as soon as it's up.","Hi, Chase, ready when you are.","It's running now; I'll bring you the tradeoffs once it's ready.","It's still checking the file, so I'll share details once that's complete.","I'll keep that in mind.",
+  // Neon review, 2026-11-26: talk, not work.
+  "Let me explain.","Let me think.","I'll break it down for you.","I'll note that.","I'll skip that.","I'll keep it simple: three beats."])
   assert.equal(livePromised(said),false,said);
 });
 
-test('Live promises work and never hands it off: V2 takes the caller’s words itself, once, without a second acknowledgement', async t => {
+test('Live promises work and never hands it off: V2 takes the caller’s words itself, once, and says what it started', async t => {
  const f=await fixture(t,{mode:'auto'});await f.start();
  const at=f.input('Write three short YouTube hooks about AI coding agents and save a quick note',{turn_id:'u1'});
  f.emit('session.output_transcript.delta',{offset_ms:at+10,delta:"Sure, I'll get that moving."});
@@ -689,8 +691,9 @@ test('Live promises work and never hands it off: V2 takes the caller’s words i
  await until(()=>plans(f)===1);
  assert.match(f.requests[0].request.transcript,/three short YouTube hooks/);
  await until(()=>f.call.staged);
- assert.equal(f.appends().some(event=>event.type==='session.commentary.append'&&/^Starting/.test(event.content)),false,'Live already said it');
- assert.ok(f.appends().some(event=>event.type==='session.thinking.append'&&/^V2 is starting/.test(event.content)));
+ // Said out loud, with the undo window open: V2 acted on its own reading of Live's words.
+ const starting=f.appends().find(event=>event.type==='session.commentary.append'&&/^Starting/.test(event.content));
+ assert.ok(starting);assert.equal(starting.delegation_id,null);
  f.advance(2500);await f.idle();assert.equal(f.work.length,1);
  f.advance(10000);await f.bridge.calls.sweep();f.advance(200);await flush();assert.equal(plans(f),1,'once per caller turn');
 });
@@ -772,4 +775,30 @@ test('after a retake, Live’s own “starting that up” does not set off a sec
  f.advance(2500);await f.idle();
  f.advance(4000);await f.bridge.calls.sweep();f.advance(200);await flush();await f.idle();
  assert.equal(plans(f),1);assert.equal(f.appends().some(e=>/Say that again/.test(e.content)),false);
+});
+
+test('words that run on from a hand-off are the same turn: no rescue for them', async t => {
+ const f=await fixture(t,{mode:'auto'});await f.start();
+ f.input('Research AI video editors and save it to my inbox.',{turn_id:'u1'});f.delegate();f.advance(200);
+ await until(()=>plans(f)===1);
+ f.advance(500);f.input(' Take your time and be thorough.',{turn_id:'u1'});
+ f.emit('session.output_transcript.delta',{delta:"Got it, I'll get that moving."});
+ for(let i=0;i<4;i++){f.advance(2500);await f.bridge.calls.sweep();f.advance(200);await flush();await f.idle()}
+ assert.equal(plans(f),1);
+});
+
+test('a lone “Mm-hmm” from Live is not its acknowledgement: “Starting…” is still said', async t => {
+ const f=await fixture(t,{mode:'auto'});await f.start();
+ f.input('Write three hooks about coding agents and save a note',{turn_id:'u1'});const id=f.delegate();
+ f.emit('session.output_transcript.delta',{delta:'Mm-hmm.'});f.advance(200);
+ await until(()=>f.call?.staged);
+ assert.ok(f.appends().some(e=>e.type==='session.commentary.append'&&/^Starting/.test(e.content)));assert.ok(id);
+});
+
+test('the two halves of a talked-over turn meet with a space, so “start a new task” is still heard', () => {
+ const turns=new LiveTurns(0);
+ turns.add({type:'session.input_transcript.delta',delta:'Also start a new task'},18000);
+ turns.add({type:'session.output_transcript.delta',delta:'Sure.'},19000);
+ turns.add({type:'session.input_transcript.delta',delta:'Write a three-line note and save it'},20000);
+ assert.equal(turns.take(21000,21000).text,'Also start a new task Write a three-line note and save it');
 });

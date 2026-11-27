@@ -1,4 +1,5 @@
 import {taskLabel,taskUpdate,shortOutcome} from '../task-updates.mjs';
+import {LIVE_SUPERSEDED} from './answers.mjs';
 
 const SILENCE=1200,BATCH=3000,RECENT=10000,CHECK_IN=180000,LINE_GAP=2500;
 // How long a hand-off may stay open for its task (Chase, 2026-11-26: "five minute cap"). Open, the call stays awake
@@ -14,7 +15,17 @@ export class LiveTaskUpdates {
  // and a commentary sent later on that delegation is spoken in Live's own voice and completes it. Lines sent with
  // delegation_id null meanwhile ("needs your OK") leave it open. So a hand-off that starts a task stays open until
  // that task's news is said on it, up to HANDOFF_CAP_MS.
- hold(taskIds,delegation,now){if(typeof delegation==='string'&&delegation)for(const id of taskIds)this.open.set(id,{delegation,at:now})}
+ // A second hand-off for the same task (a follow-up sent to it) takes over its news; the first is closed, never left
+ // open where it would keep the call awake (Neon review, 2026-11-26).
+ hold(taskIds,delegation,now){
+  if(typeof delegation!=='string'||!delegation)return;
+  for(const id of taskIds){
+   const before=this.open.get(id);
+   if(before&&before.delegation!==delegation&&![...this.open].some(([other,entry])=>other!==id&&entry.delegation===before.delegation)&&this.call.answers.isOpen(before.delegation))
+    this.call.answers.speak(before.delegation,LIVE_SUPERSEDED);
+   this.open.set(id,{delegation,at:now});
+  }
+ }
  // A renewed session does not know the old session's delegations.
  release(){this.open.clear()}
  // News held for a fresh session that could not be started: the caller's screen says it instead (see flush).
@@ -63,7 +74,10 @@ export class LiveTaskUpdates {
  flush(prefs,now,readTasks){
   const answers=this.call.answers;
   if(prefs.liveTaskUpdates==='silent'){
-   this.pending.length=0;answers.held=answers.held.filter(event=>event.delegation_id!==null);return;
+   this.pending.length=0;answers.held=answers.held.filter(event=>event.delegation_id!==null);
+   // Switched to Screen only mid-call: nothing will be said on a held hand-off, so it is closed.
+   for(const entry of this.open.values())if(answers.isOpen(entry.delegation))answers.speak(entry.delegation,LIVE_SUPERSEDED);
+   this.open.clear();return;
   }
   if(prefs.liveTaskUpdates==='chatty'&&!this.call.paused){
    const due=[...this.jobs].filter(([,at])=>at!==null&&now-at>=CHECK_IN);

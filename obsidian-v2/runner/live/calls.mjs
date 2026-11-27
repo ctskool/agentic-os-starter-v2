@@ -23,8 +23,12 @@ const expiry=value=>{
 };
 // The last sentence of Live's reply commits to work ("I'll get that moving", "Gotcha, I'll bake that in"), not an
 // offer ("Want me to…?") or a promise to report back ("I'll tell you when it's done", "I'll share details once…").
+const TURN_GAP=2500,BACKCHANNEL=/^(?:(?:mm+-?hmm+|mhm|uh-?huh|hmm+|mm+|okay|ok|yeah|yep|yes|right|sure|got it|gotcha)[,.!\s]*)+$/i;
 const RESCUE_QUIET=3000,RESCUE_WINDOW=45000,REFRESH_AFTER_TALK=4000;
-const PROMISE=/\b(?:I['’]ll|I will|I['’]m going to|I['’]m gonna|let me)\s+(?:just |go |quickly |also |now |then |get to work and )?(?!(?:be|keep|let|tell|wait|stay|hold|hang|leave|ping|update|stop|need|have|talk|get back|circle back|report|follow up|bring|share|read|walk|give you|say|mention|know|remember|see)\b)[a-z]{2,}|\b(?:getting|starting|kicking|spinning|rolling)\s+(?:that|it|this|on|off|up)\b/i;
+// Work verbs only (Neon review, 2026-11-26): "Let me explain", "I'll break it down" or "I'll note that" is talk, not work,
+// and a rescue that starts a task nobody asked for is the worst way this can fail.
+const WORK=String.raw`run|start|kick|spin|pull|check|look(?:\s+(?:that|it|this))?\s+(?:up|into)|research|dig into|draft|write|save|create|build|put together|pull together|make|add|fold|bake|include|update|edit|change|fix|cut|trim|shorten|tighten|rewrite|redo|compare|summari[sz]e|compile|find|search|grab|get (?:that|it|this|on it|started|going|moving)|work on|handle|take care of|set (?:that |it |this )?up|send|prepare|knock|whip|throw together|queue`;
+const PROMISE=new RegExp(String.raw`\b(?:I['’]ll|I will|I['’]m going to|I['’]m gonna|let me)\s+(?:just |go |quickly |also |now |then |get to work and |go ahead and )?(?:${WORK})\b|\b(?:getting|starting|kicking|spinning|rolling)\s+(?:that|it|this|on|off|up)\b`,'i');
 const REPORT_BACK=/\b(?:let you know|tell you|update you|ping you|hand (?:you|it|them) (?:over|back)|(?:when|once|as soon as) (?:it|that)(?:['’]s| is) (?:done|ready|up|back|finished|complete))\b/i;
 export function livePromised(reply){
  const text=String(reply??'').replace(/\s+/g,' ').trim();
@@ -278,7 +282,7 @@ export class LiveCalls {
    const row=call.turns?.add(event,this.now());
    if(row){call.taskUpdates?.transcript(row);call.transcriptTail=((call.transcriptTail||'')+row.text).slice(-2200);this.heard(call,row);this.delegations?.fragment(call,row)}
   }
-  if(event.type==='session.delegation.created'){call.delegatedAt=this.now();call.liveAcked=false}
+  if(event.type==='session.delegation.created'){call.delegatedAt=this.now();call.liveAcked=false;call.ackText=''}
   if(['session.input_transcript.done','session.input_transcript.completed','session.input_audio_buffer.speech_stopped','input_audio_buffer.speech_stopped','session.delegation.created','session.paused'].includes(event.type))call.taskUpdates?.endTurn(event);
   if(event.type==='session.paused'||event.type==='session.resumed'){
    call.paused=event.type==='session.paused';if(!call.from)call.updates.push({type:call.paused?'paused':'resumed'});
@@ -296,15 +300,25 @@ export class LiveCalls {
  // task news while Live is mid-sentence (task-updates.mjs), and for not doubling Live's own acknowledgement.
  heard(call,row){
   const now=this.now();
-  if(row.user){if(row.text.trim()){call.heardAt=now;call.heardOffset=row.offset;call.liveReply='';call.liveAcked=false}return}
-  call.liveSaidAt=now;call.liveAcked=true;
+  if(row.user){
+   if(row.text.trim()){
+    // A new turn starts after a quiet gap; words that run on from a hand-off are the same turn (no second rescue for them).
+    if(!(now-(call.heardAt??-Infinity)<=TURN_GAP))call.turnStartAt=now;
+    call.heardAt=now;call.heardOffset=row.offset;call.liveReply='';call.ackText='';call.liveAcked=false;
+   }
+   return;
+  }
+  call.liveSaidAt=now;
+  // An acknowledgement is a few words of its own, not a lone "Mm-hmm" while the caller talks (Neon review, 2026-11-26).
+  call.ackText=((call.ackText||'')+row.text).slice(-400);
+  call.liveAcked=!BACKCHANNEL.test(call.ackText.trim())&&call.ackText.trim().split(/\s+/).length>=2;
   if(call.heardAt!==undefined)call.liveReply=((call.liveReply||'')+row.text).slice(-1200);
  }
  // Live said it would do something and never handed it off (2026-11-26 test calls: "Sure, I'll get that moving", then
  // nothing ran, twice). Once Live has finished that reply and no hand-off came, V2 takes the caller's words itself.
  rescue(call,now){
   if(!this.delegations||call.from||call.heardAt===undefined||call.rescuedFor===call.heardAt||!call.liveReply)return;
-  if(call.delegatedAt>=call.heardAt||call.commentedAt>=call.heardAt||call.routing||call.staged||call.supersededHandoff||call.taskUpdates?.inputOpen)return;
+  if(call.delegatedAt>=(call.turnStartAt??call.heardAt)||call.commentedAt>=call.heardAt||call.routing||call.staged||call.supersededHandoff||call.taskUpdates?.inputOpen)return;
   if(now-call.liveSaidAt<RESCUE_QUIET||now-call.heardAt>RESCUE_WINDOW||!livePromised(call.liveReply))return;
   call.rescuedFor=call.heardAt;
   this.delegations.rescue(call,call.heardOffset);

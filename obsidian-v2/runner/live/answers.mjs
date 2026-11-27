@@ -15,6 +15,8 @@ export const revealedReports=reply=>new Set([reply.deliverable,reply.briefSource
  reply.obsidian?.op==='daily-note'&&`daily-notes/${localDate()}.md`,
  ...(reply.reveals||[]).filter(item=>item.kind==='doc').map(item=>item.target)].filter(path=>typeof path==='string'&&path));
 
+// Closes a hand-off nothing more will be said on. On the real API Live stays quiet and standby follows (probe, 2026-11-26).
+export const LIVE_SUPERSEDED='Superseded: what the user said next replaces this request and is handled on its own. There is nothing to say about this one; say nothing.';
 export class LiveAnswers {
  constructor(call){this.call=call;this.held=[];this.attempts=new Map();this.reports=new Set();this.answered=new Set();this.spoken=new Map()}
  append(kind,id,value,limit){
